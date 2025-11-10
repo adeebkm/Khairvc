@@ -1,0 +1,21 @@
+# Gmail OpenAI Auto-Reply Configuration
+# Copy this file to .env and fill in your values
+
+# OpenAI API Key (Required)
+# Get your key from: https://platform.openai.com/api-keys
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Email Sending Mode
+# Set to 'true' to actually send emails
+# Set to 'false' to test without sending (RECOMMENDED FOR FIRST RUN)
+SEND_EMAILS=false
+
+# Maximum number of emails to process per run
+# Adjust based on your needs and API costs
+MAX_EMAILS=5
+
+# Only process unread emails
+# Set to 'true' to only reply to unread emails
+# Set to 'false' to process all inbox emails
+UNREAD_ONLY=true
+

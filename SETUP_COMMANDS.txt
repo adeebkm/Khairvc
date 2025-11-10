@@ -1,0 +1,180 @@
+╔════════════════════════════════════════════════════════════════╗
+║          GMAIL AUTO-REPLY - SETUP COMMANDS                     ║
+║                 Quick Reference Card                            ║
+╚════════════════════════════════════════════════════════════════╝
+
+📦 INSTALLATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Navigate to project:
+  cd "/Users/adeebkhaja/Documents/gmail openai"
+
+Automated setup (EASIEST):
+  ./setup_environment.sh
+
+Manual setup:
+  python3 -m venv venv
+  source venv/bin/activate
+  pip install -r requirements.txt
+  python setup.py
+
+
+⚙️ CONFIGURATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Create .env file:
+  python setup.py
+
+Or manually edit .env:
+  OPENAI_API_KEY=sk-your-key-here
+  SEND_EMAILS=false
+  MAX_EMAILS=5
+  UNREAD_ONLY=true
+
+
+📧 GMAIL SETUP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Visit: https://console.cloud.google.com/
+2. Create project → Enable Gmail API
+3. Create OAuth credentials (Desktop app)
+4. Download as credentials.json
+5. Place in project directory
+
+
+✅ VERIFY SETUP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Test everything:
+  python test_setup.py
+
+
+🔐 FIRST-TIME AUTHENTICATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Authenticate with Gmail:
+  python auto_reply.py
+
+(Browser will open - sign in and allow permissions)
+
+
+🚀 RUN THE APPLICATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Activate environment (if not active):
+  source venv/bin/activate
+
+Option 1 - Web Interface (RECOMMENDED):
+  python app.py
+  → Open browser to: http://localhost:5000
+
+Option 2 - Command Line:
+  python auto_reply.py
+
+
+🔄 DAILY WORKFLOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Activate environment:
+   source venv/bin/activate
+
+2. Start web server:
+   python app.py
+
+3. Open browser:
+   http://localhost:5000
+
+4. Process emails visually!
+
+5. Stop server:
+   Press Ctrl+C
+
+6. Deactivate environment (optional):
+   deactivate
+
+
+📁 REQUIRED FILES CHECKLIST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Before running, you need:
+  ✓ venv/              (virtual environment)
+  ✓ .env               (your OpenAI key)
+  ✓ credentials.json   (from Google Cloud)
+  ✓ token.json         (auto-created on first auth)
+
+
+🆘 TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Virtual environment not activating:
+  Check: ls -la venv/bin/
+  Recreate: rm -rf venv && python3 -m venv venv
+
+Dependencies not installing:
+  pip install --upgrade pip
+  pip install -r requirements.txt
+
+OpenAI key not working:
+  Check .env has: OPENAI_API_KEY=sk-...
+  No quotes, no spaces around =
+
+Gmail auth failing:
+  rm token.json
+  python auto_reply.py
+
+Port 5000 in use:
+  Edit app.py, change port to 8000
+
+
+📚 DOCUMENTATION FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+START_HERE.md          → Main setup guide
+ENVIRONMENT_SETUP.md   → Detailed environment setup
+setup_guide.md         → Google Cloud walkthrough
+QUICKSTART_WEB.md      → Web interface quick start
+WEB_APP_GUIDE.md       → Complete web guide
+README.md              → Full documentation
+
+
+🔑 IMPORTANT NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ Default is TEST MODE (SEND_EMAILS=false)
+  Emails won't be sent until you change this
+
+✓ Always activate venv before running:
+  source venv/bin/activate
+
+✓ Web interface > Command line
+  More user-friendly and interactive
+
+✓ Never commit sensitive files:
+  .env, credentials.json, token.json
+
+
+🎯 QUICK TEST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+One command to test everything:
+  source venv/bin/activate && python test_setup.py
+
+
+💡 PRO TIPS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+→ Run setup script first: ./setup_environment.sh
+→ Use web interface: python app.py
+→ Test in test mode first
+→ Review AI replies before enabling sending
+→ Keep credentials secure
+
+
+═══════════════════════════════════════════════════════════════════
+
+Need help? Check START_HERE.md or ENVIRONMENT_SETUP.md
+
+Ready? Run: ./setup_environment.sh
+
+═══════════════════════════════════════════════════════════════════
+

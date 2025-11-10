@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""
+Gmail Auto-Reply with OpenAI
+Automatically reads unread emails and generates AI-powered replies
+"""
+import os
+import time
+from dotenv import load_dotenv
+from gmail_client import GmailClient
+from openai_client import OpenAIClient
+
+
+def main():
+    # Load environment variables
+    load_dotenv()
+    
+    print("=" * 60)
+    print("Gmail Auto-Reply with OpenAI")
+    print("=" * 60)
+    print()
+    
+    # Configuration
+    SEND_EMAILS = os.getenv('SEND_EMAILS', 'false').lower() == 'true'
+    MAX_EMAILS = int(os.getenv('MAX_EMAILS', '5'))
+    UNREAD_ONLY = os.getenv('UNREAD_ONLY', 'true').lower() == 'true'
+    
+    print(f"Configuration:")
+    print(f"  - Send emails: {'YES' if SEND_EMAILS else 'NO (TEST MODE)'}")
+    print(f"  - Max emails to process: {MAX_EMAILS}")
+    print(f"  - Unread only: {'YES' if UNREAD_ONLY else 'NO'}")
+    print()
+    
+    # Initialize clients
+    try:
+        gmail = GmailClient()
+        openai_client = OpenAIClient()
+    except Exception as e:
+        print(f"✗ Error initializing clients: {str(e)}")
+        return
+    
+    print()
+    print("-" * 60)
+    print("Fetching emails...")
+    print("-" * 60)
+    print()
+    
+    # Get unread emails
+    emails = gmail.get_unread_emails(max_results=MAX_EMAILS)
+    
+    if not emails:
+        print("No emails to process.")
+        return
+    
+    print(f"Found {len(emails)} unread email(s)\n")
+    
+    # Process each email
+    for idx, email in enumerate(emails, 1):
+        print(f"\n{'=' * 60}")
+        print(f"Processing Email {idx}/{len(emails)}")
+        print(f"{'=' * 60}")
+        print(f"From: {email['from']}")
+        print(f"Subject: {email['subject']}")
+        print(f"Snippet: {email['snippet'][:100]}...")
+        print()
+        
+        # Check if we should reply to this email
+        print("Analyzing email with AI...")
+        should_reply = openai_client.should_reply_to_email(
+            email['subject'],
+            email['body']
+        )
+        
+        if not should_reply:
+            print("⊘ AI determined this email doesn't need a reply (likely spam/automated)")
+            # Mark as read anyway
+            gmail.mark_as_read(email['id'])
+            continue
+        
+        print("✓ AI determined this email should receive a reply")
+        print()
+        
+        # Generate reply
+        print("Generating AI reply...")
+        reply_text = openai_client.generate_reply(
+            email['subject'],
+            email['body'],
+            email['from']
+        )
+        
+        if not reply_text:
+            print("✗ Could not generate a reply")
+            continue
+        
+        print("\n" + "-" * 60)
+        print("Generated Reply:")
+        print("-" * 60)
+        print(reply_text)
+        print("-" * 60)
+        print()
+        
+        # Send reply or show in test mode
+        if SEND_EMAILS:
+            # Extract email address from "Name <email@example.com>" format
+            sender_email = email['from']
+            if '<' in sender_email and '>' in sender_email:
+                sender_email = sender_email.split('<')[1].split('>')[0]
+            
+            success = gmail.send_reply(
+                to_email=sender_email,
+                subject=email['subject'],
+                body=reply_text,
+                thread_id=email['thread_id']
+            )
+            
+            if success:
+                # Mark as read after successful reply
+                gmail.mark_as_read(email['id'])
+                print("✓ Email marked as read")
+        else:
+            print("⚠ TEST MODE: Email not sent (set SEND_EMAILS=true to send)")
+            print(f"  Would reply to: {email['from']}")
+            # Still mark as read in test mode
+            gmail.mark_as_read(email['id'])
+        
+        # Small delay between emails
+        if idx < len(emails):
+            time.sleep(1)
+    
+    print("\n" + "=" * 60)
+    print(f"Completed processing {len(emails)} email(s)")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
+

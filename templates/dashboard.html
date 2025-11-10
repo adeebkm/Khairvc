@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Replier - Khair</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/sidebar.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="navbar-container">
+            <div class="navbar-content">
+                <div class="nav-left">
+                    <div class="nav-brand">
+                        <span class="logo">Khair</span>
+                        <span class="tagline">Email Replier Agent</span>
+                    </div>
+                </div>
+                <div class="nav-right">
+                    {% if has_gmail %}
+                    <div class="nav-search">
+                        <div class="search-container">
+                            <span class="search-icon">🔍</span>
+                            <input type="text" id="emailSearch" class="search-input" placeholder="Search emails..." onkeyup="handleSearch(event)" oninput="handleSearchInput(this.value)">
+                            <button class="search-clear" id="searchClear" onclick="clearSearch()" style="display: none;">×</button>
+                        </div>
+                    </div>
+                    {% endif %}
+                    <div class="nav-actions">
+                        <span class="user-info">Welcome, {{ current_user.username }}</span>
+                        {% if has_gmail %}
+                        <button class="btn btn-primary" onclick="openComposeModal()" title="Compose new email" style="display: inline-flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 18px;">✉️</span>
+                            <span>Compose</span>
+                        </button>
+                        <button class="btn btn-secondary" onclick="openSignatureSelector()" title="Select email signature">
+                            ✏️ Signature
+                        </button>
+                        {% endif %}
+                        <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>
+                        {% if has_gmail %}
+                        <div class="gmail-dropdown">
+                            <button class="btn btn-gmail" onclick="toggleGmailDropdown(event)" id="gmailDropdownBtn">
+                                📧 Gmail: Connected
+                            </button>
+                            <div class="gmail-dropdown-menu" id="gmailDropdownMenu" style="display: none;">
+                                <div class="gmail-dropdown-header">
+                                    <strong>Connected Account</strong>
+                                </div>
+                                <div class="gmail-dropdown-email">
+                                    {{ gmail_email or 'Gmail Connected' }}
+                                </div>
+                                <a href="{{ url_for('disconnect_gmail') }}" class="gmail-dropdown-disconnect">
+                                    Disconnect
+                                </a>
+                            </div>
+                        </div>
+                        {% else %}
+                        <a href="{{ url_for('connect_gmail') }}" class="btn btn-gmail" title="Connect Gmail account">
+                            📧 Login
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="dashboard-layout">
+        {% if has_gmail %}
+        <!-- Hamburger Menu Button (positioned above sidebar) -->
+        <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">
+            <span class="hamburger-icon">☰</span>
+        </button>
+        
+        <!-- Left Sidebar (Gmail-style) -->
+        <aside class="sidebar" id="sidebar">
+            <nav class="sidebar-nav">
+                <button class="sidebar-item active" onclick="switchTab('all')" data-tab="all" data-label="Inbox">
+                    <span class="sidebar-icon icon-inbox">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                        </svg>
+                    </span>
+                    <span class="sidebar-label">Inbox</span>
+                </button>
+                <button class="sidebar-item" onclick="switchTab('sent')" data-tab="sent" data-label="Sent">
+                    <span class="sidebar-icon icon-sent">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </span>
+                    <span class="sidebar-label">Sent</span>
+                </button>
+                <button class="sidebar-item" onclick="switchTab('starred')" data-tab="starred" data-label="Starred">
+                    <span class="sidebar-icon icon-starred">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                        </svg>
+                    </span>
+                    <span class="sidebar-label">Starred</span>
+                </button>
+                <button class="sidebar-item" onclick="switchTab('drafts')" data-tab="drafts" data-label="Drafts">
+                    <span class="sidebar-icon icon-drafts">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                            <polyline points="10 9 9 9 8 9"></polyline>
+                        </svg>
+                    </span>
+                    <span class="sidebar-label">Drafts</span>
+                </button>
+            </nav>
+            
+            <div class="sidebar-divider"></div>
+            
+            <div class="sidebar-section">
+                <div class="sidebar-section-title">CATEGORIES</div>
+                <button class="sidebar-item" onclick="switchTab('deal-flow')" data-tab="deal-flow" data-label="Deal Flow">
+                    <span class="sidebar-icon icon-deal-flow">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+                            <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+                        </svg>
+                    </span>
+                    <span class="sidebar-label">Deal Flow</span>
+                </button>
+                <button class="sidebar-item" onclick="switchTab('networking')" data-tab="networking" data-label="Networking">
+                    <span class="sidebar-icon icon-networking">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="9" cy="7" r="4"></circle>
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                        </svg>
+                    </span>
+                    <span class="sidebar-label">Networking</span>
+                </button>
+                <button class="sidebar-item" onclick="switchTab('hiring')" data-tab="hiring" data-label="Hiring">
+                    <span class="sidebar-icon icon-hiring">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="12" cy="7" r="4"></circle>
+                        </svg>
+                    </span>
+                    <span class="sidebar-label">Hiring</span>
+                </button>
+                <button class="sidebar-item" onclick="switchTab('general')" data-tab="general" data-label="General">
+                    <span class="sidebar-icon icon-general">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                            <polyline points="10 9 9 9 8 9"></polyline>
+                        </svg>
+                    </span>
+                    <span class="sidebar-label">General</span>
+                </button>
+                <button class="sidebar-item" onclick="switchTab('spam')" data-tab="spam" data-label="Spam">
+                    <span class="sidebar-icon icon-spam">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </span>
+                    <span class="sidebar-label">Spam</span>
+                </button>
+            </div>
+        </aside>
+        {% endif %}
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            {% if not has_gmail %}
+            <!-- Gmail Connection Required -->
+            <div class="gmail-connection-prompt">
+                <div class="gmail-connection-content">
+                    <div class="gmail-connection-icon">📧</div>
+                    <h2>Connect Your Gmail Account</h2>
+                    <p>To use Khair Email Replier Agent, you need to connect your Gmail account first.</p>
+                    <p class="gmail-connection-subtitle">This allows the system to read and manage your emails securely.</p>
+                    <a href="{{ url_for('connect_gmail') }}" class="btn btn-primary btn-large">
+                        Connect Gmail Account
+                    </a>
+                </div>
+            </div>
+            {% else %}
+            <!-- Compact Header Section -->
+            <div class="compact-header">
+                <!-- Gmail Status (Compact) - Removed, now in navbar -->
+                
+                <!-- Controls -->
+                <div class="controls-compact">
+                    <button class="btn btn-small btn-primary" id="fetchEmailsBtn" onclick="fetchEmails()">🔄 Fetch</button>
+                    <div class="email-count-compact" id="emailCount"></div>
+                    <label class="checkbox-compact" title="Force full sync from Gmail (uses more API calls - use sparingly)">
+                        <input type="checkbox" id="forceFullSyncCheck">
+                        <span>Force Full Sync</span>
+                    </label>
+                    <label class="checkbox-compact" title="Automatically check for new emails every 5 minutes (only fetches new emails)">
+                        <input type="checkbox" id="autoFetchCheck" checked onchange="toggleAutoFetch(this.checked)">
+                        <span>Auto-Fetch</span>
+                    </label>
+                    <label class="select-compact">
+                        <select id="maxEmailsSelect">
+                            <option value="10">10 emails</option>
+                            <option value="20" selected>20 emails</option>
+                            <option value="30">30 emails</option>
+                            <option value="40">40 emails</option>
+                            <option value="50">50 emails</option>
+                            <option value="100">100 emails</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Loading Indicator -->
+            <div class="loading" id="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p style="color: var(--text-secondary); font-weight: 500;">Loading emails...</p>
+            </div>
+
+            <!-- Email List / Deal Flow List -->
+            <div id="contentArea">
+            <!-- Email List (for all tabs except Deal Flow) -->
+            <div class="email-list" id="emailList">
+                <div class="empty-state">
+                    <p>👋 Click "Fetch Emails" to get started</p>
+                </div>
+            </div>
+
+            <!-- Deal Flow Table -->
+            <div class="deal-flow-table" id="dealFlowTable" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2 style="margin: 0;">💼 Deal Flow</h2>
+                    <!-- Scoring system removed - button disabled -->
+                </div>
+                <table class="deal-table">
+                    <thead>
+                        <tr>
+                            <th>Founder</th>
+                            <th>Subject</th>
+                            <th>State</th>
+                            <th>Deck Link</th>
+                            <th>Basics</th>
+                            <th>Portfolio Overlaps</th>
+                            <th>Score</th>
+                            <th>Date</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dealFlowBody">
+                        <tr>
+                            <td colspan="9" class="empty-state">Loading deals...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            </div>
+            {% endif %}
+        </main>
+    </div>
+
+    <!-- Modal for email details -->
+    <div class="modal" id="emailModal" style="display: none;">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <div class="modal-header">
+                <div class="modal-header-top">
+                    <h2 id="modalSubject">Email Subject</h2>
+                </div>
+                <div class="modal-from-section">
+                    <div class="modal-avatar" id="modalAvatar">A</div>
+                    <div class="modal-from-info">
+                        <span class="modal-from" id="modalFrom">Sender Name</span>
+                        <span class="modal-from-email" id="modalFromEmail">sender@example.com</span>
+                    </div>
+                    <div class="modal-date" id="modalDate"></div>
+                </div>
+                <div class="modal-metadata">
+                    <div id="modalTags" class="modal-tags"></div>
+                </div>
+                <!-- Deal Flow Scores (shown only for Deal Flow emails) -->
+                <div id="modalDealScores" class="modal-deal-scores" style="display: none;">
+                    <div class="deal-scores-header">
+                        <h3>📊 Deal Scores</h3>
+                    </div>
+                    <div class="deal-scores-grid">
+                        <div class="score-item">
+                            <span class="score-label">Team Background</span>
+                            <span class="score-value" id="modalTeamScore">-</span>
+                        </div>
+                        <div class="score-item">
+                            <span class="score-label">White Space</span>
+                            <span class="score-value" id="modalWhiteSpaceScore">-</span>
+                        </div>
+                        <div class="score-item score-overall">
+                            <span class="score-label">Overall Score</span>
+                            <span class="score-value" id="modalOverallScore">-</span>
+                        </div>
+                    </div>
+                    <div class="score-summary" id="modalScoreSummary" style="display: none;">
+                        <p class="score-summary-text"></p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div class="thread-container" id="threadContainer">
+                    <!-- Thread messages will be populated here -->
+                </div>
+                
+                <div class="email-body-section" id="singleEmailSection" style="display: none;">
+                    <h3>Original Email</h3>
+                    <div id="modalAttachments" style="margin-bottom: 16px;"></div>
+                    <div class="email-body" id="modalBody"></div>
+                </div>
+                
+                <div class="reply-section" id="replySection" style="display: none;">
+                    <h3>AI Generated Reply</h3>
+                    <div class="reply-controls">
+                        <button class="btn btn-small btn-primary" onclick="generateReply()">
+                            🤖 Generate Reply
+                        </button>
+                    </div>
+                    <div class="reply-loading" id="replyLoading" style="display: none;">
+                        <div class="spinner-small"></div>
+                        <p>AI is generating a reply...</p>
+                    </div>
+                    <div class="reply-content" id="replyContent"></div>
+                    <textarea class="reply-editor" id="replyEditor" style="display: none;"></textarea>
+                    <div class="reply-actions" id="replyActions" style="display: none;">
+                        <button class="btn btn-success" onclick="sendReply()">
+                            ✉️ Send Reply
+                        </button>
+                        <button class="btn btn-secondary" onclick="editReply()">
+                            ✏️ Edit
+                        </button>
+                        <button class="btn btn-danger" onclick="markAsRead()">
+                            ✓ Mark as Read (Skip)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </main>
+    </div>
+
+    <!-- Config Info Bar (moved to bottom) -->
+    {% if has_gmail %}
+    <div class="config-bar" id="configBar" style="margin-top: 40px;">
+        <div class="config-item">
+            <span class="config-label">Email Sending:</span>
+            <span class="config-value" id="sendStatus">Loading...</span>
+        </div>
+        <div class="config-item">
+            <span class="config-label">Max Emails:</span>
+            <span class="config-value" id="maxEmails">-</span>
+        </div>
+        <div class="config-item">
+            <span class="config-label">Gmail Status:</span>
+            <span class="config-value" id="gmailStatus">Connected</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Compose Email Modal -->
+    <div class="modal" id="composeModal" style="display: none;">
+        <div class="modal-content" style="max-width: 700px;">
+            <span class="close" onclick="closeComposeModal()">&times;</span>
+            <div class="modal-header">
+                <h2>Compose Email</h2>
+            </div>
+            <div class="modal-body" style="padding: 24px;">
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-primary);">To:</label>
+                    <input type="text" id="composeTo" class="compose-input" placeholder="recipient@example.com" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px;">
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-primary);">Subject:</label>
+                    <input type="text" id="composeSubject" class="compose-input" placeholder="Email subject" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px;">
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-primary);">Message:</label>
+                    <textarea id="composeBody" class="compose-textarea" placeholder="Type your message here..." style="width: 100%; min-height: 300px; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; font-family: inherit; resize: vertical;"></textarea>
+                </div>
+                <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                    <button class="btn btn-secondary" onclick="closeComposeModal()">Cancel</button>
+                    <button class="btn btn-primary" onclick="sendComposedEmail()" id="sendComposeBtn">
+                        <span id="sendComposeBtnText">Send</span>
+                        <span id="sendComposeBtnSpinner" style="display: none;" class="spinner-small"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Signature Selector Modal -->
+    <div class="modal" id="signatureModal" style="display: none;">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="close" onclick="closeSignatureModal()">&times;</span>
+            <div class="modal-header">
+                <h2>Select Email Signature</h2>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 16px; color: var(--text-secondary);">Choose which signature to use for your email replies:</p>
+                <div id="signatureList" style="display: flex; flex-direction: column; gap: 12px;">
+                    <div class="spinner-small"></div>
+                    <p>Loading signatures...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
