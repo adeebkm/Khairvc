@@ -2175,5 +2175,6 @@ if __name__ == '__main__':
     print()
     print("Press Ctrl+C to stop the server")
     print("=" * 60)
+    print("🔐 Lambda integration: Enabled")
     
     app.run(debug=True, host='0.0.0.0', port=8080)
