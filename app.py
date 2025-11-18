@@ -26,6 +26,11 @@ print(f"📧 Email sending: {'ENABLED' if send_emails_debug.lower() == 'true' el
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 
+# Trust proxy headers for HTTPS detection (required for Railway)
+# This allows Flask to detect HTTPS when behind a reverse proxy
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
 # Use PostgreSQL on Railway, SQLite locally
 database_url = os.getenv('DATABASE_URL')
 if database_url:
@@ -46,6 +51,37 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 login_manager.login_message = 'Please log in to access this page.'
+
+
+# Error handler to catch session serialization errors and clear problematic session data
+@app.before_request
+def clear_problematic_session_data():
+    """Clear any non-serializable objects from session before each request"""
+    try:
+        # Check if session has any problematic keys
+        keys_to_remove = []
+        for key in list(session.keys()):
+            # Check if value is not JSON serializable by trying to serialize it
+            try:
+                import json
+                json.dumps(session[key])
+            except (TypeError, ValueError):
+                # This value is not serializable, mark for removal
+                keys_to_remove.append(key)
+            # Also proactively remove OAuth flow objects
+            if 'oauth' in key.lower() or 'flow' in key.lower():
+                if key not in keys_to_remove:
+                    keys_to_remove.append(key)
+        
+        # Remove problematic keys
+        for key in keys_to_remove:
+            try:
+                session.pop(key, None)
+            except:
+                pass
+    except:
+        # If anything goes wrong, just continue
+        pass
 
 
 @login_manager.user_loader
@@ -203,6 +239,29 @@ def dashboard():
 def connect_gmail():
     """Initiate Gmail OAuth flow"""
     try:
+        # Aggressively clear any OAuth-related session data (flow objects are not JSON serializable)
+        # This prevents errors from stale session data
+        keys_to_remove = []
+        for key in list(session.keys()):
+            # Check if value is not JSON serializable
+            try:
+                import json
+                json.dumps(session[key])
+            except (TypeError, ValueError):
+                # This value is not serializable, mark for removal
+                keys_to_remove.append(key)
+            # Also remove any OAuth-related keys
+            if 'oauth' in key.lower() or 'flow' in key.lower():
+                if key not in keys_to_remove:
+                    keys_to_remove.append(key)
+        
+        # Remove problematic keys
+        for key in keys_to_remove:
+            try:
+                session.pop(key, None)
+            except:
+                pass
+        
         from google_auth_oauthlib.flow import InstalledAppFlow
         import json
         
@@ -237,7 +296,11 @@ def connect_gmail():
                 prompt='consent'
             )
             session['oauth_state'] = state
-            session['oauth_flow'] = flow  # Store flow in session (will need to recreate in callback)
+            # CRITICAL: Delete flow object before returning (it's not JSON serializable)
+            # Flow will be recreated in oauth2callback using credentials and state
+            del flow
+            # Force session save to ensure state is stored
+            session.modified = True
             return redirect(authorization_url)
         else:
             # Local development: use local server
@@ -264,8 +327,15 @@ def connect_gmail():
     
     except Exception as e:
         import traceback
-        traceback.print_exc()
-        return f"Error connecting Gmail: {str(e)}", 500
+        error_traceback = traceback.format_exc()
+        print(f"❌ Error in connect_gmail: {str(e)}")
+        print(f"Full traceback:\n{error_traceback}")
+        # Return JSON error for better debugging
+        return jsonify({
+            'error': 'Failed to connect Gmail',
+            'message': str(e),
+            'type': type(e).__name__
+        }), 500
 
 
 @app.route('/oauth2callback')
@@ -273,6 +343,26 @@ def connect_gmail():
 def oauth2callback():
     """OAuth 2.0 callback handler for Railway/production"""
     try:
+        # Clear any OAuth flow objects from session first (prevent serialization errors)
+        keys_to_remove = []
+        for key in list(session.keys()):
+            # Check if value is not JSON serializable
+            try:
+                import json
+                json.dumps(session[key])
+            except (TypeError, ValueError):
+                keys_to_remove.append(key)
+            # Also remove OAuth flow keys
+            if 'oauth' in key.lower() and 'flow' in key.lower():
+                if key not in keys_to_remove:
+                    keys_to_remove.append(key)
+        
+        for key in keys_to_remove:
+            try:
+                session.pop(key, None)
+            except:
+                pass
+        
         from google_auth_oauthlib.flow import InstalledAppFlow
         import json
         
@@ -300,8 +390,14 @@ def oauth2callback():
         flow = InstalledAppFlow.from_client_config(credentials_data, SCOPES)
         flow.redirect_uri = redirect_uri
         
+        # Construct callback URL with HTTPS (required for OAuth)
+        # Replace HTTP with HTTPS in the callback URL if needed
+        callback_url = request.url
+        if callback_url.startswith('http://'):
+            callback_url = callback_url.replace('http://', 'https://', 1)
+        
         # Fetch token
-        flow.fetch_token(authorization_response=request.url)
+        flow.fetch_token(authorization_response=callback_url)
         creds = flow.credentials
         
         # Get token JSON
@@ -320,9 +416,13 @@ def oauth2callback():
         
         db.session.commit()
         
+        # CRITICAL: Delete flow object before returning (it's not JSON serializable)
+        del flow
+        del creds
+        
         # Clear session
         session.pop('oauth_state', None)
-        session.pop('oauth_flow', None)
+        session.modified = True
         
         # Redirect with parameter to trigger auto-fetch
         return redirect(url_for('dashboard') + '?connected=true')
@@ -363,7 +463,7 @@ def get_emails():
         if not gmail:
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
-        max_emails = request.args.get('max', default=20, type=int)
+        max_emails = min(request.args.get('max', default=20, type=int), 20)  # Cap at 20 emails max
         category_filter = request.args.get('category')  # Optional category filter
         show_spam = request.args.get('show_spam', 'false').lower() == 'true'
         unread_only = False  # Always fetch all emails (unread only filter removed)
@@ -435,14 +535,9 @@ def get_emails():
             # NOTE: We ignore unread_only filter here because database doesn't store read/unread status
             query = EmailClassification.query.filter_by(user_id=current_user.id)
             
-            if force_full_sync:
-                # User explicitly requested full sync - respect max_emails limit
-                print(f"   Force full sync: Limiting to {max_emails} emails from database")
-                db_classifications = query.order_by(EmailClassification.classified_at.desc()).limit(max_emails).all()
-            else:
-                # Normal case: Load ALL emails from database (no limit)
-                print(f"   Loading ALL emails from database (no limit)")
-                db_classifications = query.order_by(EmailClassification.classified_at.desc()).all()
+            # Always limit to 20 emails max (to save storage and credits)
+            print(f"   Loading latest {max_emails} emails from database (max 20)")
+            db_classifications = query.order_by(EmailClassification.classified_at.desc()).limit(max_emails).all()
             
             classified_emails = []
             # Batch fetch star status for all emails from database
@@ -645,7 +740,9 @@ def get_emails():
                                     headers=headers,
                                     sender=email.get('from', ''),
                                     links=links,
-                                    has_pdf_attachment=has_pdf_deck  # Pass PDF indicator
+                                    has_pdf_attachment=has_pdf_deck,  # Pass PDF indicator
+                                    thread_id=email.get('thread_id'),
+                                    user_id=str(current_user.id)
                                 )
                             except Exception as classify_error:
                                 # If classification fails (e.g., OpenAI quota/rate limit), use deterministic only
@@ -898,6 +995,25 @@ def get_emails():
                 # Continue processing other emails
                 continue
         
+        # Enforce 20 email limit: Delete oldest emails if more than 20 exist (after processing all emails)
+        total_classifications = EmailClassification.query.filter_by(user_id=current_user.id).count()
+        if total_classifications > 20:
+            # Get IDs of oldest emails (keep latest 20)
+            oldest_classifications = EmailClassification.query.filter_by(
+                user_id=current_user.id
+            ).order_by(EmailClassification.classified_at.asc()).limit(total_classifications - 20).all()
+            
+            # Delete associated deals first (to avoid foreign key constraints)
+            for old_class in oldest_classifications:
+                Deal.query.filter_by(classification_id=old_class.id).delete()
+            
+            # Delete oldest classifications
+            for old_class in oldest_classifications:
+                db.session.delete(old_class)
+            
+            db.session.commit()
+            print(f"🗑️  Deleted {len(oldest_classifications)} old emails (keeping latest 20)")
+        
         print(f"✅ Returning {len(classified_emails)} emails to frontend")
         
         return jsonify({
@@ -936,7 +1052,7 @@ def get_starred_emails():
             }), 500
         
         # Get max emails from query parameter
-        max_emails = request.args.get('max', default=20, type=int)
+        max_emails = min(request.args.get('max', default=20, type=int), 20)  # Cap at 20 emails max
         
         # Fetch starred emails
         starred_emails = gmail.get_starred_emails(max_results=max_emails)
@@ -1001,7 +1117,7 @@ def get_sent_emails():
             }), 500
         
         # Get max emails from query parameter
-        max_emails = request.args.get('max', default=20, type=int)
+        max_emails = min(request.args.get('max', default=20, type=int), 20)  # Cap at 20 emails max
         
         # Fetch sent emails
         sent_emails = gmail.get_sent_emails(max_results=max_emails)
@@ -1059,7 +1175,7 @@ def get_drafts():
             }), 500
         
         # Get max emails from query parameter
-        max_emails = request.args.get('max', default=20, type=int)
+        max_emails = min(request.args.get('max', default=20, type=int), 20)  # Cap at 20 emails max
         
         # Fetch drafts
         drafts = gmail.get_drafts(max_results=max_emails)
@@ -1183,7 +1299,9 @@ def reclassify_email():
                 body=email_body_for_classification,  # Includes PDF content
                 headers=headers,
                 sender=email.get('from', ''),
-                links=links
+                links=links,
+                thread_id=email.get('thread_id'),
+                user_id=str(current_user.id)
             )
         
         # Store new classification
@@ -1346,7 +1464,9 @@ def generate_reply():
                 body=body,  # This should already be combined_text if available
                 headers=headers,
                 sender=sender,
-                links=links
+                links=links,
+                thread_id=data.get('thread_id'),
+                user_id=str(current_user.id)
             )
             
             category = classification_result['category']
