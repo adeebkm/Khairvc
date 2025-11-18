@@ -8,6 +8,14 @@ from typing import Dict, List, Tuple, Optional
 from openai import OpenAI
 import os
 
+# Try to import Lambda client (optional - falls back to OpenAI if not available)
+try:
+    from lambda_client import LambdaClient
+    LAMBDA_AVAILABLE = True
+except ImportError:
+    LAMBDA_AVAILABLE = False
+    LambdaClient = None
+
 
 # Category constants
 CATEGORY_DEAL_FLOW = "DEAL_FLOW"
@@ -31,10 +39,18 @@ TAG_GENERAL = "GEN/General"
 
 
 class EmailClassifier:
-    """Classify emails into VC categories using deterministic rules + OpenAI"""
+    """Classify emails into VC categories using deterministic rules + OpenAI/Lambda"""
     
     def __init__(self, openai_client=None):
         self.openai_client = openai_client
+        # Try to initialize Lambda client if available
+        self.lambda_client = None
+        if LAMBDA_AVAILABLE:
+            try:
+                self.lambda_client = LambdaClient()
+            except Exception as e:
+                print(f"⚠️  Lambda client not available, falling back to OpenAI: {str(e)}")
+                self.lambda_client = None
     
     def extract_links(self, text: str) -> List[str]:
         """Extract all URLs from email body"""
@@ -411,14 +427,36 @@ class EmailClassifier:
         sender: str,
         links: List[str],
         deterministic_category: str,
-        has_pdf_attachment: bool = False
+        has_pdf_attachment: bool = False,
+        thread_id: str = None,
+        user_id: str = None
     ) -> Tuple[str, float]:
         """
-        Use OpenAI to validate/override deterministic classification
+        Use OpenAI (via Lambda or direct) to validate/override deterministic classification
         Returns: (category, confidence)
         
         Uses a comprehensive zero-hallucination prompt for accurate classification.
+        Prefers Lambda if available (more secure, no logging).
         """
+        # Prefer Lambda if available (more secure, no email content logging)
+        if self.lambda_client:
+            try:
+                return self.lambda_client.classify_email(
+                    subject=subject,
+                    body=body,
+                    headers=headers,
+                    sender=sender,
+                    links=links,
+                    deterministic_category=deterministic_category,
+                    has_pdf_attachment=has_pdf_attachment,
+                    thread_id=thread_id,
+                    user_id=user_id
+                )
+            except Exception as e:
+                print(f"⚠️  Lambda classification failed, falling back to OpenAI: {str(e)}")
+                # Fall through to OpenAI fallback
+        
+        # Fallback to direct OpenAI if Lambda not available or failed
         if not self.openai_client:
             return (deterministic_category, 0.70)
         
@@ -799,7 +837,9 @@ Return ONLY the JSON object. No additional text."""
         headers: Dict[str, str],
         sender: str,
         links: List[str] = None,
-        has_pdf_attachment: bool = False
+        has_pdf_attachment: bool = False,
+        thread_id: str = None,
+        user_id: str = None
     ) -> Dict:
         """
         Main classification method
@@ -818,9 +858,10 @@ Return ONLY the JSON object. No additional text."""
             subject, body, headers, sender, links, has_pdf_attachment
         )
         
-        # Step 2: OpenAI validation/override
+        # Step 2: OpenAI validation/override (via Lambda if available)
         final_category, confidence = self.openai_classify(
-            subject, body, headers, sender, links, det_category, has_pdf_attachment
+            subject, body, headers, sender, links, det_category, has_pdf_attachment,
+            thread_id=thread_id, user_id=user_id
         )
         
         # Step 3: Determine tags

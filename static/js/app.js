@@ -940,25 +940,9 @@ async function openDealThread(threadId) {
 }
 
 // Load configuration
+// Config bar removed - no longer needed
 async function loadConfig() {
-    try {
-        const response = await fetch('/api/config');
-        const data = await response.json();
-        
-        const sendStatus = document.getElementById('sendStatus');
-        if (data.send_emails_enabled) {
-            sendStatus.textContent = 'Enabled ✓';
-            sendStatus.className = 'config-value enabled';
-        } else {
-            sendStatus.textContent = 'Disabled (Test Mode)';
-            sendStatus.className = 'config-value disabled';
-        }
-        
-        document.getElementById('maxEmails').textContent = data.max_emails;
-    } catch (error) {
-        console.error('Error loading config:', error);
-        showAlert('error', 'Failed to load configuration');
-    }
+    // Config bar removed - function kept for compatibility but does nothing
 }
 
 // Fetch emails from Gmail
