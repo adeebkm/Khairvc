@@ -838,10 +838,13 @@ Return ONLY the JSON object. No additional text."""
             
             # Apply tie-breaker hierarchy (if deterministic strongly suggests something)
             # But generally trust OpenAI's comprehensive analysis
-            if deterministic_category == CATEGORY_DEAL_FLOW and confidence < 0.80:
-                # If deterministic strongly believes it's deal flow, and AI is uncertain, lean toward deal flow
-                category = CATEGORY_DEAL_FLOW
-                confidence = 0.85
+            if deterministic_category == CATEGORY_DEAL_FLOW:
+                # If deterministic believes it's deal flow (especially with high confidence from warm intro detection)
+                # Override AI classification unless AI is very confident (>0.90) it's something else
+                if confidence < 0.90:
+                    # Trust deterministic for deal flow (warm intros, fundraising keywords, etc.)
+                    category = CATEGORY_DEAL_FLOW
+                    confidence = max(0.85, confidence)
             
             return (category, confidence)
         
