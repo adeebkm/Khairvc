@@ -313,14 +313,9 @@ def connect_gmail():
             del flow
             # Force session save to ensure state is stored
             session.modified = True
-            # Explicitly save session (some Flask versions need this)
-            try:
-                from flask import session
-                # Trigger session save by accessing it
-                _ = session.get('oauth_state')
-            except:
-                pass
-            print(f"🔍 OAuth redirect - Stored state: {state}, Session keys: {list(session.keys())}")
+            # Verify state was stored
+            stored_state = session.get('oauth_state')
+            print(f"🔍 OAuth redirect - Stored state: {stored_state}, Session keys: {list(session.keys())}")
             return redirect(authorization_url)
         else:
             # Local development: use local server
