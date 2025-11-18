@@ -5,19 +5,20 @@ Each user manages their own Gmail account with complete privacy
 """
 import os
 import json
+from dotenv import load_dotenv
+
+# Load environment variables FIRST (before any imports that use them)
+load_dotenv()
+
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session, send_file
 from werkzeug.utils import secure_filename
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from dotenv import load_dotenv
 from models import db, User, GmailToken, EmailClassification, Deal
 from auth import encrypt_token, decrypt_token
 from gmail_client import GmailClient, SCOPES
 from openai_client import OpenAIClient
 from email_classifier import EmailClassifier, CATEGORY_DEAL_FLOW, CATEGORY_NETWORKING, CATEGORY_HIRING, CATEGORY_SPAM, CATEGORY_GENERAL, TAG_DEAL, TAG_GENERAL
 # from tracxn_scorer import TracxnScorer  # Removed - scoring system disabled
-
-# Load environment variables
-load_dotenv()
 
 # Debug: Print SEND_EMAILS value on startup
 send_emails_debug = os.getenv('SEND_EMAILS', 'false')
@@ -1116,6 +1117,7 @@ def get_starred_emails():
                 'snippet': email.get('snippet', ''),
                 'date': email.get('date'),
                 'body': email.get('body', ''),
+                'body_html': email.get('body_html', ''),
                 'combined_text': email.get('combined_text', ''),
                 'attachments': email.get('attachments', []),
                 'is_starred': True,  # Always true for starred emails
@@ -1181,6 +1183,7 @@ def get_sent_emails():
                 'snippet': email.get('snippet', ''),
                 'date': email.get('date'),
                 'body': email.get('body', ''),
+                'body_html': email.get('body_html', ''),
                 'combined_text': email.get('combined_text', ''),
                 'attachments': email.get('attachments', []),
                 'category': 'SENT',  # Mark as sent
@@ -1239,6 +1242,7 @@ def get_drafts():
                 'snippet': email.get('snippet', ''),
                 'date': email.get('date'),
                 'body': email.get('body', ''),
+                'body_html': email.get('body_html', ''),
                 'combined_text': email.get('combined_text', ''),
                 'attachments': email.get('attachments', []),
                 'is_starred': email.get('is_starred', False),
@@ -2037,7 +2041,7 @@ def rescore_all_deals():
 @app.route('/api/attachment/<message_id>/<filename>')
 @login_required
 def get_attachment(message_id, filename):
-    """Download/view PDF attachment from a specific email message"""
+    """Download/view an attachment (PDF, image, etc.) from a specific email message"""
     if not current_user.gmail_token:
         return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
     
@@ -2059,14 +2063,16 @@ def get_attachment(message_id, filename):
             from urllib.parse import unquote
             decoded_filename = unquote(filename)
             
-            # Find the PDF attachment in the message parts
+            # Find the attachment in the message parts (any mime type)
             attachment_id = None
+            attachment_mime = None
             
             def find_attachment_id(parts):
                 for part in parts:
                     part_filename = part.get('filename', '')
-                    if part_filename == decoded_filename and part.get('mimeType') == 'application/pdf':
-                        return part.get('body', {}).get('attachmentId')
+                    mime_type = part.get('mimeType', '')
+                    if part_filename == decoded_filename:
+                        return part.get('body', {}).get('attachmentId'), mime_type
                     if 'parts' in part:
                         found = find_attachment_id(part['parts'])
                         if found:
@@ -2075,30 +2081,39 @@ def get_attachment(message_id, filename):
             
             payload = message.get('payload', {})
             if 'parts' in payload:
-                attachment_id = find_attachment_id(payload['parts'])
+                result = find_attachment_id(payload['parts'])
+                if result:
+                    attachment_id, attachment_mime = result
             else:
                 # Single part message
-                if payload.get('filename') == decoded_filename and payload.get('mimeType') == 'application/pdf':
+                if payload.get('filename') == decoded_filename:
                     attachment_id = payload.get('body', {}).get('attachmentId')
+                    attachment_mime = payload.get('mimeType', 'application/octet-stream')
             
             if not attachment_id:
-                # Try to find any PDF attachment if exact filename match fails
-                def find_any_pdf(parts):
+                # Try to find any attachment if exact filename match fails
+                def find_any_attachment(parts):
                     for part in parts:
-                        if part.get('mimeType') == 'application/pdf':
-                            return part.get('body', {}).get('attachmentId'), part.get('filename', 'deck.pdf')
+                        mime_type = part.get('mimeType', '')
+                        if part.get('filename'):
+                            return (
+                                part.get('body', {}).get('attachmentId'),
+                                part.get('filename', 'attachment'),
+                                mime_type or 'application/octet-stream'
+                            )
                         if 'parts' in part:
-                            found = find_any_pdf(part['parts'])
+                            found = find_any_attachment(part['parts'])
                             if found:
                                 return found
                     return None
                 
                 if 'parts' in payload:
-                    pdf_result = find_any_pdf(payload['parts'])
-                    if pdf_result:
-                        attachment_id, decoded_filename = pdf_result
-                elif payload.get('mimeType') == 'application/pdf':
+                    result = find_any_attachment(payload['parts'])
+                    if result:
+                        attachment_id, decoded_filename, attachment_mime = result
+                elif payload.get('filename'):
                     attachment_id = payload.get('body', {}).get('attachmentId')
+                    attachment_mime = payload.get('mimeType', 'application/octet-stream')
             
             if not attachment_id:
                 return jsonify({'success': False, 'error': 'Attachment ID not found'}), 404
@@ -2118,8 +2133,8 @@ def get_attachment(message_id, filename):
             
             return send_file(
                 io.BytesIO(file_data),
-                mimetype='application/pdf',
-                as_attachment=True,
+                mimetype=attachment_mime or 'application/octet-stream',
+                as_attachment=False,
                 download_name=decoded_filename
             )
             
