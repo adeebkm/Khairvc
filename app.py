@@ -25,6 +25,10 @@ print(f"📧 Email sending: {'ENABLED' if send_emails_debug.lower() == 'true' el
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+# Configure session to persist across redirects
+app.config['SESSION_COOKIE_SECURE'] = True  # Use secure cookies in production (HTTPS)
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Allow cookies on OAuth redirects
 
 # Trust proxy headers for HTTPS detection (required for Railway)
 # This allows Flask to detect HTTPS when behind a reverse proxy
@@ -163,6 +167,8 @@ def login():
         
         if user and user.check_password(password):
             login_user(user)
+            # Make session permanent to survive OAuth redirects
+            session.permanent = True
             return redirect(url_for('dashboard'))
         else:
             return render_template('login.html', error='Invalid username or password')
@@ -296,11 +302,14 @@ def connect_gmail():
                 prompt='consent'
             )
             session['oauth_state'] = state
+            # Make session permanent to survive OAuth redirects
+            session.permanent = True
             # CRITICAL: Delete flow object before returning (it's not JSON serializable)
             # Flow will be recreated in oauth2callback using credentials and state
             del flow
             # Force session save to ensure state is stored
             session.modified = True
+            print(f"🔍 OAuth redirect - Stored state: {state}, Authorization URL: {authorization_url[:100]}...")
             return redirect(authorization_url)
         else:
             # Local development: use local server
@@ -344,16 +353,22 @@ def oauth2callback():
     """OAuth 2.0 callback handler for Railway/production"""
     try:
         # Clear any OAuth flow objects from session first (prevent serialization errors)
+        # BUT preserve oauth_state (it's a string, not an object)
         keys_to_remove = []
+        oauth_state_backup = session.get('oauth_state')  # Backup state before cleanup
+        
         for key in list(session.keys()):
+            # Skip oauth_state - we need to keep it
+            if key == 'oauth_state':
+                continue
             # Check if value is not JSON serializable
             try:
                 import json
                 json.dumps(session[key])
             except (TypeError, ValueError):
                 keys_to_remove.append(key)
-            # Also remove OAuth flow keys
-            if 'oauth' in key.lower() and 'flow' in key.lower():
+            # Also remove OAuth flow keys (but not oauth_state)
+            if 'oauth' in key.lower() and 'flow' in key.lower() and key != 'oauth_state':
                 if key not in keys_to_remove:
                     keys_to_remove.append(key)
         
@@ -363,13 +378,21 @@ def oauth2callback():
             except:
                 pass
         
+        # Restore oauth_state if it was removed
+        if 'oauth_state' not in session and oauth_state_backup:
+            session['oauth_state'] = oauth_state_backup
+        
         from google_auth_oauthlib.flow import InstalledAppFlow
         import json
         
         # Get state from session
         state = session.get('oauth_state')
-        if not state or state != request.args.get('state'):
-            return "Invalid state parameter", 400
+        request_state = request.args.get('state')
+        
+        print(f"🔍 OAuth callback - Session state: {state}, Request state: {request_state}")
+        
+        if not state or state != request_state:
+            return f"Invalid state parameter. Session state: {state}, Request state: {request_state}", 400
         
         # Get credentials from environment or file
         credentials_json = os.getenv('GOOGLE_CREDENTIALS_JSON')
