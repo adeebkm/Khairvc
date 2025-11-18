@@ -12,9 +12,15 @@ import os
 try:
     from lambda_client import LambdaClient
     LAMBDA_AVAILABLE = True
-except ImportError:
+    print("✓ Lambda client module imported successfully")
+except ImportError as e:
     LAMBDA_AVAILABLE = False
     LambdaClient = None
+    print(f"⚠️  Lambda client module not available: {str(e)}")
+except Exception as e:
+    LAMBDA_AVAILABLE = False
+    LambdaClient = None
+    print(f"⚠️  Error importing Lambda client: {str(e)}")
 
 
 # Category constants
@@ -48,9 +54,12 @@ class EmailClassifier:
         if LAMBDA_AVAILABLE:
             try:
                 self.lambda_client = LambdaClient()
+                print("✓ Lambda client initialized")
             except Exception as e:
-                print(f"⚠️  Lambda client not available, falling back to OpenAI: {str(e)}")
+                print(f"⚠️  Lambda client initialization failed: {str(e)}")
                 self.lambda_client = None
+        else:
+            print("⚠️  Lambda not available (module not imported)")
     
     def extract_links(self, text: str) -> List[str]:
         """Extract all URLs from email body"""
