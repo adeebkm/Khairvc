@@ -184,8 +184,8 @@ class EmailClassifier:
         sender_lower = sender.lower()
         return any(pattern in sender_lower for pattern in noreply_patterns)
     
-    def check_newsletter_sender(self, sender: str, subject: str, headers: Dict[str, str]) -> bool:
-        """Check if email is from a newsletter service"""
+    def check_newsletter_sender(self, sender: str, subject: str, headers: Dict[str, str], body: str = "") -> bool:
+        """Check if email is from a newsletter service (including forwarded newsletters)"""
         # Common newsletter platforms and services
         newsletter_domains = [
             'substack.com',
@@ -199,7 +199,11 @@ class EmailClassifier:
             'sendinblue.com',
             'mail.google.com',  # Google notifications
             'accounts.google.com',  # Google account alerts
-            'bounce.google.com'
+            'bounce.google.com',
+            'engage.canva.com',  # Canva marketing
+            'marketing@',  # Generic marketing emails
+            'no-reply@',
+            'noreply@'
         ]
         
         sender_lower = sender.lower()
@@ -208,8 +212,25 @@ class EmailClassifier:
         if any(domain in sender_lower for domain in newsletter_domains):
             return True
         
+        # Check for forwarded newsletters
+        # Look for "---------- Forwarded message ---------" pattern
+        if '---------- Forwarded message ---------' in body or 'Forwarded message' in body:
+            # Extract original sender from forwarded content
+            import re
+            # Look for "From: <email>" pattern in forwarded content
+            forwarded_from_match = re.search(r'From:\s*([^\n<]*<?[^\s>]+@[^\s>]+>?)', body, re.IGNORECASE)
+            if forwarded_from_match:
+                original_sender = forwarded_from_match.group(1).lower()
+                # Check if original sender is from a newsletter domain
+                if any(domain in original_sender for domain in newsletter_domains):
+                    return True
+        
         # Check for unsubscribe links in headers
         if 'List-Unsubscribe' in headers or 'List-Id' in headers:
+            return True
+        
+        # Check for unsubscribe links in body (common in forwarded newsletters)
+        if 'unsubscribe' in body.lower() and ('click here' in body.lower() or 'preferences' in body.lower()):
             return True
         
         # Check subject for newsletter indicators
@@ -391,7 +412,7 @@ class EmailClassifier:
         # RULE 3: GENERAL CHECK (newsletters, automated emails, subscriptions)
         # Check for newsletters and automated emails BEFORE deal flow
         # These should NEVER be deal flow, even if they mention startup keywords
-        is_newsletter = self.check_newsletter_sender(sender, subject, headers)
+        is_newsletter = self.check_newsletter_sender(sender, subject, headers, body)
         is_noreply = self.check_noreply_sender(sender)
         
         if is_newsletter or is_noreply:
