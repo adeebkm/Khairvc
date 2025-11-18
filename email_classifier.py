@@ -257,11 +257,27 @@ class EmailClassifier:
             'startup building', 'company building'
         ]
         
-        # Must have intro pattern AND mention of team/startup/founder
-        has_intro_pattern = any(pattern in text for pattern in intro_patterns)
-        has_startup_mention = any(word in text for word in ['team', 'founder', 'startup', 'building', 'company'])
+        # VC-specific referral patterns (stronger indicators)
+        vc_referral_patterns = [
+            'we may invest', 'may invest in', 'invest in them', 'invest in this',
+            'fits our thesis', 'fits your thesis', 'fits the thesis',
+            'check them out', 'check this out', 'take a look at them',
+            'worth looking at', 'worth evaluating', 'worth considering',
+            'good fit for', 'fit for your', 'fit for the fund',
+            'introducing you to', 'intro to a', 'introducing a'
+        ]
         
-        return has_intro_pattern and has_startup_mention
+        # Strong indicator: VC-specific referral language
+        has_vc_referral = any(pattern in text for pattern in vc_referral_patterns)
+        
+        # Traditional intro pattern
+        has_intro_pattern = any(pattern in text for pattern in intro_patterns)
+        has_startup_mention = any(word in text for word in ['team', 'founder', 'startup', 'building', 'company', 'them', 'this'])
+        
+        # Return True if either:
+        # 1. VC-specific referral pattern (high confidence), OR
+        # 2. Traditional intro pattern + startup mention
+        return has_vc_referral or (has_intro_pattern and has_startup_mention)
     
     def check_follow_up_indicators(self, subject: str, body: str) -> bool:
         """Check if email is a follow-up that might be investment-related"""
