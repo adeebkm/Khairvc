@@ -23,6 +23,11 @@ load_dotenv()
 send_emails_debug = os.getenv('SEND_EMAILS', 'false')
 print(f"📧 Email sending: {'ENABLED' if send_emails_debug.lower() == 'true' else 'DISABLED'} (SEND_EMAILS={send_emails_debug})")
 
+# Privacy: Minimal logging mode (hides email metadata)
+MINIMAL_LOGGING = os.getenv('MINIMAL_LOGGING', 'false').lower() == 'true'
+if MINIMAL_LOGGING:
+    print("🔒 Privacy mode: ENABLED (metadata logging disabled)")
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 # Configure session to persist across redirects
@@ -648,7 +653,8 @@ def get_emails():
                 }
                 
                 classified_emails.append(email_data)
-                print(f"📧 Loaded from DB: Category={classification.category}, Thread={classification.thread_id[:16]}")
+                if not MINIMAL_LOGGING:
+                    print(f"📧 Loaded from DB: Category={classification.category}, Thread={classification.thread_id[:16]}")
             
             print(f"✅ Returning {len(classified_emails)} emails from database")
             
@@ -1023,8 +1029,9 @@ def get_emails():
                 if classification.category == CATEGORY_SPAM and not show_spam:
                     continue
                 
-                # Debug: Log what we're appending
-                print(f"📧 Appending email from {email.get('from', 'unknown')[:50]}: Category={classification.category}, Subject={email.get('subject', 'No subject')[:50]}, Starred={email.get('is_starred', False)}")
+                # Debug: Log what we're appending (only if not in minimal logging mode)
+                if not MINIMAL_LOGGING:
+                    print(f"📧 Appending email from {email.get('from', 'unknown')[:50]}: Category={classification.category}, Subject={email.get('subject', 'No subject')[:50]}, Starred={email.get('is_starred', False)}")
                 
                 classified_emails.append(email)
             
