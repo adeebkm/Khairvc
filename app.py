@@ -110,9 +110,14 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 
-# Initialize database
+# Initialize database - create tables if they don't exist
 with app.app_context():
-    db.create_all()
+    try:
+        db.create_all()
+        print("✅ Database tables created/verified")
+    except Exception as e:
+        print(f"⚠️  Database initialization error: {str(e)}")
+        print("Tables may need to be created manually")
 
 
 # Global OpenAI client (shared API key from .env)
@@ -2357,6 +2362,31 @@ def get_config():
         'has_gmail': current_user.gmail_token is not None
     })
 
+
+@app.route('/api/init-database', methods=['POST'])
+def init_database():
+    """Initialize database tables (admin endpoint)"""
+    try:
+        # Create all tables
+        db.create_all()
+        
+        # Verify tables were created
+        with db.engine.connect() as conn:
+            result = conn.execute(db.text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
+            tables = [row[0] for row in result]
+        
+        return jsonify({
+            'success': True,
+            'message': 'Database tables initialized successfully',
+            'tables': tables
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 
 @app.route('/api/clear-cache', methods=['POST'])
 @login_required
