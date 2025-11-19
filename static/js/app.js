@@ -6,6 +6,11 @@ let filteredEmails = []; // Currently displayed/filtered emails
 let currentTab = 'all';
 let searchQuery = ''; // Current search query
 
+// Pagination state
+let currentPage = 1;
+const EMAILS_PER_PAGE = 40;
+let paginatedEmails = []; // Emails for current page
+
 // Track if we're currently fetching to prevent multiple simultaneous requests
 let isFetching = false;
 // Cache for emails - persists across tab switches and page refreshes
@@ -196,16 +201,290 @@ function toggleGmailDropdown(event) {
     }
 }
 
+// ==================== SETUP SCREEN ====================
+async function startSetup() {
+    const setupScreen = document.getElementById('setupScreen');
+    const startBtn = document.getElementById('startSetupBtn');
+    const progressDiv = document.getElementById('setupProgress');
+    const progressBar = document.getElementById('setupProgressBar');
+    const progressText = document.getElementById('setupProgressText');
+    
+    if (!setupScreen) return;
+    
+    // Hide start button, show progress
+    startBtn.style.display = 'none';
+    progressDiv.style.display = 'block';
+    
+    try {
+        // Start initial fetch (60 emails)
+        progressText.textContent = 'Fetching your first 60 emails...';
+        progressBar.style.width = '10%';
+        
+        const response = await fetch('/api/setup/fetch-initial', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.task_id) {
+            // Poll for progress
+            await pollSetupProgress(data.task_id, progressBar, progressText);
+        } else if (data.use_streaming) {
+            // Use streaming endpoint
+            await fetchInitialEmailsStreaming(progressBar, progressText);
+        } else {
+            throw new Error(data.error || 'Failed to start setup');
+        }
+        
+        // Mark setup as complete
+        await fetch('/api/setup/complete', { method: 'POST' });
+        
+        // Hide setup screen and show main content
+        setupScreen.style.display = 'none';
+        document.querySelector('.main-content > .compact-header')?.style.display = 'block';
+        document.getElementById('emailList')?.style.display = 'block';
+        
+        // Load emails
+        await loadEmailsFromDatabase();
+        
+        // Start background fetching
+        startBackgroundFetching();
+        
+    } catch (error) {
+        console.error('Setup error:', error);
+        progressText.textContent = `Error: ${error.message}`;
+        startBtn.style.display = 'block';
+        progressDiv.style.display = 'none';
+    }
+}
+
+async function pollSetupProgress(taskId, progressBar, progressText) {
+    return new Promise((resolve, reject) => {
+        const interval = setInterval(async () => {
+            try {
+                const response = await fetch(`/api/emails/sync/status/${taskId}`);
+                const data = await response.json();
+                
+                if (data.status === 'PROGRESS') {
+                    const progress = data.progress || 0;
+                    const total = data.total || 60;
+                    const percent = Math.min((progress / total) * 100, 90);
+                    progressBar.style.width = `${percent}%`;
+                    progressText.textContent = `Processing ${progress} of ${total} emails...`;
+                } else if (data.status === 'SUCCESS') {
+                    clearInterval(interval);
+                    progressBar.style.width = '100%';
+                    progressText.textContent = 'Setup complete!';
+                    setTimeout(resolve, 1000);
+                } else if (data.status === 'FAILURE') {
+                    clearInterval(interval);
+                    reject(new Error(data.error || 'Setup failed'));
+                }
+            } catch (error) {
+                clearInterval(interval);
+                reject(error);
+            }
+        }, 1000);
+    });
+}
+
+async function fetchInitialEmailsStreaming(progressBar, progressText) {
+    // Use streaming endpoint for initial fetch
+    const response = await fetch('/api/emails/stream?max=60&force_full_sync=true');
+    
+    if (!response.body) {
+        throw new Error('Streaming not supported');
+    }
+    
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let processed = 0;
+    const total = 60;
+    
+    while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, {stream: true});
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        
+        for (const line of lines) {
+            if (line.startsWith('data: ')) {
+                const data = JSON.parse(line.slice(6));
+                if (data.email) {
+                    processed++;
+                    const percent = Math.min((processed / total) * 100, 90);
+                    progressBar.style.width = `${percent}%`;
+                    progressText.textContent = `Processing ${processed} of ${total} emails...`;
+                } else if (data.status === 'complete') {
+                    progressBar.style.width = '100%';
+                    progressText.textContent = 'Setup complete!';
+                }
+            }
+        }
+    }
+}
+
+// ==================== PAGINATION ====================
+function updatePagination() {
+    const emailList = document.getElementById('emailList');
+    if (!emailList) return;
+    
+    // Remove existing pagination
+    const existingPagination = emailList.querySelector('.pagination');
+    if (existingPagination) {
+        existingPagination.remove();
+    }
+    
+    // Calculate pagination
+    const totalEmails = filteredEmails.length;
+    const totalPages = Math.ceil(totalEmails / EMAILS_PER_PAGE);
+    
+    if (totalPages <= 1) return; // No pagination needed
+    
+    // Get emails for current page
+    const startIndex = (currentPage - 1) * EMAILS_PER_PAGE;
+    const endIndex = startIndex + EMAILS_PER_PAGE;
+    paginatedEmails = filteredEmails.slice(startIndex, endIndex);
+    
+    // Display current page emails
+    displayEmails(paginatedEmails);
+    
+    // Create pagination controls
+    const pagination = document.createElement('div');
+    pagination.className = 'pagination';
+    
+    // Previous button
+    const prevBtn = document.createElement('button');
+    prevBtn.textContent = '← Previous';
+    prevBtn.disabled = currentPage === 1;
+    prevBtn.onclick = () => {
+        if (currentPage > 1) {
+            currentPage--;
+            updatePagination();
+        }
+    };
+    pagination.appendChild(prevBtn);
+    
+    // Page info
+    const pageInfo = document.createElement('span');
+    pageInfo.className = 'pagination-info';
+    pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${totalEmails} emails)`;
+    pagination.appendChild(pageInfo);
+    
+    // Next button
+    const nextBtn = document.createElement('button');
+    nextBtn.textContent = 'Next →';
+    nextBtn.disabled = currentPage === totalPages;
+    nextBtn.onclick = () => {
+        if (currentPage < totalPages) {
+            currentPage++;
+            updatePagination();
+        }
+    };
+    pagination.appendChild(nextBtn);
+    
+    // Insert pagination after email list
+    emailList.appendChild(pagination);
+}
+
+// ==================== BACKGROUND FETCHING ====================
+let backgroundFetchInterval = null;
+let backgroundFetchActive = false;
+
+async function startBackgroundFetching() {
+    if (backgroundFetchActive) return;
+    
+    backgroundFetchActive = true;
+    
+    // Check every 2 minutes if we need to fetch more emails
+    backgroundFetchInterval = setInterval(async () => {
+        try {
+            const response = await fetch('/api/emails/background-fetch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success && data.task_id) {
+                console.log(`🔄 Background fetch started: ${data.fetching} emails (${data.current_count}/${data.target_total})`);
+                
+                // Poll for completion (silently)
+                pollBackgroundTask(data.task_id);
+            } else if (data.message === 'Already have enough emails') {
+                console.log('✅ Background fetch: Already have 200 emails');
+                stopBackgroundFetching();
+            }
+        } catch (error) {
+            console.error('Background fetch error:', error);
+        }
+    }, 2 * 60 * 1000); // Every 2 minutes
+}
+
+async function pollBackgroundTask(taskId) {
+    // Silently poll and reload emails when done
+    const interval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/emails/sync/status/${taskId}`);
+            const data = await response.json();
+            
+            if (data.status === 'SUCCESS') {
+                clearInterval(interval);
+                console.log('✅ Background fetch complete');
+                // Silently reload emails
+                await loadEmailsFromDatabase();
+            } else if (data.status === 'FAILURE') {
+                clearInterval(interval);
+                console.error('Background fetch failed:', data.error);
+            }
+        } catch (error) {
+            clearInterval(interval);
+            console.error('Background fetch poll error:', error);
+        }
+    }, 5000); // Poll every 5 seconds
+}
+
+function stopBackgroundFetching() {
+    if (backgroundFetchInterval) {
+        clearInterval(backgroundFetchInterval);
+        backgroundFetchInterval = null;
+    }
+    backgroundFetchActive = false;
+}
+
 // Load config on page load
 document.addEventListener('DOMContentLoaded', async function() {
     // Initialize sidebar state
     initSidebar();
     loadConfig();
     
+    // Check if setup is needed
+    const setupScreen = document.getElementById('setupScreen');
+    if (setupScreen && setupScreen.style.display !== 'none') {
+        // Setup screen is visible - don't load emails yet
+        console.log('📋 Setup screen detected - waiting for user to start setup');
+        return;
+    }
+    
     // Restore auto-fetch preference from localStorage (default to true)
     const savedAutoFetch = localStorage.getItem('autoFetchEnabled');
     const shouldAutoFetch = savedAutoFetch === null ? true : savedAutoFetch === 'true';
     toggleAutoFetch(shouldAutoFetch);
+    
+    // Start background fetching if setup is complete
+    try {
+        const setupResponse = await fetch('/api/setup/status');
+        const setupData = await setupResponse.json();
+        if (setupData.success && setupData.setup_completed) {
+            startBackgroundFetching();
+        }
+    } catch (error) {
+        console.error('Error checking setup status:', error);
+    }
     
     // Check if we have cached emails and display them
     const urlParams = new URLSearchParams(window.location.search);
@@ -665,6 +944,8 @@ function clearSearch() {
 
 // Apply both category and search filters
 function applyFilters() {
+    // Reset to first page when filters change
+    currentPage = 1;
     let filtered = allEmails;
     
     // Apply category filter
@@ -704,7 +985,14 @@ function applyFilters() {
     });
     
     filteredEmails = sortedFiltered; // Store sorted filtered emails for openEmail
-    displayEmails(sortedFiltered);
+    
+    // Use pagination if we have more than 40 emails
+    if (sortedFiltered.length > EMAILS_PER_PAGE) {
+        updatePagination();
+    } else {
+        // Display all emails if less than one page
+        displayEmails(sortedFiltered);
+    }
     
     // Update email count
     const emailCountEl = document.getElementById('emailCount');

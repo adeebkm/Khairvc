@@ -209,6 +209,37 @@ with app.app_context():
                 except Exception as mig_error:
                     db.session.rollback()
                     print(f"⚠️  Migration error (will retry on next request): {mig_error}")
+            
+            # Check and add User table columns for setup tracking
+            try:
+                result = db.session.execute(text("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'users' 
+                    AND column_name IN ('setup_completed', 'initial_emails_fetched')
+                """))
+                existing_user_columns = [row[0] for row in result]
+                
+                if 'setup_completed' not in existing_user_columns:
+                    db.session.execute(text("""
+                        ALTER TABLE users 
+                        ADD COLUMN IF NOT EXISTS setup_completed BOOLEAN DEFAULT FALSE;
+                    """))
+                    print("   ✅ Added setup_completed column to users table")
+                
+                if 'initial_emails_fetched' not in existing_user_columns:
+                    db.session.execute(text("""
+                        ALTER TABLE users 
+                        ADD COLUMN IF NOT EXISTS initial_emails_fetched INTEGER DEFAULT 0;
+                    """))
+                    print("   ✅ Added initial_emails_fetched column to users table")
+                
+                if 'setup_completed' not in existing_user_columns or 'initial_emails_fetched' not in existing_user_columns:
+                    db.session.commit()
+                    print("✅ User table migration completed successfully")
+            except Exception as user_mig_error:
+                db.session.rollback()
+                print(f"⚠️  User table migration error (non-critical): {user_mig_error}")
     except Exception as e:
         # Ignore errors for SQLite or if table doesn't exist yet
         if 'sqlite' not in str(e).lower():
@@ -370,7 +401,10 @@ def dashboard():
         except Exception as e:
             print(f"Error getting Gmail email: {str(e)}")
     
-    return render_template('dashboard.html', has_gmail=has_gmail, gmail_email=gmail_email)
+    # Check if setup is needed (first-time user with Gmail connected but setup not completed)
+    needs_setup = has_gmail and not current_user.setup_completed
+    
+    return render_template('dashboard.html', has_gmail=has_gmail, gmail_email=gmail_email, needs_setup=needs_setup, setup_completed=current_user.setup_completed)
 
 
 # ==================== GMAIL CONNECTION ====================
@@ -2756,6 +2790,157 @@ def migrate_add_encryption_columns():
         return jsonify({
             'success': False,
             'error': error_msg
+        }), 500
+
+@app.route('/api/setup/status')
+@login_required
+def get_setup_status():
+    """Get setup status for current user"""
+    return jsonify({
+        'success': True,
+        'setup_completed': current_user.setup_completed if current_user.setup_completed else False,
+        'initial_emails_fetched': current_user.initial_emails_fetched if current_user.initial_emails_fetched else 0,
+        'needs_setup': current_user.gmail_token is not None and not current_user.setup_completed
+    })
+
+@app.route('/api/setup/complete', methods=['POST'])
+@login_required
+def complete_setup():
+    """Mark setup as complete"""
+    try:
+        current_user.setup_completed = True
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'message': 'Setup completed'
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/setup/fetch-initial', methods=['POST'])
+@login_required
+def fetch_initial_emails():
+    """
+    Fetch initial 60 emails for first-time setup
+    Returns immediately and processes in background
+    """
+    if not current_user.gmail_token:
+        return jsonify({
+            'success': False,
+            'error': 'Gmail not connected'
+        }), 400
+    
+    try:
+        max_emails = 60  # Initial fetch: 60 emails (3 pages of 40)
+        
+        # Try to use background task if available
+        if CELERY_AVAILABLE:
+            try:
+                from celery_config import celery
+                inspect = celery.control.inspect()
+                active_workers = inspect.active()
+                
+                if active_workers:
+                    # Use background task
+                    task = sync_user_emails.delay(
+                        user_id=current_user.id,
+                        max_emails=max_emails,
+                        force_full_sync=True
+                    )
+                    
+                    # Update initial_emails_fetched
+                    current_user.initial_emails_fetched = max_emails
+                    db.session.commit()
+                    
+                    return jsonify({
+                        'success': True,
+                        'task_id': task.id,
+                        'message': 'Initial email fetch started',
+                        'max_emails': max_emails
+                    })
+            except Exception as e:
+                print(f"⚠️  Background task not available: {e}")
+        
+        # Fallback: Use streaming endpoint
+        return jsonify({
+            'success': True,
+            'use_streaming': True,
+            'message': 'Use streaming endpoint',
+            'max_emails': max_emails
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/emails/background-fetch', methods=['POST'])
+@login_required
+def background_fetch_emails():
+    """
+    Silently fetch more emails in background (up to 200 total)
+    Rate-limited to avoid hitting API limits
+    """
+    if not current_user.gmail_token:
+        return jsonify({
+            'success': False,
+            'error': 'Gmail not connected'
+        }), 400
+    
+    try:
+        # Check current email count
+        current_count = EmailClassification.query.filter_by(user_id=current_user.id).count()
+        target_total = 200
+        
+        if current_count >= target_total:
+            return jsonify({
+                'success': True,
+                'message': 'Already have enough emails',
+                'current_count': current_count
+            })
+        
+        # Calculate how many more to fetch (with rate limiting)
+        remaining = target_total - current_count
+        max_to_fetch = min(remaining, 20)  # Fetch 20 at a time to avoid rate limits
+        
+        if CELERY_AVAILABLE:
+            try:
+                from celery_config import celery
+                inspect = celery.control.inspect()
+                active_workers = inspect.active()
+                
+                if active_workers:
+                    task = sync_user_emails.delay(
+                        user_id=current_user.id,
+                        max_emails=max_to_fetch,
+                        force_full_sync=False  # Use incremental sync
+                    )
+                    
+                    return jsonify({
+                        'success': True,
+                        'task_id': task.id,
+                        'message': 'Background fetch started',
+                        'fetching': max_to_fetch,
+                        'current_count': current_count,
+                        'target_total': target_total
+                    })
+            except Exception as e:
+                print(f"⚠️  Background task not available: {e}")
+        
+        return jsonify({
+            'success': False,
+            'error': 'Background processing not available'
+        }), 503
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500
 
 if __name__ == '__main__':
