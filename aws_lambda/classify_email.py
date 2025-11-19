@@ -160,19 +160,29 @@ If ambiguity arises → use ONLY fresh content before signatures.
 You classify based on the **sender's primary goal**, not keywords.
 
 --------------------------------------------------
-A) DEALFLOW → Primary intent: **seeking investment**
+A) DEALFLOW → Primary intent: **seeking YOUR investment in a specific startup**
 --------------------------------------------------
 Includes:
-- Founder/VC/IB sending deck, pitch, fundraising update.
-- Any mention of raising money, SAFE, term sheet, valuation, SPV, secondary.
-- Pitch + meeting link.
-- "We're raising", "exploring a round", "open to capital".
-- Follow-on from portfolio company.
-- **Warm intros/referrals ABOUT specific startups/teams** (even without deck).
-- "I met a team building X, would you want to know more?"
-- "Should I connect you with this founder?"
+- Founder/VC/IB sending deck, pitch, fundraising update **directly to YOU**.
+- Any mention of raising money, SAFE, term sheet, valuation, SPV, secondary **for their startup**.
+- Pitch + meeting link **requesting YOUR investment decision**.
+- "We're raising", "exploring a round", "open to capital" **and want YOUR money**.
+- Follow-on from portfolio company **seeking YOUR additional investment**.
+- **Warm intros/referrals ABOUT specific startups/teams SEEKING YOUR INVESTMENT** (even without deck).
+- "I met a team building X, would you want to invest?" or "Should I connect you with this founder for funding?"
 
-If fundraising is ANY part of the agenda OR discussing a specific startup/team for investment → classify as dealflow.
+**CRITICAL DIRECTION TEST:**
+- Email is FROM founder/referrer TO you (the VC) = Likely DEALFLOW
+- Email is FROM organizer INVITING you to SEE pitches = NOT dealflow (NETWORKING or GENERAL)
+- Email is ABOUT your own meetings/prep = NOT dealflow (GENERAL)
+
+**NOT DEALFLOW:**
+- Event invitations (even if about "Founder Presentations" or "Demo Day") → NETWORKING
+- Meeting summaries/notes about YOUR presentations → GENERAL
+- Lists of startups presenting to OTHER people → NETWORKING or GENERAL
+- Newsletter mentions of fundraising announcements → GENERAL
+
+If fundraising is ANY part of the agenda AND they're asking YOU specifically for capital → classify as dealflow.
 
 --------------------------------------------------
 B) HIRING → Primary intent: **job seeking or recruiting**
@@ -187,16 +197,21 @@ Includes:
 Pitch deck with team bios ≠ hiring (still dealflow).
 
 --------------------------------------------------
-C) NETWORKING → Primary intent: **meeting, event, intro — NOT about a specific deal**
+C) NETWORKING → Primary intent: **meeting, event, intro — NOT seeking YOUR investment**
 --------------------------------------------------
 Includes:
 - Coffee chats, catch ups, general intros, "pick your brain".
-- Invites: panel, demo day, conference, podcast.
-- "Learn about your thesis" (general learning, NO specific startup mentioned).
+- **Event invitations**: panel, demo day, conference, podcast, "Founder Presentation Series".
+- "Learn about your thesis" (general learning, NO specific startup seeking YOUR money).
 - Vendor partnership discussion with no fundraising ask.
-- Events about fundraising but not pitching.
+- Events where startups will present but NOT directly pitching TO YOU for YOUR money.
+- Invitations to ATTEND pitch events (you're an audience member, not the direct recipient of a pitch).
 
-If there is ANY ask for money OR discussing a specific startup/team for investment → NOT networking (it's DEALFLOW).
+**Key distinction:**
+- "Come see these 10 startups present" = NETWORKING (you're attending)
+- "Here's our startup's pitch for your investment" = DEALFLOW (you're the target investor)
+
+If there is ANY ask for YOUR money OR discussing a specific startup seeking YOUR investment → NOT networking (it's DEALFLOW).
 
 --------------------------------------------------
 D) SPAM → Primary intent: **deception, compromise, harm**
@@ -227,10 +242,14 @@ A newsletter with ads ≠ spam unless malicious.
 E) GENERAL → Everything else
 --------------------------------------------------
 Includes:
-- **Legitimate service provider emails** (Google, Microsoft, Apple, Amazon, etc.)
+- **Legitimate service provider emails** (Google, Microsoft, Apple, Amazon, Canva, Lyra, etc.)
   - Security notifications from official domains (google.com, microsoft.com, etc.)
   - Account alerts, access notifications, service updates
+  - Newsletter updates from design tools (Canva, Figma, etc.)
+  - Meeting summaries from tools (Lyra, Otter.ai, Fireflies, etc.)
   - These are ALWAYS GENERAL, never SPAM, even if they contain security keywords
+- **Meeting recaps, notes, summaries** (especially from automated tools)
+- **YOUR OWN meeting prep, presentation notes, internal docs**
 - newsletters, subscribed updates, market commentary
 - receipts, personal notes, banter, sports talk
 - cold vendor pitches (SaaS/product demos)
