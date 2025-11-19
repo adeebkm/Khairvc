@@ -470,7 +470,12 @@ class GmailClient:
                 if i + BATCH_SIZE < total_messages:
                     time.sleep(DELAY_BETWEEN_BATCHES)
             
-            print(f"✅ Incremental sync: Fetched {len(emails)} new emails with 2 API calls (90%+ reduction!). historyId: {new_history_id}")
+            # Calculate actual API calls: 1 for history + batches
+            num_batches = (len(message_ids_list) + BATCH_SIZE - 1) // BATCH_SIZE if message_ids_list else 0
+            total_api_calls = 1 + num_batches  # 1 for history, rest for batches
+            print(f"✅ Incremental sync: Fetched {len(emails)} new emails with {total_api_calls} API calls. historyId: {new_history_id}")
+            if errors:
+                print(f"⚠️  {len(errors)} errors encountered (some emails may be missing)")
             
             return emails, new_history_id
             
