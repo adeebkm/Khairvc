@@ -23,13 +23,7 @@
                 </div>
                 <div class="nav-right">
                     {% if has_gmail %}
-                    <div class="nav-search">
-                        <div class="search-container">
-                            <span class="search-icon">🔍</span>
-                            <input type="text" id="emailSearch" class="search-input" placeholder="Search emails..." onkeyup="handleSearch(event)" oninput="handleSearchInput(this.value)">
-                            <button class="search-clear" id="searchClear" onclick="clearSearch()" style="display: none;">×</button>
-                        </div>
-                    </div>
+                    <!-- Search removed - shifting to new working -->
                     {% endif %}
                     <div class="nav-actions">
                         <span class="user-info">Welcome, {{ current_user.username }}</span>
@@ -187,15 +181,18 @@
                     <div class="setup-icon">🚀</div>
                     <h2>Welcome to Khair!</h2>
                     <p>Let's get your inbox set up. We'll fetch and classify your first 60 emails.</p>
-                    <div class="setup-progress" id="setupProgress" style="display: none;">
+                    <div class="setup-progress" id="setupProgress">
+                        <div class="loading-animation">
+                            <div class="spinner-large"></div>
+                            <div class="pulse-dots">
+                                <span></span><span></span><span></span>
+                            </div>
+                        </div>
                         <div class="progress-bar-container">
                             <div class="progress-bar" id="setupProgressBar"></div>
                         </div>
                         <p class="progress-text" id="setupProgressText">Setting up your inbox...</p>
                     </div>
-                    <button class="btn btn-primary btn-large" id="startSetupBtn" onclick="startSetup()">
-                        Start Setup
-                    </button>
                 </div>
             </div>
             {% elif not has_gmail %}

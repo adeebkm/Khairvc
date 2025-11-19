@@ -345,17 +345,36 @@ def signup():
         if User.query.filter_by(email=email).first():
             return render_template('signup.html', error='Email already registered')
         
-        # Create user
-        user = User(username=username, email=email)
-        user.set_password(password)
-        db.session.add(user)
+        # Create new user
+        new_user = User(username=username, email=email)
+        new_user.set_password(password)
+        new_user.setup_completed = False  # New users need setup
+        db.session.add(new_user)
         db.session.commit()
         
-        login_user(user)
-        # Store user ID in session for additional verification
-        session['user_id'] = user.id
-        session['username'] = user.username
-        return redirect(url_for('dashboard'))
+        # Log in the new user
+        login_user(new_user)
+        session.permanent = True
+        session['user_id'] = new_user.id
+        session['username'] = new_user.username
+        
+        # Redirect to Gmail OAuth (automatic connection)
+        return redirect(url_for('connect_gmail') + '?from_signup=true')
+        # Create new user
+        new_user = User(username=username, email=email)
+        new_user.set_password(password)
+        new_user.setup_completed = False  # New users need setup
+        db.session.add(new_user)
+        db.session.commit()
+        
+        # Log in the new user
+        login_user(new_user)
+        session.permanent = True
+        session['user_id'] = new_user.id
+        session['username'] = new_user.username
+        
+        # Redirect to Gmail OAuth (automatic connection)
+        return redirect(url_for('connect_gmail') + '?from_signup=true')
     
     return render_template('signup.html')
 
@@ -630,8 +649,16 @@ def oauth2callback():
         session.pop('oauth_state', None)
         session.modified = True
         
-        # Redirect with parameter to trigger auto-fetch
-        return redirect(url_for('dashboard') + '?connected=true')
+        # Check if this is from signup (auto-start setup)
+        from_signup = request.args.get('from_signup') == 'true'
+        
+        # Redirect to dashboard (setup screen will auto-start if needed)
+        redirect_url = url_for('dashboard')
+        if from_signup:
+            redirect_url += '?from_signup=true&auto_setup=true'
+        else:
+            redirect_url += '?connected=true'
+        return redirect(redirect_url)
     
     except Exception as e:
         import traceback
@@ -2895,7 +2922,7 @@ def background_fetch_emails():
     try:
         # Check current email count
         current_count = EmailClassification.query.filter_by(user_id=current_user.id).count()
-        target_total = 200
+        target_total = 150  # Changed from 200 to 150
         
         if current_count >= target_total:
             return jsonify({

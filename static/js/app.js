@@ -4,7 +4,7 @@ let currentReply = null;
 let allEmails = [];
 let filteredEmails = []; // Currently displayed/filtered emails
 let currentTab = 'all';
-let searchQuery = ''; // Current search query
+// Search functionality removed - shifting to new working
 
 // Pagination state
 let currentPage = 1;
@@ -211,14 +211,13 @@ async function startSetup() {
     
     if (!setupScreen) return;
     
-    // Hide start button, show progress
-    startBtn.style.display = 'none';
-    progressDiv.style.display = 'block';
+    // Show progress (no button to hide - auto-started)
+    if (progressDiv) progressDiv.style.display = 'block';
     
     try {
         // Start initial fetch (60 emails)
-        progressText.textContent = 'Fetching your first 60 emails...';
-        progressBar.style.width = '10%';
+        if (progressText) progressText.textContent = 'Fetching your first 60 emails...';
+        if (progressBar) progressBar.style.width = '10%';
         
         const response = await fetch('/api/setup/fetch-initial', {
             method: 'POST',
@@ -253,9 +252,7 @@ async function startSetup() {
         
     } catch (error) {
         console.error('Setup error:', error);
-        progressText.textContent = `Error: ${error.message}`;
-        startBtn.style.display = 'block';
-        progressDiv.style.display = 'none';
+        if (progressText) progressText.textContent = `Error: ${error.message}. Please refresh the page.`;
     }
 }
 
@@ -270,12 +267,12 @@ async function pollSetupProgress(taskId, progressBar, progressText) {
                     const progress = data.progress || 0;
                     const total = data.total || 60;
                     const percent = Math.min((progress / total) * 100, 90);
-                    progressBar.style.width = `${percent}%`;
-                    progressText.textContent = `Processing ${progress} of ${total} emails...`;
+                    if (progressBar) progressBar.style.width = `${percent}%`;
+                    if (progressText) progressText.textContent = `Processing ${progress} of ${total} emails...`;
                 } else if (data.status === 'SUCCESS') {
                     clearInterval(interval);
-                    progressBar.style.width = '100%';
-                    progressText.textContent = 'Setup complete!';
+                    if (progressBar) progressBar.style.width = '100%';
+                    if (progressText) progressText.textContent = 'Setup complete!';
                     setTimeout(resolve, 1000);
                 } else if (data.status === 'FAILURE') {
                     clearInterval(interval);
@@ -317,11 +314,11 @@ async function fetchInitialEmailsStreaming(progressBar, progressText) {
                 if (data.email) {
                     processed++;
                     const percent = Math.min((processed / total) * 100, 90);
-                    progressBar.style.width = `${percent}%`;
-                    progressText.textContent = `Processing ${processed} of ${total} emails...`;
+                    if (progressBar) progressBar.style.width = `${percent}%`;
+                    if (progressText) progressText.textContent = `Processing ${processed} of ${total} emails...`;
                 } else if (data.status === 'complete') {
-                    progressBar.style.width = '100%';
-                    progressText.textContent = 'Setup complete!';
+                    if (progressBar) progressBar.style.width = '100%';
+                    if (progressText) progressText.textContent = 'Setup complete!';
                 }
             }
         }
@@ -416,7 +413,7 @@ async function startBackgroundFetching() {
                 // Poll for completion (silently)
                 pollBackgroundTask(data.task_id);
             } else if (data.message === 'Already have enough emails') {
-                console.log('✅ Background fetch: Already have 200 emails');
+                console.log('✅ Background fetch: Already have 150 emails');
                 stopBackgroundFetching();
             }
         } catch (error) {
@@ -462,11 +459,17 @@ document.addEventListener('DOMContentLoaded', async function() {
     initSidebar();
     loadConfig();
     
-    // Check if setup is needed
+    // Check if setup is needed - auto-start if visible
     const setupScreen = document.getElementById('setupScreen');
+    const urlParams = new URLSearchParams(window.location.search);
+    const autoSetup = urlParams.get('auto_setup') === 'true';
+    
     if (setupScreen && setupScreen.style.display !== 'none') {
-        // Setup screen is visible - don't load emails yet
-        console.log('📋 Setup screen detected - waiting for user to start setup');
+        // Setup screen is visible - auto-start setup
+        console.log('📋 Setup screen detected - auto-starting setup...');
+        setTimeout(() => {
+            startSetup();
+        }, 500); // Small delay for UI to render
         return;
     }
     
@@ -962,20 +965,7 @@ function applyFilters() {
     }
     // 'all' shows everything
     
-    // Apply search filter if query exists
-    if (searchQuery) {
-        filtered = filtered.filter(email => {
-            const subject = (email.subject || '').toLowerCase();
-            const from = (email.from || '').toLowerCase();
-            const snippet = (email.snippet || '').toLowerCase();
-            const body = (email.body || email.combined_text || '').toLowerCase();
-            
-            return subject.includes(searchQuery) ||
-                   from.includes(searchQuery) ||
-                   snippet.includes(searchQuery) ||
-                   body.includes(searchQuery);
-        });
-    }
+    // Search filter removed - shifting to new working
     
     // Sort filtered emails by date (newest first) before storing and displaying
     const sortedFiltered = [...filtered].sort((a, b) => {
@@ -997,8 +987,7 @@ function applyFilters() {
     // Update email count
     const emailCountEl = document.getElementById('emailCount');
     if (emailCountEl) {
-        const searchText = searchQuery ? ` (${filtered.length} found)` : '';
-        emailCountEl.textContent = `${filtered.length} email${filtered.length !== 1 ? 's' : ''}${searchText}`;
+        emailCountEl.textContent = `${filtered.length} email${filtered.length !== 1 ? 's' : ''}`;
     }
 }
 
