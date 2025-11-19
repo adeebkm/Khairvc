@@ -1201,6 +1201,7 @@ def stream_emails():
                             classification_result = classifier.classify_email(
                                 subject=email.get('subject', ''),
                                 body=email.get('body', ''),
+                                headers=email.get('headers', {}),
                                 sender=email.get('from', ''),
                                 thread_id=email.get('thread_id', ''),
                                 user_id=user_id
