@@ -141,6 +141,54 @@ def set_user_context_for_rls():
 # Initialize database
 with app.app_context():
     db.create_all()
+    
+    # Auto-run migration: Add encryption columns if they don't exist
+    try:
+        from sqlalchemy import text
+        result = db.session.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'email_classifications' 
+            AND column_name IN ('subject_encrypted', 'snippet_encrypted')
+        """))
+        existing_columns = [row[0] for row in result]
+        
+        if 'subject_encrypted' not in existing_columns or 'snippet_encrypted' not in existing_columns:
+            print("🔄 Auto-migrating: Adding encryption columns...")
+            
+            if 'subject_encrypted' not in existing_columns:
+                db.session.execute(text("""
+                    ALTER TABLE email_classifications 
+                    ADD COLUMN subject_encrypted TEXT;
+                """))
+                print("   ✅ Added subject_encrypted column")
+            
+            if 'snippet_encrypted' not in existing_columns:
+                db.session.execute(text("""
+                    ALTER TABLE email_classifications 
+                    ADD COLUMN snippet_encrypted TEXT;
+                """))
+                print("   ✅ Added snippet_encrypted column")
+            
+            # Migrate existing data
+            db.session.execute(text("""
+                UPDATE email_classifications 
+                SET subject_encrypted = subject 
+                WHERE subject_encrypted IS NULL AND subject IS NOT NULL;
+            """))
+            
+            db.session.execute(text("""
+                UPDATE email_classifications 
+                SET snippet_encrypted = snippet 
+                WHERE snippet_encrypted IS NULL AND snippet IS NOT NULL;
+            """))
+            
+            db.session.commit()
+            print("✅ Migration completed successfully")
+    except Exception as e:
+        # Ignore errors (might be SQLite or columns already exist)
+        if 'sqlite' not in str(e).lower() and 'already exists' not in str(e).lower():
+            print(f"⚠️  Migration check failed (non-critical): {e}")
 
 
 # Global OpenAI client (shared API key from .env)
