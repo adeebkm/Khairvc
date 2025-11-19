@@ -1196,7 +1196,7 @@ function displayEmails(emails) {
         }
         if (!displayName) displayName = field || 'Unknown';
         
-        // Format date with both short format and relative time
+        // Format date with actual time and relative time in brackets
         let dateText = '';
         if (email.date) {
             const timestamp = typeof email.date === 'string' ? parseInt(email.date) : email.date;
@@ -1210,22 +1210,24 @@ function displayEmails(emails) {
             const diffMonths = Math.floor(diffDays / 30);
             const diffYears = Math.floor(diffDays / 365);
             
-            // Short format
-            let shortFormat = '';
-            if (diffMins < 1) {
-                shortFormat = 'now';
-            } else if (diffMins < 60) {
-                shortFormat = `${diffMins}m`;
-            } else if (diffHours < 24) {
-                shortFormat = `${diffHours}h`;
-            } else if (diffDays < 7) {
-                shortFormat = `${diffDays}d`;
-            } else if (diffDays < 30) {
-                shortFormat = `${diffWeeks}w`;
-            } else if (diffDays < 365) {
-                shortFormat = `${diffMonths}mo`;
+            // Actual time format
+            let timeFormat = '';
+            const isToday = date.toDateString() === now.toDateString();
+            const isYesterday = date.toDateString() === new Date(now.getTime() - 86400000).toDateString();
+            const isThisYear = date.getFullYear() === now.getFullYear();
+            
+            if (isToday) {
+                // Show time for today's emails (e.g., "3:45 PM")
+                timeFormat = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            } else if (isYesterday) {
+                // Show "Yesterday" + time
+                timeFormat = `Yesterday ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+            } else if (isThisYear) {
+                // Show month/day for this year (e.g., "Nov 15")
+                timeFormat = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             } else {
-                shortFormat = `${diffYears}y`;
+                // Show full date for older emails (e.g., "Nov 15, 2023")
+                timeFormat = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
             }
             
             // Relative time in brackets
@@ -1246,7 +1248,7 @@ function displayEmails(emails) {
                 relativeTime = `${diffYears} year${diffYears !== 1 ? 's' : ''} ago`;
             }
             
-            dateText = `${shortFormat} (${relativeTime})`;
+            dateText = `${timeFormat} (${relativeTime})`;
         }
         
         // Decode HTML entities for subject and snippet
