@@ -960,16 +960,55 @@ async function fetchEmails() {
     
     // Show loading state
     loading.style.display = 'block';
-    loading.innerHTML = '<div class="loading-spinner"></div><p>Fetching emails from Gmail...</p><p class="loading-progress">0 emails processed</p>';
+    loading.innerHTML = '<div class="loading-spinner"></div><p>Starting email sync...</p><p class="loading-progress">Initializing...</p>';
     emailList.innerHTML = '';
     fetchBtn.disabled = true;
     
     try {
         const forceFullSync = document.getElementById('forceFullSyncCheck')?.checked || false;
         const maxEmails = document.getElementById('maxEmailsSelect')?.value || '20';
-        const categoryParam = currentTab !== 'all' ? currentTab.toUpperCase().replace('-', '_') : null;
         
-        // Use streaming endpoint for progressive loading
+        // PHASE 1: Try background task first (if available)
+        try {
+            const syncResponse = await fetch('/api/emails/sync', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    max: parseInt(maxEmails),
+                    force_full_sync: forceFullSync
+                })
+            });
+            
+            const syncData = await syncResponse.json();
+            
+            if (syncData.success && syncData.task_id) {
+                // Background task started - poll for status
+                console.log('✅ Background task started:', syncData.task_id);
+                try {
+                    await pollTaskStatus(syncData.task_id, loading, emailList, fetchBtn);
+                    return; // Success - exit function
+                } catch (pollError) {
+                    console.error('Error polling task status:', pollError);
+                    showAlert('error', `Sync failed: ${pollError.message}`);
+                    loading.style.display = 'none';
+                    if (fetchBtn) fetchBtn.disabled = false;
+                    isFetching = false;
+                    return; // Exit on error
+                }
+            } else if (syncResponse.status === 503) {
+                // Celery not available - fall back to streaming
+                console.log('⚠️  Background tasks not available, using streaming endpoint');
+            } else {
+                throw new Error(syncData.error || 'Failed to start sync');
+            }
+        } catch (error) {
+            console.log('⚠️  Background task failed, falling back to streaming:', error);
+            // Fall through to streaming endpoint
+        }
+        
+        // FALLBACK: Use streaming endpoint (original implementation)
         let url = `/api/emails/stream?max=${maxEmails}&`;
         if (forceFullSync) url += 'force_full_sync=true&';
         
@@ -1138,6 +1177,109 @@ async function fetchEmails() {
         loading.style.display = 'none';
         fetchBtn.disabled = false;
         isFetching = false; // Reset fetching flag
+    }
+}
+
+// PHASE 1: Poll background task status
+async function pollTaskStatus(taskId, loading, emailList, fetchBtn) {
+    const maxAttempts = 300; // 5 minutes max (300 * 1 second)
+    let attempts = 0;
+    let pollInterval;
+    
+    return new Promise((resolve, reject) => {
+        pollInterval = setInterval(async () => {
+            attempts++;
+            
+            try {
+                const statusResponse = await fetch(`/api/emails/sync/status/${taskId}`);
+                const statusData = await statusResponse.json();
+                
+                if (!statusData.success) {
+                    clearInterval(pollInterval);
+                    reject(new Error(statusData.error || 'Task failed'));
+                    return;
+                }
+                
+                const status = statusData.status;
+                
+                if (status === 'PENDING') {
+                    loading.innerHTML = '<div class="loading-spinner"></div><p>Waiting for worker...</p><p class="loading-progress">Queued</p>';
+                } else if (status === 'PROGRESS') {
+                    const progress = statusData.progress || 0;
+                    const total = statusData.total || 0;
+                    const currentEmail = statusData.current_email || '';
+                    const message = statusData.message || 'Processing...';
+                    
+                    loading.innerHTML = `
+                        <div class="loading-spinner"></div>
+                        <p>${message}</p>
+                        <p class="loading-progress">${progress} / ${total} emails processed</p>
+                        ${currentEmail ? `<p style="font-size: 0.9em; color: var(--text-secondary); margin-top: 8px;">${escapeHtml(currentEmail)}</p>` : ''}
+                    `;
+                } else if (status === 'SUCCESS') {
+                    clearInterval(pollInterval);
+                    
+                    // Show completion message
+                    const emailsProcessed = statusData.emails_processed || 0;
+                    const emailsClassified = statusData.emails_classified || 0;
+                    
+                    loading.innerHTML = `
+                        <div class="loading-spinner"></div>
+                        <p>✅ Sync completed!</p>
+                        <p class="loading-progress">${emailsClassified} emails classified</p>
+                    `;
+                    
+                    // Wait a moment, then load emails from database
+                    setTimeout(async () => {
+                        await loadEmailsFromDatabase();
+                        loading.style.display = 'none';
+                        if (fetchBtn) fetchBtn.disabled = false;
+                        isFetching = false;
+                        resolve();
+                    }, 1000);
+                    
+                } else if (status === 'FAILURE' || status === 'ERROR') {
+                    clearInterval(pollInterval);
+                    reject(new Error(statusData.error || 'Task failed'));
+                }
+                
+                // Check timeout
+                if (attempts >= maxAttempts) {
+                    clearInterval(pollInterval);
+                    reject(new Error('Task timeout - taking too long'));
+                }
+                
+            } catch (error) {
+                clearInterval(pollInterval);
+                reject(error);
+            }
+        }, 1000); // Poll every 1 second
+    });
+}
+
+// Load emails from database after background sync completes
+async function loadEmailsFromDatabase() {
+    try {
+        const categoryParam = currentTab !== 'all' ? currentTab.toUpperCase().replace('-', '_') : null;
+        let url = `/api/emails?db_only=true&max=100&`;
+        if (categoryParam) url += `category=${categoryParam}&`;
+        url += 'show_spam=true';
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success) {
+            const emails = data.emails || [];
+            emailCache.data = emails;
+            emailCache.timestamp = Date.now();
+            localStorage.setItem('emailCache', JSON.stringify(emailCache));
+            applyFilters();
+        } else {
+            throw new Error(data.error || 'Failed to load emails');
+        }
+    } catch (error) {
+        console.error('Error loading emails from database:', error);
+        showAlert('error', `Failed to load emails: ${error.message}`);
     }
 }
 

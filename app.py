@@ -18,6 +18,14 @@ from openai_client import OpenAIClient
 from email_classifier import EmailClassifier, CATEGORY_DEAL_FLOW, CATEGORY_NETWORKING, CATEGORY_HIRING, CATEGORY_SPAM, CATEGORY_GENERAL, TAG_DEAL, TAG_GENERAL
 # from tracxn_scorer import TracxnScorer  # Removed - scoring system disabled
 
+# Import background tasks (only if Celery is available)
+try:
+    from tasks import sync_user_emails
+    CELERY_AVAILABLE = True
+except ImportError:
+    CELERY_AVAILABLE = False
+    print("⚠️  Celery not available - background tasks disabled")
+
 # Rate limiting: Max concurrent OpenAI API calls to prevent 429 errors
 # Increased to 10 for better throughput with 20 users (10,000 RPM available)
 CLASSIFICATION_SEMAPHORE = Semaphore(10)  # Max 10 concurrent classifications
@@ -539,6 +547,105 @@ def disconnect_gmail():
 
 
 # ==================== API ENDPOINTS ====================
+
+@app.route('/api/emails/sync', methods=['POST'])
+@login_required
+def trigger_email_sync():
+    """
+    Trigger background email sync (Phase 1: Background Workers)
+    Returns immediately with task ID - user polls for status
+    """
+    if not current_user.gmail_token:
+        return jsonify({
+            'success': False,
+            'error': 'Gmail not connected. Please connect your Gmail account.'
+        }), 400
+    
+    if not CELERY_AVAILABLE:
+        return jsonify({
+            'success': False,
+            'error': 'Background processing not available. Please use /api/emails endpoint.'
+        }), 503
+    
+    try:
+        # Get parameters
+        max_emails = min(request.json.get('max', 50), 100)  # Cap at 100
+        force_full_sync = request.json.get('force_full_sync', False)
+        
+        # Trigger background task
+        task = sync_user_emails.delay(
+            user_id=current_user.id,
+            max_emails=max_emails,
+            force_full_sync=force_full_sync
+        )
+        
+        return jsonify({
+            'success': True,
+            'task_id': task.id,
+            'message': 'Email sync started in background',
+            'status': 'PENDING'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to start sync: {str(e)}'
+        }), 500
+
+@app.route('/api/emails/sync/status/<task_id>')
+@login_required
+def get_sync_status(task_id):
+    """Get status of background email sync task"""
+    if not CELERY_AVAILABLE:
+        return jsonify({
+            'success': False,
+            'error': 'Background processing not available'
+        }), 503
+    
+    try:
+        from celery_config import celery
+        task = celery.AsyncResult(task_id)
+        
+        if task.state == 'PENDING':
+            response = {
+                'success': True,
+                'status': 'PENDING',
+                'message': 'Task is waiting to be processed'
+            }
+        elif task.state == 'PROGRESS':
+            response = {
+                'success': True,
+                'status': 'PROGRESS',
+                'message': task.info.get('status', 'Processing...'),
+                'progress': task.info.get('progress', 0),
+                'total': task.info.get('total', 0),
+                'current_email': task.info.get('current_email', '')
+            }
+        elif task.state == 'SUCCESS':
+            result = task.result
+            response = {
+                'success': True,
+                'status': 'SUCCESS',
+                'message': 'Sync completed',
+                'emails_processed': result.get('emails_processed', 0),
+                'emails_classified': result.get('emails_classified', 0),
+                'total_fetched': result.get('total_fetched', 0),
+                'errors': result.get('errors', [])
+            }
+        else:  # FAILURE or other states
+            response = {
+                'success': False,
+                'status': task.state,
+                'error': str(task.info) if task.info else 'Task failed'
+            }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to get status: {str(e)}'
+        }), 500
 
 @app.route('/api/emails')
 @login_required
