@@ -185,6 +185,9 @@ def login():
             login_user(user)
             # Make session permanent to survive OAuth redirects
             session.permanent = True
+            # Store user ID in session for additional verification
+            session['user_id'] = user.id
+            session['username'] = user.username
             return redirect(url_for('dashboard'))
         else:
             return render_template('login.html', error='Invalid username or password')
@@ -218,6 +221,9 @@ def signup():
         db.session.commit()
         
         login_user(user)
+        # Store user ID in session for additional verification
+        session['user_id'] = user.id
+        session['username'] = user.username
         return redirect(url_for('dashboard'))
     
     return render_template('signup.html')
@@ -228,6 +234,7 @@ def signup():
 def logout():
     """User logout"""
     logout_user()
+    session.clear()  # Clear all session data to prevent session reuse
     return redirect(url_for('index'))
 
 
@@ -237,6 +244,18 @@ def logout():
 @login_required
 def dashboard():
     """Main dashboard - email management"""
+    # SECURITY: Verify session matches current_user to prevent session hijacking
+    if 'user_id' in session and session['user_id'] != current_user.id:
+        print(f"⚠️  SESSION MISMATCH DETECTED! Session user_id={session.get('user_id')}, current_user.id={current_user.id}")
+        logout_user()
+        session.clear()
+        return redirect(url_for('login'))
+    
+    # Store user ID in session if not present (for old sessions)
+    if 'user_id' not in session:
+        session['user_id'] = current_user.id
+        session['username'] = current_user.username
+    
     has_gmail = current_user.gmail_token is not None
     gmail_email = None
     
