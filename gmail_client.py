@@ -281,16 +281,26 @@ class GmailClient:
                 return [], history_id
             
             # Use batch request to fetch all message details
+            # Process in smaller chunks to avoid Gmail API rate limits
             from googleapiclient.http import BatchHttpRequest
+            import time
             
             emails = []
             errors = []
             latest_history_id = None
             
+            # Gmail API allows max 100 requests per batch, but concurrent requests are limited
+            # Process in chunks of 10 to avoid "Too many concurrent requests" errors
+            BATCH_SIZE = 10
+            DELAY_BETWEEN_BATCHES = 0.5  # 500ms delay between batches
+            
             def callback(request_id, response, exception):
                 nonlocal latest_history_id
                 if exception:
-                    print(f"⚠️  Error in batch request: {exception}")
+                    error_str = str(exception)
+                    # Don't log every rate limit error (too noisy)
+                    if '429' not in error_str and 'rateLimitExceeded' not in error_str:
+                        print(f"⚠️  Error in batch request: {exception}")
                     errors.append(exception)
                 else:
                     # Extract historyId from message for incremental sync
@@ -301,24 +311,51 @@ class GmailClient:
                     if email_data:
                         emails.append(email_data)
             
-            # Create batch request
-            batch = self.service.new_batch_http_request(callback=callback)
-            
-            for message in messages:
-                batch.add(self.service.users().messages().get(
-                    userId='me',
-                    id=message['id'],
-                    format='full'
-                ))
-            
-            # Execute all requests in a single network call
-            batch.execute()
+            # Process messages in smaller batches to avoid rate limits
+            total_messages = len(messages)
+            for i in range(0, total_messages, BATCH_SIZE):
+                batch_chunk = messages[i:i + BATCH_SIZE]
+                
+                # Create batch request for this chunk
+                batch = self.service.new_batch_http_request(callback=callback)
+                
+                for message in batch_chunk:
+                    batch.add(self.service.users().messages().get(
+                        userId='me',
+                        id=message['id'],
+                        format='full'
+                    ))
+                
+                # Execute this batch
+                try:
+                    batch.execute()
+                except Exception as batch_error:
+                    error_str = str(batch_error)
+                    if '429' in error_str or 'rateLimitExceeded' in error_str:
+                        print(f"⚠️  Rate limit hit on batch {i//BATCH_SIZE + 1}. Waiting 2 seconds...")
+                        time.sleep(2)  # Wait longer on rate limit
+                        # Retry this batch once
+                        try:
+                            batch.execute()
+                        except Exception as retry_error:
+                            print(f"⚠️  Retry failed: {retry_error}")
+                    else:
+                        print(f"⚠️  Batch error: {batch_error}")
+                
+                # Add delay between batches (except for the last one)
+                if i + BATCH_SIZE < total_messages:
+                    time.sleep(DELAY_BETWEEN_BATCHES)
             
             # Use historyId from the fetched messages (for incremental sync next time)
             if latest_history_id:
                 history_id = latest_history_id
             
-            print(f"✅ Full sync: Fetched {len(emails)} emails with 2 API calls. historyId: {history_id}")
+            # Calculate actual API calls: 1 for list + batches (each batch = 1 API call)
+            num_batches = (len(messages) + BATCH_SIZE - 1) // BATCH_SIZE
+            total_api_calls = 1 + num_batches  # 1 for list, rest for batches
+            print(f"✅ Full sync: Fetched {len(emails)} emails with {total_api_calls} API calls. historyId: {history_id}")
+            if errors:
+                print(f"⚠️  {len(errors)} errors encountered (some emails may be missing)")
             
             return emails, history_id
         
@@ -374,29 +411,64 @@ class GmailClient:
             
             print(f"🔄 Incremental sync: Found {len(message_ids)} new messages. Fetching details...")
             
-            # Batch fetch the new messages
+            # Batch fetch the new messages (in chunks to avoid rate limits)
             from googleapiclient.http import BatchHttpRequest
+            import time
             
             emails = []
+            errors = []
+            
+            # Process in chunks of 10 to avoid "Too many concurrent requests" errors
+            BATCH_SIZE = 10
+            DELAY_BETWEEN_BATCHES = 0.5  # 500ms delay between batches
             
             def callback(request_id, response, exception):
                 if exception:
-                    print(f"⚠️  Error in batch request: {exception}")
+                    error_str = str(exception)
+                    # Don't log every rate limit error (too noisy)
+                    if '429' not in error_str and 'rateLimitExceeded' not in error_str:
+                        print(f"⚠️  Error in batch request: {exception}")
+                    errors.append(exception)
                 else:
                     email_data = self._extract_message_data(response)
                     if email_data:
                         emails.append(email_data)
             
-            batch = self.service.new_batch_http_request(callback=callback)
+            # Process message IDs in smaller batches
+            message_ids_list = list(message_ids)
+            total_messages = len(message_ids_list)
             
-            for msg_id in message_ids:
-                batch.add(self.service.users().messages().get(
-                    userId='me',
-                    id=msg_id,
-                    format='full'
-                ))
-            
-            batch.execute()
+            for i in range(0, total_messages, BATCH_SIZE):
+                batch_chunk = message_ids_list[i:i + BATCH_SIZE]
+                
+                batch = self.service.new_batch_http_request(callback=callback)
+                
+                for message_id in batch_chunk:
+                    batch.add(self.service.users().messages().get(
+                        userId='me',
+                        id=message_id,
+                        format='full'
+                    ))
+                
+                # Execute this batch
+                try:
+                    batch.execute()
+                except Exception as batch_error:
+                    error_str = str(batch_error)
+                    if '429' in error_str or 'rateLimitExceeded' in error_str:
+                        print(f"⚠️  Rate limit hit on incremental batch {i//BATCH_SIZE + 1}. Waiting 2 seconds...")
+                        time.sleep(2)  # Wait longer on rate limit
+                        # Retry this batch once
+                        try:
+                            batch.execute()
+                        except Exception as retry_error:
+                            print(f"⚠️  Retry failed: {retry_error}")
+                    else:
+                        print(f"⚠️  Batch error: {batch_error}")
+                
+                # Add delay between batches (except for the last one)
+                if i + BATCH_SIZE < total_messages:
+                    time.sleep(DELAY_BETWEEN_BATCHES)
             
             print(f"✅ Incremental sync: Fetched {len(emails)} new emails with 2 API calls (90%+ reduction!). historyId: {new_history_id}")
             
