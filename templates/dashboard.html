@@ -23,7 +23,13 @@
                 </div>
                 <div class="nav-right">
                     {% if has_gmail %}
-                    <!-- Search removed - shifting to new working -->
+                    <div class="nav-search">
+                        <div class="search-container">
+                            <span class="search-icon">🔍</span>
+                            <input type="text" id="emailSearch" class="search-input" placeholder="Search emails..." onkeyup="handleSearch(event)" oninput="handleSearchInput(this.value)">
+                            <button class="search-clear" id="searchClear" onclick="clearSearch()" style="display: none;">×</button>
+                        </div>
+                    </div>
                     {% endif %}
                     <div class="nav-actions">
                         <span class="user-info">Welcome, {{ current_user.username }}</span>
@@ -178,20 +184,15 @@
             <!-- First-Time Setup Screen -->
             <div class="setup-screen" id="setupScreen">
                 <div class="setup-content">
-                    <div class="setup-icon">🚀</div>
-                    <h2>Welcome to Khair!</h2>
-                    <p>Let's get your inbox set up. We'll fetch and classify your first 60 emails.</p>
+                    <div class="setup-loading"></div>
+                    <div class="setup-icon" id="setupIcon" style="display: none;">🚀</div>
+                    <h2>Setting up your inbox...</h2>
+                    <p>We're fetching and classifying your first 60 emails. This will just take a moment.</p>
                     <div class="setup-progress" id="setupProgress">
-                        <div class="loading-animation">
-                            <div class="spinner-large"></div>
-                            <div class="pulse-dots">
-                                <span></span><span></span><span></span>
-                            </div>
-                        </div>
                         <div class="progress-bar-container">
                             <div class="progress-bar" id="setupProgressBar"></div>
                         </div>
-                        <p class="progress-text" id="setupProgressText">Setting up your inbox...</p>
+                        <p class="progress-text" id="setupProgressText">Initializing...</p>
                     </div>
                 </div>
             </div>
@@ -224,16 +225,6 @@
                     <label class="checkbox-compact" title="Automatically check for new emails every 5 minutes (only fetches new emails)">
                         <input type="checkbox" id="autoFetchCheck" checked onchange="toggleAutoFetch(this.checked)">
                         <span>Auto-Fetch</span>
-                    </label>
-                    <label class="select-compact">
-                        <select id="maxEmailsSelect">
-                            <option value="10">10 emails</option>
-                            <option value="20" selected>20 emails</option>
-                            <option value="30">30 emails</option>
-                            <option value="40">40 emails</option>
-                            <option value="50">50 emails</option>
-                            <option value="100">100 emails</option>
-                        </select>
                     </label>
                 </div>
             </div>

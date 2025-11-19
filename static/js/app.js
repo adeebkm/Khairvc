@@ -4,8 +4,7 @@ let currentReply = null;
 let allEmails = [];
 let filteredEmails = []; // Currently displayed/filtered emails
 let currentTab = 'all';
-// Search removed - shifting to new working
-let searchQuery = ''; // Kept for compatibility but not used
+let searchQuery = ''; // Current search query
 
 // Pagination state
 let currentPage = 1;
@@ -105,9 +104,8 @@ async function autoFetchNewEmails() {
     }
     
     try {
-        const maxEmails = document.getElementById('maxEmailsSelect')?.value || '20';
         // Use incremental sync - only fetch new emails (no force_full_sync)
-        const response = await fetch(`/api/emails?max=${maxEmails}&show_spam=true`);
+        const response = await fetch(`/api/emails?max=100&show_spam=true`);
         const data = await response.json();
         
         // Handle rate limit errors
@@ -212,7 +210,8 @@ async function startSetup() {
     
     if (!setupScreen) return;
     
-    // Show progress (no button to hide - auto-started)
+    // Hide start button, show progress
+    if (startBtn) startBtn.style.display = 'none';
     if (progressDiv) progressDiv.style.display = 'block';
     
     try {
@@ -241,9 +240,11 @@ async function startSetup() {
         await fetch('/api/setup/complete', { method: 'POST' });
         
         // Hide setup screen and show main content
-        setupScreen.style.display = 'none';
-        document.querySelector('.main-content > .compact-header')?.style.display = 'block';
-        document.getElementById('emailList')?.style.display = 'block';
+        if (setupScreen) setupScreen.style.display = 'none';
+        const compactHeader = document.querySelector('.main-content > .compact-header');
+        if (compactHeader) compactHeader.style.display = 'block';
+        const emailList = document.getElementById('emailList');
+        if (emailList) emailList.style.display = 'block';
         
         // Load emails
         await loadEmailsFromDatabase();
@@ -253,7 +254,9 @@ async function startSetup() {
         
     } catch (error) {
         console.error('Setup error:', error);
-        if (progressText) progressText.textContent = `Error: ${error.message}. Please refresh the page.`;
+        if (progressText) progressText.textContent = `Error: ${error.message}`;
+        if (startBtn) startBtn.style.display = 'block';
+        if (progressDiv) progressDiv.style.display = 'none';
     }
 }
 
@@ -315,11 +318,11 @@ async function fetchInitialEmailsStreaming(progressBar, progressText) {
                 if (data.email) {
                     processed++;
                     const percent = Math.min((processed / total) * 100, 90);
-                    if (progressBar) progressBar.style.width = `${percent}%`;
-                    if (progressText) progressText.textContent = `Processing ${processed} of ${total} emails...`;
+                    progressBar.style.width = `${percent}%`;
+                    progressText.textContent = `Processing ${processed} of ${total} emails...`;
                 } else if (data.status === 'complete') {
-                    if (progressBar) progressBar.style.width = '100%';
-                    if (progressText) progressText.textContent = 'Setup complete!';
+                    progressBar.style.width = '100%';
+                    progressText.textContent = 'Setup complete!';
                 }
             }
         }
@@ -460,17 +463,18 @@ document.addEventListener('DOMContentLoaded', async function() {
     initSidebar();
     loadConfig();
     
-    // Check if setup is needed - auto-start if visible
+    // Check if setup is needed and auto-start
     const setupScreen = document.getElementById('setupScreen');
     const urlParams = new URLSearchParams(window.location.search);
     const autoSetup = urlParams.get('auto_setup') === 'true';
     
     if (setupScreen && setupScreen.style.display !== 'none') {
         // Setup screen is visible - auto-start setup
-        console.log('📋 Setup screen detected - auto-starting setup...');
-        setTimeout(() => {
-            startSetup();
-        }, 500); // Small delay for UI to render
+        console.log('📋 Setup screen detected - auto-starting setup');
+        if (autoSetup || !document.getElementById('startSetupBtn')) {
+            // Auto-start if from signup or if no start button (auto-setup mode)
+            setTimeout(() => startSetup(), 500);
+        }
         return;
     }
     
@@ -497,8 +501,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     // ALWAYS verify database first before using cache
     // This ensures cache is cleared if database was reset
     try {
-        const maxEmails = document.getElementById('maxEmailsSelect')?.value || '20';
-        const verifyResponse = await fetch(`/api/emails?max=${maxEmails}&db_only=true`);
+        const verifyResponse = await fetch(`/api/emails?max=100&db_only=true`);
         const verifyData = await verifyResponse.json();
         
         if (verifyData.success) {
@@ -717,7 +720,7 @@ function switchTab(tabName) {
             applyFilters();
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                const searchText = '';
+                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
                 emailCountEl.textContent = `${sentEmailsCache.length} sent email${sentEmailsCache.length !== 1 ? 's' : ''} (cached)${searchText}`;
             }
         } else {
@@ -737,7 +740,7 @@ function switchTab(tabName) {
             applyFilters();
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                const searchText = '';
+                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
                 emailCountEl.textContent = `${starredEmailsCache.length} starred email${starredEmailsCache.length !== 1 ? 's' : ''} (cached)${searchText}`;
             }
         } else {
@@ -757,7 +760,7 @@ function switchTab(tabName) {
             applyFilters();
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                const searchText = '';
+                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
                 emailCountEl.textContent = `${draftsCache.length} draft${draftsCache.length !== 1 ? 's' : ''} (cached)${searchText}`;
             }
         } else {
@@ -777,7 +780,7 @@ function switchTab(tabName) {
             applyFilters(); // Use applyFilters to include search query
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                const searchText = '';
+                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
                 emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''} (cached)${searchText}`;
             }
         } else {
@@ -790,8 +793,7 @@ function switchTab(tabName) {
 // Fetch starred emails
 async function fetchStarredEmails() {
     try {
-        const maxEmails = document.getElementById('maxEmailsSelect')?.value || '20';
-        const response = await fetch(`/api/starred-emails?max=${maxEmails}`);
+        const response = await fetch(`/api/starred-emails?max=100`);
         const data = await response.json();
         
         if (data.success) {
@@ -812,7 +814,7 @@ async function fetchStarredEmails() {
                 
                 const emailCountEl = document.getElementById('emailCount');
                 if (emailCountEl) {
-                    const searchText = '';
+                    const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
                     emailCountEl.textContent = `${starredEmails.length} starred email${starredEmails.length !== 1 ? 's' : ''}${searchText}`;
                 }
             }
@@ -833,8 +835,7 @@ async function fetchStarredEmails() {
 // Fetch sent emails
 async function fetchSentEmails() {
     try {
-        const maxEmails = document.getElementById('maxEmailsSelect')?.value || '20';
-        const response = await fetch(`/api/sent-emails?max=${maxEmails}`);
+        const response = await fetch(`/api/sent-emails?max=100`);
         const data = await response.json();
         
         if (data.success) {
@@ -855,7 +856,7 @@ async function fetchSentEmails() {
                 
                 const emailCountEl = document.getElementById('emailCount');
                 if (emailCountEl) {
-                    const searchText = '';
+                    const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
                     emailCountEl.textContent = `${sentEmails.length} sent email${sentEmails.length !== 1 ? 's' : ''}${searchText}`;
                 }
             }
@@ -876,8 +877,7 @@ async function fetchSentEmails() {
 // Fetch drafts
 async function fetchDrafts() {
     try {
-        const maxEmails = document.getElementById('maxEmailsSelect')?.value || '20';
-        const response = await fetch(`/api/drafts?max=${maxEmails}`);
+        const response = await fetch(`/api/drafts?max=100`);
         const data = await response.json();
         
         if (data.success) {
@@ -898,7 +898,7 @@ async function fetchDrafts() {
                 
                 const emailCountEl = document.getElementById('emailCount');
                 if (emailCountEl) {
-                    const searchText = '';
+                    const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
                     emailCountEl.textContent = `${drafts.length} draft${drafts.length !== 1 ? 's' : ''}${searchText}`;
                 }
             }
@@ -918,7 +918,7 @@ async function fetchDrafts() {
 
 // Search functionality
 function handleSearchInput(value) {
-    // Search removed
+    searchQuery = value.trim().toLowerCase();
     const clearBtn = document.getElementById('searchClear');
     if (clearBtn) {
         clearBtn.style.display = searchQuery ? 'flex' : 'none';
@@ -937,7 +937,7 @@ function clearSearch() {
     const searchInput = document.getElementById('emailSearch');
     if (searchInput) {
         searchInput.value = '';
-        // Search removed
+        searchQuery = '';
         const clearBtn = document.getElementById('searchClear');
         if (clearBtn) {
             clearBtn.style.display = 'none';
@@ -966,7 +966,20 @@ function applyFilters() {
     }
     // 'all' shows everything
     
-    // Search filter removed - shifting to new working
+    // Apply search filter if query exists
+    if (searchQuery) {
+        filtered = filtered.filter(email => {
+            const subject = (email.subject || '').toLowerCase();
+            const from = (email.from || '').toLowerCase();
+            const snippet = (email.snippet || '').toLowerCase();
+            const body = (email.body || email.combined_text || '').toLowerCase();
+            
+            return subject.includes(searchQuery) ||
+                   from.includes(searchQuery) ||
+                   snippet.includes(searchQuery) ||
+                   body.includes(searchQuery);
+        });
+    }
     
     // Sort filtered emails by date (newest first) before storing and displaying
     const sortedFiltered = [...filtered].sort((a, b) => {
@@ -988,7 +1001,8 @@ function applyFilters() {
     // Update email count
     const emailCountEl = document.getElementById('emailCount');
     if (emailCountEl) {
-        emailCountEl.textContent = `${filtered.length} email${filtered.length !== 1 ? 's' : ''}`;
+        const searchText = searchQuery ? ` (${filtered.length} found)` : '';
+        emailCountEl.textContent = `${filtered.length} email${filtered.length !== 1 ? 's' : ''}${searchText}`;
     }
 }
 
@@ -1244,7 +1258,7 @@ async function fetchEmails() {
     
     try {
         const forceFullSync = document.getElementById('forceFullSyncCheck')?.checked || false;
-        const maxEmails = document.getElementById('maxEmailsSelect')?.value || '20';
+        const maxEmails = 100; // Fixed to 100 emails
         
         // PHASE 1: Try background task first (if available)
         try {
@@ -1254,7 +1268,7 @@ async function fetchEmails() {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    max: parseInt(maxEmails),
+                    max: maxEmails,
                     force_full_sync: forceFullSync
                 })
             });
@@ -1284,7 +1298,7 @@ async function fetchEmails() {
         }
         
         // FALLBACK: Use streaming endpoint (original implementation)
-        let url = `/api/emails/stream?max=${maxEmails}&`;
+        let url = `/api/emails/stream?max=100&`;
         if (forceFullSync) url += 'force_full_sync=true&';
         
         const response = await fetch(url);
@@ -1293,7 +1307,7 @@ async function fetchEmails() {
         if (!response.body) {
             console.warn('Streaming not supported, falling back to regular fetch');
             // Fallback to regular endpoint
-            url = `/api/emails?max=${maxEmails}&`;
+            url = `/api/emails?max=100&`;
             if (categoryParam) url += `category=${categoryParam}&`;
             if (forceFullSync) url += 'force_full_sync=true&';
             url += 'show_spam=true';
@@ -1344,7 +1358,7 @@ async function fetchEmails() {
                 applyFilters(); // Apply filters including search
                 const emailCountEl = document.getElementById('emailCount');
                 if (emailCountEl) {
-                    const searchText = '';
+                    const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
                     if (newEmails.length > 0) {
                         emailCountEl.textContent = `${allEmails.length} total (${newEmails.length} new)${searchText}`;
                     } else if (allEmails.length > 0) {
@@ -2664,7 +2678,7 @@ async function sendReply() {
             applyFilters(); // Apply filters including search
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                const searchText = '';
+                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
                 emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''} found${searchText}`;
             }
             
@@ -2717,7 +2731,7 @@ async function markAsRead() {
             applyFilters(); // Apply filters including search
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                const searchText = '';
+                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
                 emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''} found${searchText}`;
             }
             

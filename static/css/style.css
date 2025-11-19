@@ -352,7 +352,34 @@ body::before {
 .setup-icon {
     font-size: 64px;
     margin-bottom: 24px;
-    animation: float 3s ease-in-out infinite;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.1);
+        opacity: 0.8;
+    }
+}
+
+/* Cool loading spinner for setup */
+.setup-loading {
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+    border: 4px solid rgba(99, 102, 241, 0.1);
+    border-top-color: var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
 }
 
 .setup-content h2 {
@@ -371,66 +398,6 @@ body::before {
 
 .setup-progress {
     margin: 32px 0;
-}
-
-/* Cool Loading Animation */
-.loading-animation {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    margin-bottom: 24px;
-}
-
-.spinner-large {
-    width: 60px;
-    height: 60px;
-    border: 4px solid var(--bg-secondary);
-    border-top: 4px solid var(--primary-color);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin-bottom: 16px;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-.pulse-dots {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-}
-
-.pulse-dots span {
-    width: 12px;
-    height: 12px;
-    background: var(--primary-color);
-    border-radius: 50%;
-    animation: pulse 1.4s ease-in-out infinite;
-}
-
-.pulse-dots span:nth-child(1) {
-    animation-delay: 0s;
-}
-
-.pulse-dots span:nth-child(2) {
-    animation-delay: 0.2s;
-}
-
-.pulse-dots span:nth-child(3) {
-    animation-delay: 0.4s;
-}
-
-@keyframes pulse {
-    0%, 100% {
-        opacity: 0.3;
-        transform: scale(0.8);
-    }
-    50% {
-        opacity: 1;
-        transform: scale(1.2);
-    }
 }
 
 .progress-bar-container {
