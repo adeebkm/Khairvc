@@ -1086,10 +1086,7 @@ function displayEmails(emails) {
         const classification = email.classification || {};
         const category = classification.category || 'UNKNOWN';
         const tags = classification.tags || [];
-        const rationale = classification.rationale || '';
         const categoryBadge = getCategoryBadge(category);
-        // Add info icon with tooltip if rationale exists
-        const rationaleIcon = rationale ? `<span class="rationale-icon" title="${escapeHtml(rationale)}" onclick="event.stopPropagation(); showRationaleModal('${escapeHtml(rationale).replace(/'/g, '&#39;')}')">ℹ️</span>` : '';
         // Only show tags if they provide additional info beyond the category (e.g., "DF/AskMore")
         // Filter out redundant tags that just repeat the category
         const redundantTags = ['DF/Deal', 'HR/Hiring', 'NW/Networking', 'SPAM/Skip', 'GEN/General'];
@@ -1188,7 +1185,6 @@ function displayEmails(emails) {
                         <div class="email-subject">
                             <span>${escapeHtml(decodedSubject)}</span>
                             ${categoryBadge}
-                            ${rationaleIcon}
                         </div>
                         <div class="email-snippet">${escapeHtml(decodedSnippet)}</div>
                     </div>
@@ -2238,55 +2234,6 @@ function showAlert(type, message) {
             document.body.removeChild(alert);
         }, 300);
     }, 5000);
-}
-
-// Show rationale modal
-function showRationaleModal(rationale) {
-    if (!rationale) return;
-    
-    // Create modal backdrop
-    const backdrop = document.createElement('div');
-    backdrop.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 10000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    `;
-    
-    // Create modal content
-    const modal = document.createElement('div');
-    modal.style.cssText = `
-        background: var(--bg-primary);
-        border-radius: 8px;
-        padding: 24px;
-        max-width: 500px;
-        width: 90%;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    `;
-    
-    modal.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <h3 style="margin: 0; color: var(--text-primary);">📝 Classification Reason</h3>
-            <button onclick="this.closest('[style*=fixed]').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
-        </div>
-        <p style="color: var(--text-primary); line-height: 1.6; margin: 0;">${rationale}</p>
-    `;
-    
-    backdrop.appendChild(modal);
-    document.body.appendChild(backdrop);
-    
-    // Close on backdrop click
-    backdrop.addEventListener('click', (e) => {
-        if (e.target === backdrop) {
-            backdrop.remove();
-        }
-    });
 }
 
 // Add animations
