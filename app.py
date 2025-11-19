@@ -2540,6 +2540,81 @@ def clear_cache():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/migrate/add-encryption-columns', methods=['POST'])
+@login_required
+def migrate_add_encryption_columns():
+    """
+    Migration endpoint: Add subject_encrypted and snippet_encrypted columns
+    Run this once after deploying the new models
+    """
+    try:
+        from sqlalchemy import text
+        
+        # Check if columns already exist
+        result = db.session.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'email_classifications' 
+            AND column_name IN ('subject_encrypted', 'snippet_encrypted')
+        """))
+        existing_columns = [row[0] for row in result]
+        
+        if 'subject_encrypted' in existing_columns and 'snippet_encrypted' in existing_columns:
+            return jsonify({
+                'success': True,
+                'message': 'Columns already exist',
+                'columns_exist': True
+            })
+        
+        # Add columns if they don't exist
+        if 'subject_encrypted' not in existing_columns:
+            db.session.execute(text("""
+                ALTER TABLE email_classifications 
+                ADD COLUMN subject_encrypted TEXT;
+            """))
+            print("✅ Added subject_encrypted column")
+        
+        if 'snippet_encrypted' not in existing_columns:
+            db.session.execute(text("""
+                ALTER TABLE email_classifications 
+                ADD COLUMN snippet_encrypted TEXT;
+            """))
+            print("✅ Added snippet_encrypted column")
+        
+        # Migrate existing data (copy plain text to encrypted columns)
+        # They'll be encrypted on next write
+        db.session.execute(text("""
+            UPDATE email_classifications 
+            SET subject_encrypted = subject 
+            WHERE subject_encrypted IS NULL AND subject IS NOT NULL;
+        """))
+        
+        db.session.execute(text("""
+            UPDATE email_classifications 
+            SET snippet_encrypted = snippet 
+            WHERE snippet_encrypted IS NULL AND snippet IS NOT NULL;
+        """))
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Migration completed successfully',
+            'columns_added': [
+                col for col in ['subject_encrypted', 'snippet_encrypted'] 
+                if col not in existing_columns
+            ]
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        error_msg = str(e)
+        print(f"❌ Migration failed: {error_msg}")
+        return jsonify({
+            'success': False,
+            'error': error_msg
+        }), 500
+
 if __name__ == '__main__':
     print("=" * 60)
     print("Multi-User Gmail Auto-Reply Web Interface")
