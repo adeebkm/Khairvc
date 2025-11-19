@@ -4,7 +4,8 @@ let currentReply = null;
 let allEmails = [];
 let filteredEmails = []; // Currently displayed/filtered emails
 let currentTab = 'all';
-// Search functionality removed - shifting to new working
+// Search removed - shifting to new working
+let searchQuery = ''; // Kept for compatibility but not used
 
 // Pagination state
 let currentPage = 1;
