@@ -642,7 +642,10 @@ def oauth2callback():
         session.pop('from_signup', None)
         
         # Redirect to dashboard - setup screen will show automatically if setup_completed is False
-        return redirect(url_for('dashboard') + '?auto_setup=true' if from_signup else '?connected=true')
+        if from_signup:
+            return redirect(url_for('dashboard') + '?auto_setup=true')
+        else:
+            return redirect(url_for('dashboard') + '?connected=true')
     
     except Exception as e:
         import traceback
