@@ -2234,6 +2234,36 @@ def clear_cache():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/migrate-rationale', methods=['POST'])
+@login_required
+def migrate_rationale():
+    """Add rationale column to email_classifications table if it doesn't exist"""
+    try:
+        from sqlalchemy import text
+        
+        # Check if column exists (works for both SQLite and PostgreSQL)
+        with db.engine.connect() as conn:
+            # For PostgreSQL
+            result = conn.execute(text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='email_classifications' AND column_name='rationale'
+            """))
+            
+            if result.fetchone():
+                return jsonify({'success': True, 'message': 'Rationale column already exists', 'migrated': False})
+            
+            # Add the column
+            conn.execute(text("ALTER TABLE email_classifications ADD COLUMN rationale TEXT"))
+            conn.commit()
+            
+        return jsonify({'success': True, 'message': 'Rationale column added successfully', 'migrated': True})
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 if __name__ == '__main__':
     print("=" * 60)
     print("Multi-User Gmail Auto-Reply Web Interface")
