@@ -926,8 +926,8 @@ def get_emails():
             # NOTE: We ignore unread_only filter here because database doesn't store read/unread status
             query = EmailClassification.query.filter_by(user_id=current_user.id)
             
-            # Always limit to 20 emails max (to save storage and credits)
-            print(f"   Loading latest {max_emails} emails from database (max 20)")
+            # Limit to max_emails (user can request 20, 50, or 100)
+            print(f"   Loading latest {max_emails} emails from database")
             db_classifications = query.order_by(EmailClassification.classified_at.desc()).limit(max_emails).all()
             
             classified_emails = []

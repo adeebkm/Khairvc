@@ -30,7 +30,20 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
         dict: Status and results
     """
     # Import inside function to avoid circular imports
-    from app import app, db
+    # Try multiple import strategies for Railway worker
+    try:
+        from app import app, db
+    except ImportError:
+        # Fallback: add current directory to path and try again
+        import sys
+        import os
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+        if '/app' not in sys.path:
+            sys.path.insert(0, '/app')
+        from app import app, db
+    
     from models import User, GmailToken, EmailClassification, Deal
     from gmail_client import GmailClient
     from email_classifier import EmailClassifier, CATEGORY_DEAL_FLOW
