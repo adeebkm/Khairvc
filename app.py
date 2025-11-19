@@ -649,6 +649,7 @@ def get_emails():
                         'category': classification.category,
                         'tags': classification.tags.split(',') if classification.tags else [],
                         'confidence': classification.confidence,
+                        'rationale': classification.rationale or '',
                         'reply_type': classification.reply_type,
                         'deal_state': classification.deal_state,
                         'deck_link': classification.deck_link
@@ -854,6 +855,7 @@ def get_emails():
                         category=classification_result['category'],
                         tags=','.join(classification_result['tags']),
                         confidence=classification_result['confidence'],
+                        rationale=classification_result.get('rationale', ''),
                         extracted_links=json.dumps(classification_result['links'])
                     )
                     
@@ -1013,6 +1015,7 @@ def get_emails():
                     'category': classification.category,
                     'tags': classification.tags.split(',') if classification.tags else [],
                     'confidence': classification.confidence,
+                    'rationale': classification.rationale or '',
                     'reply_type': classification.reply_type,
                     'deal_state': classification.deal_state,
                     'deck_link': classification.deck_link
@@ -1369,6 +1372,7 @@ def reclassify_email():
             category=classification_result['category'],
             tags=','.join(classification_result['tags']),
             confidence=classification_result['confidence'],
+            rationale=classification_result.get('rationale', ''),
             extracted_links=json.dumps(classification_result['links'])
         )
         

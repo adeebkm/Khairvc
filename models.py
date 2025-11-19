@@ -71,6 +71,7 @@ class EmailClassification(db.Model):
     reply_type = db.Column(db.String(50))  # ack, ask-more, none
     reply_sent = db.Column(db.Boolean, default=False)
     confidence = db.Column(db.Float)  # Classification confidence score
+    rationale = db.Column(db.Text)  # AI-generated explanation for why this classification was chosen
     classified_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Deal Flow specific
