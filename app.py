@@ -18,7 +18,8 @@ from email_classifier import EmailClassifier, CATEGORY_DEAL_FLOW, CATEGORY_NETWO
 # from tracxn_scorer import TracxnScorer  # Removed - scoring system disabled
 
 # Rate limiting: Max concurrent OpenAI API calls to prevent 429 errors
-CLASSIFICATION_SEMAPHORE = Semaphore(3)  # Max 3 concurrent classifications
+# Increased to 10 for better throughput with 20 users (10,000 RPM available)
+CLASSIFICATION_SEMAPHORE = Semaphore(10)  # Max 10 concurrent classifications
 
 # Load environment variables
 load_dotenv()
@@ -515,7 +516,7 @@ def get_emails():
         if not gmail:
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
-        max_emails = min(request.args.get('max', default=20, type=int), 20)  # Cap at 20 emails max
+        max_emails = min(request.args.get('max', default=20, type=int), 100)  # Cap at 100 emails max (user can select 20, 50, or 100)
         category_filter = request.args.get('category')  # Optional category filter
         show_spam = request.args.get('show_spam', 'false').lower() == 'true'
         unread_only = False  # Always fetch all emails (unread only filter removed)
@@ -1108,7 +1109,7 @@ def get_starred_emails():
             }), 500
         
         # Get max emails from query parameter
-        max_emails = min(request.args.get('max', default=20, type=int), 20)  # Cap at 20 emails max
+        max_emails = min(request.args.get('max', default=20, type=int), 100)  # Cap at 100 emails max (user can select 20, 50, or 100)
         
         # Fetch starred emails
         starred_emails = gmail.get_starred_emails(max_results=max_emails)
@@ -1174,7 +1175,7 @@ def get_sent_emails():
             }), 500
         
         # Get max emails from query parameter
-        max_emails = min(request.args.get('max', default=20, type=int), 20)  # Cap at 20 emails max
+        max_emails = min(request.args.get('max', default=20, type=int), 100)  # Cap at 100 emails max (user can select 20, 50, or 100)
         
         # Fetch sent emails
         sent_emails = gmail.get_sent_emails(max_results=max_emails)
@@ -1233,7 +1234,7 @@ def get_drafts():
             }), 500
         
         # Get max emails from query parameter
-        max_emails = min(request.args.get('max', default=20, type=int), 20)  # Cap at 20 emails max
+        max_emails = min(request.args.get('max', default=20, type=int), 100)  # Cap at 100 emails max (user can select 20, 50, or 100)
         
         # Fetch drafts
         drafts = gmail.get_drafts(max_results=max_emails)
