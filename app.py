@@ -10,6 +10,7 @@ from flask import Flask, render_template, jsonify, request, redirect, url_for, s
 from werkzeug.utils import secure_filename
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from dotenv import load_dotenv
+from sqlalchemy import text
 from models import db, User, GmailToken, EmailClassification, Deal
 from auth import encrypt_token, decrypt_token
 from gmail_client import GmailClient, SCOPES
@@ -108,6 +109,25 @@ def clear_problematic_session_data():
 def load_user(user_id):
     """Load user from database"""
     return User.query.get(int(user_id))
+
+
+# PRIORITY 1: Row-Level Security (RLS) - Set user context for database queries
+@app.before_request
+def set_user_context_for_rls():
+    """Set PostgreSQL user context for Row-Level Security"""
+    if current_user.is_authenticated:
+        try:
+            # Set user context for RLS (PostgreSQL only)
+            # This allows RLS policies to filter by user_id automatically
+            db.session.execute(
+                text("SET LOCAL app.current_user_id = :user_id"),
+                {"user_id": current_user.id}
+            )
+        except Exception as e:
+            # Ignore errors for SQLite (RLS is PostgreSQL-only)
+            # Also ignore if RLS not yet enabled (migration not run)
+            if 'sqlite' not in str(e).lower() and 'does not exist' not in str(e).lower():
+                print(f"⚠️  Warning: Could not set RLS context: {e}")
 
 
 # Initialize database
@@ -664,9 +684,10 @@ def get_emails():
                 email_data = {
                     'id': classification.message_id,
                     'thread_id': classification.thread_id,
-                    'subject': classification.subject or 'No Subject',
+                    # PRIORITY 2: Use decrypted getters for encrypted fields
+                    'subject': classification.get_subject_decrypted() or 'No Subject',
                     'from': classification.sender or 'Unknown',
-                    'snippet': classification.snippet or '',
+                    'snippet': classification.get_snippet_decrypted() or '',
                     'date': classification.email_date or (int(classification.classified_at.timestamp() * 1000) if classification.classified_at else None),
                     'is_starred': star_info['is_starred'],  # Get actual status from Gmail
                     'label_ids': star_info['label_ids'],  # Get actual labels from Gmail
@@ -874,15 +895,16 @@ def get_emails():
                         user_id=current_user.id,
                         thread_id=email['thread_id'],
                         message_id=email['id'],
-                        subject=email.get('subject', 'No Subject'),
                         sender=email.get('from', 'Unknown'),
-                        snippet=email.get('snippet', ''),
                         email_date=email.get('date'),
                         category=classification_result['category'],
                         tags=','.join(classification_result['tags']),
                         confidence=classification_result['confidence'],
                         extracted_links=json.dumps(classification_result['links'])
                     )
+                    # PRIORITY 2: Use encrypted field setters
+                    classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+                    classification.set_snippet_encrypted(email.get('snippet', ''))
                     
                     # Deal Flow specific processing
                     if classification_result['category'] == CATEGORY_DEAL_FLOW:
@@ -1212,15 +1234,16 @@ def stream_emails():
                             user_id=user_id,
                             thread_id=email['thread_id'],
                             message_id=email['id'],
-                            subject=email.get('subject', 'No Subject'),
                             sender=email.get('from', 'Unknown'),
-                            snippet=email.get('snippet', ''),
                             email_date=email.get('date'),
                             category=classification_result['category'],
                             tags=','.join(classification_result['tags']),
                             confidence=classification_result['confidence'],
                             extracted_links=json.dumps(classification_result['links'])
                         )
+                        # PRIORITY 2: Use encrypted field setters
+                        new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+                        new_classification.set_snippet_encrypted(email.get('snippet', ''))
                         db.session.add(new_classification)
                         db.session.commit()
                         
@@ -1539,15 +1562,16 @@ def reclassify_email():
             user_id=current_user.id,
             thread_id=thread_id,
             message_id=email['id'],
-            subject=email.get('subject', 'No Subject'),
             sender=email.get('from', 'Unknown'),
-            snippet=email.get('snippet', ''),
             email_date=email.get('date'),
             category=classification_result['category'],
             tags=','.join(classification_result['tags']),
             confidence=classification_result['confidence'],
             extracted_links=json.dumps(classification_result['links'])
         )
+        # PRIORITY 2: Use encrypted field setters
+        new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+        new_classification.set_snippet_encrypted(email.get('snippet', ''))
         
         # Process Deal Flow if needed
         if classification_result['category'] == CATEGORY_DEAL_FLOW:

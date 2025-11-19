@@ -6,6 +6,18 @@ from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 
+# Import encryption functions for Priority 2 (Field Encryption)
+try:
+    from auth import encrypt_token, decrypt_token
+    ENCRYPTION_AVAILABLE = True
+except ImportError:
+    # Fallback if auth module not available
+    ENCRYPTION_AVAILABLE = False
+    def encrypt_token(data):
+        return data
+    def decrypt_token(data):
+        return data
+
 db = SQLAlchemy()
 
 
@@ -61,9 +73,14 @@ class EmailClassification(db.Model):
     message_id = db.Column(db.String(255), nullable=False)  # Gmail message ID
     
     # Email metadata (stored for display when loading from cache)
-    subject = db.Column(db.String(500))  # Email subject
-    sender = db.Column(db.String(255))  # Sender email/name
-    snippet = db.Column(db.Text)  # Email preview snippet
+    # PRIORITY 2: Encrypted fields for sensitive data
+    subject_encrypted = db.Column(db.Text)  # Encrypted email subject
+    snippet_encrypted = db.Column(db.Text)  # Encrypted email preview snippet
+    
+    # Legacy plain text fields (kept for backward compatibility during migration)
+    subject = db.Column(db.String(500))  # Legacy: plain text subject (deprecated)
+    sender = db.Column(db.String(255))  # Sender email/name (not encrypted - less sensitive)
+    snippet = db.Column(db.Text)  # Legacy: plain text snippet (deprecated)
     email_date = db.Column(db.BigInteger)  # Gmail internalDate timestamp
     
     category = db.Column(db.String(20), nullable=False)  # DEAL_FLOW, NETWORKING, HIRING, SPAM, GENERAL
@@ -82,6 +99,50 @@ class EmailClassification(db.Model):
     __table_args__ = (
         db.Index('idx_user_thread', 'user_id', 'thread_id'),
     )
+    
+    # PRIORITY 2: Helper methods for encrypted fields
+    # Note: We keep direct column access for backward compatibility
+    # New code should use set_subject_encrypted() and get_subject_decrypted()
+    
+    def set_subject_encrypted(self, value):
+        """Set subject with automatic encryption"""
+        if value:
+            self.subject_encrypted = encrypt_token(str(value))
+            # Keep legacy field for backward compatibility
+            self.subject = str(value)
+        else:
+            self.subject_encrypted = None
+            self.subject = None
+    
+    def get_subject_decrypted(self):
+        """Get subject with automatic decryption"""
+        if self.subject_encrypted:
+            try:
+                return decrypt_token(self.subject_encrypted)
+            except Exception:
+                # Fallback to legacy plain text
+                return self.subject or ''
+        return self.subject or ''
+    
+    def set_snippet_encrypted(self, value):
+        """Set snippet with automatic encryption"""
+        if value:
+            self.snippet_encrypted = encrypt_token(str(value))
+            # Keep legacy field for backward compatibility
+            self.snippet = str(value)
+        else:
+            self.snippet_encrypted = None
+            self.snippet = None
+    
+    def get_snippet_decrypted(self):
+        """Get snippet with automatic decryption"""
+        if self.snippet_encrypted:
+            try:
+                return decrypt_token(self.snippet_encrypted)
+            except Exception:
+                # Fallback to legacy plain text
+                return self.snippet or ''
+        return self.snippet or ''
     
     def __repr__(self):
         return f'<EmailClassification {self.category} for thread {self.thread_id}>'
