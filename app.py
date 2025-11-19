@@ -2189,6 +2189,33 @@ def get_config():
     })
 
 
+@app.route('/api/clear-cache', methods=['POST'])
+@login_required
+def clear_cache():
+    """Clear all email classifications for current user to force re-classification via Lambda"""
+    try:
+        # First delete all deals for current user (foreign key constraint)
+        deals_count = Deal.query.filter_by(user_id=current_user.id).count()
+        Deal.query.filter_by(user_id=current_user.id).delete()
+        
+        # Then delete all classifications for current user
+        classifications_count = EmailClassification.query.filter_by(user_id=current_user.id).count()
+        EmailClassification.query.filter_by(user_id=current_user.id).delete()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleared {classifications_count} classifications and {deals_count} deals. Next fetch will use Lambda!',
+            'classifications_count': classifications_count,
+            'deals_count': deals_count
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     print("=" * 60)
     print("Multi-User Gmail Auto-Reply Web Interface")
