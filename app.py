@@ -2194,23 +2194,37 @@ def get_config():
 def clear_cache():
     """Clear all email classifications for current user to force re-classification via Lambda"""
     try:
-        # First delete all deals for current user (foreign key constraint)
-        deals_count = Deal.query.filter_by(user_id=current_user.id).count()
-        Deal.query.filter_by(user_id=current_user.id).delete()
+        # Get all classification IDs for current user
+        classification_ids = [c.id for c in EmailClassification.query.filter_by(user_id=current_user.id).all()]
+        classifications_count = len(classification_ids)
         
-        # Then delete all classifications for current user
-        classifications_count = EmailClassification.query.filter_by(user_id=current_user.id).count()
-        EmailClassification.query.filter_by(user_id=current_user.id).delete()
-        
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'message': f'Cleared {classifications_count} classifications and {deals_count} deals. Next fetch will use Lambda!',
-            'classifications_count': classifications_count,
-            'deals_count': deals_count
-        })
+        if classification_ids:
+            # First, nullify the classification_id in deals that reference these classifications
+            deals_to_update = Deal.query.filter(Deal.classification_id.in_(classification_ids)).all()
+            deals_count = len(deals_to_update)
+            for deal in deals_to_update:
+                deal.classification_id = None
+            
+            # Now safe to delete classifications
+            EmailClassification.query.filter(EmailClassification.id.in_(classification_ids)).delete(synchronize_session=False)
+            
+            db.session.commit()
+            
+            return jsonify({
+                'success': True,
+                'message': f'Cleared {classifications_count} classifications (and updated {deals_count} deals). Next fetch will use Lambda!',
+                'classifications_count': classifications_count,
+                'deals_count': deals_count
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'message': 'No classifications to clear',
+                'classifications_count': 0,
+                'deals_count': 0
+            })
     except Exception as e:
+        db.session.rollback()
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
