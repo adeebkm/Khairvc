@@ -1114,13 +1114,22 @@ def get_emails():
 @login_required
 def stream_emails():
     """Stream emails as they're being classified (progressive loading)"""
-    if not current_user.gmail_token:
-        yield f"data: {json.dumps({'error': 'Gmail not connected'})}\n\n"
-        return
+    # Store user info before entering generator (Flask-Login compatibility)
+    user_id = current_user.id
+    has_gmail_token = current_user.gmail_token is not None
+    
+    if not has_gmail_token:
+        return jsonify({'error': 'Gmail not connected'}), 400
     
     def generate():
         try:
-            gmail = get_user_gmail_client(current_user)
+            # Get user object (can't use current_user in generator)
+            user = User.query.get(user_id)
+            if not user:
+                yield f"data: {json.dumps({'error': 'User not found'})}\n\n"
+                return
+            
+            gmail = get_user_gmail_client(user)
             if not gmail:
                 yield f"data: {json.dumps({'error': 'Failed to connect to Gmail'})}\n\n"
                 return
@@ -1129,7 +1138,7 @@ def stream_emails():
             force_full_sync = request.args.get('force_full_sync', 'false').lower() == 'true'
             
             # Get history_id for incremental sync
-            gmail_token = GmailToken.query.filter_by(user_id=current_user.id).first()
+            gmail_token = GmailToken.query.filter_by(user_id=user_id).first()
             start_history_id = gmail_token.history_id if gmail_token and not force_full_sync else None
             
             # Send initial status
@@ -1162,7 +1171,7 @@ def stream_emails():
                 try:
                     # Check if already classified
                     classification = EmailClassification.query.filter_by(
-                        user_id=current_user.id,
+                        user_id=user_id,
                         thread_id=email['thread_id']
                     ).first()
                     
@@ -1194,12 +1203,12 @@ def stream_emails():
                                 body=email.get('body', ''),
                                 sender=email.get('from', ''),
                                 thread_id=email.get('thread_id', ''),
-                                user_id=current_user.id
+                                user_id=user_id
                             )
                         
                         # Store classification
                         new_classification = EmailClassification(
-                            user_id=current_user.id,
+                            user_id=user_id,
                             thread_id=email['thread_id'],
                             message_id=email['id'],
                             subject=email.get('subject', 'No Subject'),
