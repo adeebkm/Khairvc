@@ -579,7 +579,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     
     // Check if we have cached emails and display them
-    const urlParams = new URLSearchParams(window.location.search);
     const justConnected = urlParams.get('connected') === 'true';
     
     // ALWAYS verify database first before using cache
