@@ -751,7 +751,7 @@ Return ONLY the JSON object. No additional text."""
             client = self.openai_client.client if hasattr(self.openai_client, 'client') else self.openai_client
             
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4o",
                 messages=[
                     {"role": "system", "content": "You are a deterministic email classifier for a venture capital firm. Return ONLY valid JSON. No markdown, no explanation, no additional text."},
                     {"role": "user", "content": prompt}
@@ -1066,7 +1066,7 @@ IMPORTANT:
 - Do NOT include signature placeholders like "[Your Name]", "[Your Position]", "[Your Firm]". The actual signature will be added automatically."""
                     
                     response = client.chat.completions.create(
-                        model="gpt-4o-mini",
+                        model="gpt-4o",
                         messages=[
                             {"role": "system", "content": "You are a venture capital partner making investment decisions. Generate clear, professional replies that make real decisions (interested/decline/need more info) based on the opportunity score, not generic acknowledgments."},
                             {"role": "user", "content": prompt}
@@ -1122,7 +1122,7 @@ Format as a clear, professional email.
 IMPORTANT: Do NOT include signature placeholders like "[Your Name]", "[Your Position]", "[Your Firm]". The actual signature will be added automatically."""
                     
                     response = client.chat.completions.create(
-                        model="gpt-4o-mini",
+                        model="gpt-4o",
                         messages=[
                             {"role": "system", "content": "You are a professional email assistant for a venture capital firm. Generate concise, professional replies that request missing information."},
                             {"role": "user", "content": prompt}
