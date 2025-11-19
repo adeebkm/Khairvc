@@ -226,9 +226,22 @@ async function startSetup() {
         
         const data = await response.json();
         
-        if (data.success && data.task_id) {
+        // If setup is already complete (user has emails), skip to completion
+        if (data.success && data.already_complete) {
+            console.log(`✅ Setup already complete: ${data.email_count} emails found`);
+            if (progressBar) progressBar.style.width = '100%';
+            if (progressText) progressText.textContent = `Found ${data.email_count} existing emails!`;
+            // Wait a moment then proceed
+            await new Promise(resolve => setTimeout(resolve, 1500));
+        } else if (data.success && data.task_id) {
             // Poll for progress
-            await pollSetupProgress(data.task_id, progressBar, progressText);
+            try {
+                await pollSetupProgress(data.task_id, progressBar, progressText);
+            } catch (pollError) {
+                console.warn('Polling failed, falling back to streaming:', pollError);
+                // Fall back to streaming if polling fails
+                await fetchInitialEmailsStreaming(progressBar, progressText);
+            }
         } else if (data.use_streaming) {
             // Use streaming endpoint
             await fetchInitialEmailsStreaming(progressBar, progressText);
@@ -254,20 +267,65 @@ async function startSetup() {
         
     } catch (error) {
         console.error('Setup error:', error);
-        if (progressText) progressText.textContent = `Error: ${error.message}`;
-        if (startBtn) startBtn.style.display = 'block';
-        if (progressDiv) progressDiv.style.display = 'none';
+        // Even if setup fails, try to load existing emails and mark setup as complete
+        // This prevents users from being stuck on the setup screen
+        try {
+            // Check if we already have emails
+            await loadEmailsFromDatabase();
+            const emailCount = allEmails.length;
+            
+            if (emailCount > 0) {
+                // We have emails, mark setup as complete and continue
+                console.log(`✅ Found ${emailCount} existing emails, marking setup as complete`);
+                await fetch('/api/setup/complete', { method: 'POST' });
+                
+                // Hide setup screen
+                if (setupScreen) setupScreen.style.display = 'none';
+                const compactHeader = document.querySelector('.main-content > .compact-header');
+                if (compactHeader) compactHeader.style.display = 'block';
+                const emailList = document.getElementById('emailList');
+                if (emailList) emailList.style.display = 'block';
+                
+                showAlert('info', `Loaded ${emailCount} existing emails. Setup can be completed later.`);
+            } else {
+                // No emails, show error but allow retry
+                if (progressText) progressText.textContent = `Error: ${error.message}. Click "Start Setup" to retry.`;
+                if (startBtn) startBtn.style.display = 'block';
+                if (progressDiv) progressDiv.style.display = 'none';
+            }
+        } catch (loadError) {
+            console.error('Error loading emails after setup failure:', loadError);
+            if (progressText) progressText.textContent = `Error: ${error.message}. Click "Start Setup" to retry.`;
+            if (startBtn) startBtn.style.display = 'block';
+            if (progressDiv) progressDiv.style.display = 'none';
+        }
     }
 }
 
 async function pollSetupProgress(taskId, progressBar, progressText) {
     return new Promise((resolve, reject) => {
+        let pollCount = 0;
+        const MAX_POLLS = 60; // 60 seconds timeout (60 polls * 1 second)
+        let pendingTime = 0;
+        
         const interval = setInterval(async () => {
+            pollCount++;
             try {
                 const response = await fetch(`/api/emails/sync/status/${taskId}`);
                 const data = await response.json();
                 
-                if (data.status === 'PROGRESS') {
+                if (data.status === 'PENDING') {
+                    pendingTime++;
+                    // If task stays PENDING for 30 seconds, assume no worker is processing it
+                    if (pendingTime >= 30) {
+                        console.warn('⚠️  Task stuck in PENDING for 30+ seconds, falling back to streaming');
+                        clearInterval(interval);
+                        reject(new Error('Task not being processed, using streaming fallback'));
+                    } else if (progressText) {
+                        progressText.textContent = `Waiting for worker... (${pendingTime}s)`;
+                    }
+                } else if (data.status === 'PROGRESS') {
+                    pendingTime = 0; // Reset pending time
                     const progress = data.progress || 0;
                     const total = data.total || 60;
                     const percent = Math.min((progress / total) * 100, 90);
@@ -282,6 +340,12 @@ async function pollSetupProgress(taskId, progressBar, progressText) {
                     clearInterval(interval);
                     reject(new Error(data.error || 'Setup failed'));
                 }
+                
+                // Timeout after MAX_POLLS
+                if (pollCount >= MAX_POLLS) {
+                    clearInterval(interval);
+                    reject(new Error('Setup timeout - task took too long'));
+                }
             } catch (error) {
                 clearInterval(interval);
                 reject(error);
@@ -292,10 +356,16 @@ async function pollSetupProgress(taskId, progressBar, progressText) {
 
 async function fetchInitialEmailsStreaming(progressBar, progressText) {
     // Use streaming endpoint for initial fetch
+    if (progressText) progressText.textContent = 'Connecting to server...';
+    
     const response = await fetch('/api/emails/stream?max=60&force_full_sync=true');
     
+    if (!response.ok) {
+        throw new Error(`Streaming failed: ${response.status} ${response.statusText}`);
+    }
+    
     if (!response.body) {
-        throw new Error('Streaming not supported');
+        throw new Error('Streaming not supported by browser');
     }
     
     const reader = response.body.getReader();
@@ -304,28 +374,42 @@ async function fetchInitialEmailsStreaming(progressBar, progressText) {
     let processed = 0;
     const total = 60;
     
-    while (true) {
-        const {done, value} = await reader.read();
-        if (done) break;
-        
-        buffer += decoder.decode(value, {stream: true});
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        
-        for (const line of lines) {
-            if (line.startsWith('data: ')) {
-                const data = JSON.parse(line.slice(6));
-                if (data.email) {
-                    processed++;
-                    const percent = Math.min((processed / total) * 100, 90);
-                    if (progressBar) progressBar.style.width = `${percent}%`;
-                    if (progressText) progressText.textContent = `Processing ${processed} of ${total} emails...`;
-                } else if (data.status === 'complete') {
-                    if (progressBar) progressBar.style.width = '100%';
-                    if (progressText) progressText.textContent = 'Setup complete!';
+    try {
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, {stream: true});
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+                if (line.trim() === '') continue;
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        if (data.email) {
+                            processed++;
+                            const percent = Math.min((processed / total) * 100, 90);
+                            if (progressBar) progressBar.style.width = `${percent}%`;
+                            if (progressText) progressText.textContent = `Processing ${processed} of ${total} emails...`;
+                        } else if (data.status === 'complete') {
+                            if (progressBar) progressBar.style.width = '100%';
+                            if (progressText) progressText.textContent = 'Setup complete!';
+                        } else if (data.error) {
+                            throw new Error(data.error);
+                        }
+                    } catch (parseError) {
+                        console.warn('Error parsing streaming data:', parseError, 'Line:', line);
+                    }
                 }
             }
         }
+    } catch (streamError) {
+        console.error('Streaming error:', streamError);
+        throw streamError;
+    } finally {
+        reader.releaseLock();
     }
 }
 

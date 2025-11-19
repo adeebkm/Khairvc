@@ -2849,6 +2849,21 @@ def fetch_initial_emails():
         }), 400
     
     try:
+        # Check if user already has emails - if so, skip setup
+        from models import EmailClassification
+        existing_count = EmailClassification.query.filter_by(user_id=current_user.id).count()
+        if existing_count > 0:
+            print(f"✅ User {current_user.id} already has {existing_count} emails, marking setup as complete")
+            current_user.setup_completed = True
+            current_user.initial_emails_fetched = existing_count
+            db.session.commit()
+            return jsonify({
+                'success': True,
+                'already_complete': True,
+                'message': f'Setup already complete ({existing_count} emails found)',
+                'email_count': existing_count
+            })
+        
         max_emails = 60  # Initial fetch: 60 emails (3 pages of 40)
         
         # Try to use background task if available
@@ -2858,13 +2873,16 @@ def fetch_initial_emails():
                 inspect = celery.control.inspect()
                 active_workers = inspect.active()
                 
-                if active_workers:
+                # Check if we have active workers (active_workers is a dict with worker names as keys)
+                if active_workers and len(active_workers) > 0:
+                    print(f"✅ Found {len(active_workers)} active Celery worker(s)")
                     # Use background task
                     task = sync_user_emails.delay(
                         user_id=current_user.id,
                         max_emails=max_emails,
                         force_full_sync=True
                     )
+                    print(f"✅ Queued task {task.id} for user {current_user.id}")
                     
                     # Update initial_emails_fetched
                     current_user.initial_emails_fetched = max_emails
@@ -2876,8 +2894,12 @@ def fetch_initial_emails():
                         'message': 'Initial email fetch started',
                         'max_emails': max_emails
                     })
+                else:
+                    print(f"⚠️  No active Celery workers found (active_workers: {active_workers})")
             except Exception as e:
                 print(f"⚠️  Background task not available: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Fallback: Use streaming endpoint
         return jsonify({
