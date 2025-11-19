@@ -43,5 +43,13 @@ celery.conf.task_soft_time_limit = 540  # 9 minutes soft limit
 # Result expiration (clean up old results)
 celery.conf.result_expires = 3600  # 1 hour
 
+# Import tasks to register them with Celery
+# This ensures tasks are available when the worker starts
+try:
+    import tasks  # noqa: F401
+    print("✅ Tasks module imported successfully")
+except ImportError as e:
+    print(f"⚠️  Warning: Could not import tasks module: {e}")
+
 print(f"✅ Celery configured with broker: {redis_url.split('@')[-1] if '@' in redis_url else redis_url}")
 
