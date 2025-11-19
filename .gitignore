@@ -49,3 +49,4 @@ Thumbs.db
 
 # Railway deployment files (may contain sensitive info)
 railway_env_vars.txt
+aws_lambda/python/

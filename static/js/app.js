@@ -960,6 +960,7 @@ async function fetchEmails() {
     
     // Show loading state
     loading.style.display = 'block';
+    loading.innerHTML = '<div class="loading-spinner"></div><p>Fetching emails from Gmail...</p><p class="loading-progress">0 emails processed</p>';
     emailList.innerHTML = '';
     fetchBtn.disabled = true;
     
@@ -968,15 +969,26 @@ async function fetchEmails() {
         const maxEmails = document.getElementById('maxEmailsSelect')?.value || '20';
         const categoryParam = currentTab !== 'all' ? currentTab.toUpperCase().replace('-', '_') : null;
         
-        let url = `/api/emails?max=${maxEmails}&`;
-        if (categoryParam) url += `category=${categoryParam}&`;
+        // Use streaming endpoint for progressive loading
+        let url = `/api/emails/stream?max=${maxEmails}&`;
         if (forceFullSync) url += 'force_full_sync=true&';
-        url += 'show_spam=true';  // Always show spam
         
         const response = await fetch(url);
-        const data = await response.json();
         
-        if (data.success) {
+        // Check if streaming is supported
+        if (!response.body) {
+            console.warn('Streaming not supported, falling back to regular fetch');
+            // Fallback to regular endpoint
+            url = `/api/emails?max=${maxEmails}&`;
+            if (categoryParam) url += `category=${categoryParam}&`;
+            if (forceFullSync) url += 'force_full_sync=true&';
+            url += 'show_spam=true';
+            
+            const fallbackResponse = await fetch(url);
+            const data = await fallbackResponse.json();
+            
+            // Process fallback response normally
+            if (data.success) {
             const newEmails = data.emails || [];
             
             // If force_full_sync is enabled, replace cache instead of merging
@@ -1043,7 +1055,80 @@ async function fetchEmails() {
                 showAlert('error', data.error || 'Failed to fetch emails');
                 emailList.innerHTML = '<div class="empty-state"><p>Failed to fetch emails. Check console for details.</p></div>';
             }
+            return; // Exit after fallback processing
         }
+        
+        // STREAMING: Process Server-Sent Events for progressive loading
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        const streamedEmails = [];
+        
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, {stream: true});
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep incomplete line in buffer
+            
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = JSON.parse(line.slice(6));
+                    
+                    if (data.status === 'fetching') {
+                        loading.innerHTML = `<div class="loading-spinner"></div><p>Fetching up to ${data.total} emails from Gmail...</p>`;
+                    } else if (data.status === 'classifying') {
+                        loading.innerHTML = `<div class="loading-spinner"></div><p>Classifying ${data.total} emails...</p><p class="loading-progress">0 / ${data.total} emails processed</p>`;
+                    } else if (data.email) {
+                        // New email received - add to list immediately
+                        streamedEmails.push(data.email);
+                        
+                        // Update progress
+                        const progressEl = document.querySelector('.loading-progress');
+                        if (progressEl) {
+                            progressEl.textContent = `${data.progress} / ${data.total} emails processed`;
+                        }
+                        
+                        // Add to cache and display
+                        const existingIndex = emailCache.data.findIndex(e => e.thread_id === data.email.thread_id);
+                        if (existingIndex >= 0) {
+                            emailCache.data[existingIndex] = data.email;
+                        } else {
+                            emailCache.data.push(data.email);
+                        }
+                        
+                        // Update display in real-time
+                        allEmails = [...emailCache.data];
+                        applyFilters();
+                        
+                    } else if (data.status === 'complete') {
+                        console.log(`✅ Streaming complete: ${streamedEmails.length} emails processed`);
+                        emailCache.timestamp = Date.now();
+                        saveEmailCacheToStorage();
+                        
+                        // Final update
+                        allEmails = [...emailCache.data];
+                        applyFilters();
+                        
+                        const emailCountEl = document.getElementById('emailCount');
+                        if (emailCountEl) {
+                            emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''} (${streamedEmails.length} new)`;
+                        }
+                        
+                        // Reload deals if on Deal Flow tab
+                        if (currentTab === 'deal-flow') {
+                            loadDeals();
+                        }
+                        
+                    } else if (data.error) {
+                        showAlert('error', data.error);
+                        emailList.innerHTML = `<div class="empty-state"><p>Error: ${data.error}</p></div>`;
+                    }
+                }
+            }
+        }
+        
     } catch (error) {
         console.error('Error fetching emails:', error);
         showAlert('error', 'Error fetching emails: ' + error.message);

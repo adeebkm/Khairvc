@@ -6,7 +6,7 @@ Each user manages their own Gmail account with complete privacy
 import os
 import json
 from threading import Semaphore
-from flask import Flask, render_template, jsonify, request, redirect, url_for, session, send_file
+from flask import Flask, render_template, jsonify, request, redirect, url_for, session, send_file, Response, stream_with_context
 from werkzeug.utils import secure_filename
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from dotenv import load_dotenv
@@ -516,6 +516,7 @@ def get_emails():
         if not gmail:
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
+        # Get max_emails from query param - dynamically fetch based on filter selection
         max_emails = min(request.args.get('max', default=20, type=int), 100)  # Cap at 100 emails max (user can select 20, 50, or 100)
         category_filter = request.args.get('category')  # Optional category filter
         show_spam = request.args.get('show_spam', 'false').lower() == 'true'
@@ -1089,6 +1090,144 @@ def get_emails():
             'error': str(e),
             'traceback': error_trace if app.debug else None
         }), 500
+
+@app.route('/api/emails/stream')
+@login_required
+def stream_emails():
+    """Stream emails as they're being classified (progressive loading)"""
+    if not current_user.gmail_token:
+        yield f"data: {json.dumps({'error': 'Gmail not connected'})}\n\n"
+        return
+    
+    def generate():
+        try:
+            gmail = get_user_gmail_client(current_user)
+            if not gmail:
+                yield f"data: {json.dumps({'error': 'Failed to connect to Gmail'})}\n\n"
+                return
+            
+            max_emails = min(request.args.get('max', default=20, type=int), 100)
+            force_full_sync = request.args.get('force_full_sync', 'false').lower() == 'true'
+            
+            # Get history_id for incremental sync
+            gmail_token = GmailToken.query.filter_by(user_id=current_user.id).first()
+            start_history_id = gmail_token.history_id if gmail_token and not force_full_sync else None
+            
+            # Send initial status
+            yield f"data: {json.dumps({'status': 'fetching', 'total': max_emails})}\n\n"
+            
+            # Fetch emails from Gmail
+            emails, new_history_id = gmail.get_emails(
+                max_results=max_emails,
+                unread_only=False,
+                start_history_id=start_history_id
+            )
+            
+            # Store new history_id
+            if new_history_id and gmail_token:
+                gmail_token.history_id = new_history_id
+                db.session.commit()
+            
+            # Send count update
+            yield f"data: {json.dumps({'status': 'classifying', 'total': len(emails)})}\n\n"
+            
+            openai_client = get_openai_client()
+            classifier = EmailClassifier(openai_client)
+            
+            import time
+            for idx, email in enumerate(emails):
+                # Rate limiting
+                if idx > 0:
+                    time.sleep(0.5)
+                
+                try:
+                    # Check if already classified
+                    classification = EmailClassification.query.filter_by(
+                        user_id=current_user.id,
+                        thread_id=email['thread_id']
+                    ).first()
+                    
+                    if classification:
+                        # Return existing classification
+                        email_data = {
+                            'id': email['id'],
+                            'thread_id': email['thread_id'],
+                            'subject': email.get('subject', 'No Subject'),
+                            'from': email.get('from', 'Unknown'),
+                            'snippet': email.get('snippet', ''),
+                            'date': email.get('date'),
+                            'is_starred': email.get('is_starred', False),
+                            'label_ids': email.get('label_ids', []),
+                            'classification': {
+                                'category': classification.category,
+                                'tags': classification.tags.split(',') if classification.tags else [],
+                                'confidence': classification.confidence,
+                                'reply_type': classification.reply_type,
+                                'deal_state': classification.deal_state,
+                                'deck_link': classification.deck_link
+                            }
+                        }
+                    else:
+                        # Classify new email
+                        with CLASSIFICATION_SEMAPHORE:
+                            classification_result = classifier.classify_email(
+                                subject=email.get('subject', ''),
+                                body=email.get('body', ''),
+                                sender=email.get('from', ''),
+                                thread_id=email.get('thread_id', ''),
+                                user_id=current_user.id
+                            )
+                        
+                        # Store classification
+                        new_classification = EmailClassification(
+                            user_id=current_user.id,
+                            thread_id=email['thread_id'],
+                            message_id=email['id'],
+                            subject=email.get('subject', 'No Subject'),
+                            sender=email.get('from', 'Unknown'),
+                            snippet=email.get('snippet', ''),
+                            email_date=email.get('date'),
+                            category=classification_result['category'],
+                            tags=','.join(classification_result['tags']),
+                            confidence=classification_result['confidence'],
+                            extracted_links=json.dumps(classification_result['links'])
+                        )
+                        db.session.add(new_classification)
+                        db.session.commit()
+                        
+                        email_data = {
+                            'id': email['id'],
+                            'thread_id': email['thread_id'],
+                            'subject': email.get('subject', 'No Subject'),
+                            'from': email.get('from', 'Unknown'),
+                            'snippet': email.get('snippet', ''),
+                            'date': email.get('date'),
+                            'is_starred': email.get('is_starred', False),
+                            'label_ids': email.get('label_ids', []),
+                            'classification': {
+                                'category': classification_result['category'],
+                                'tags': classification_result['tags'],
+                                'confidence': classification_result['confidence'],
+                                'reply_type': None,
+                                'deal_state': None,
+                                'deck_link': None
+                            }
+                        }
+                    
+                    # Stream this email to frontend
+                    yield f"data: {json.dumps({'email': email_data, 'progress': idx + 1, 'total': len(emails)})}\n\n"
+                    
+                except Exception as e:
+                    print(f"Error processing email {idx}: {str(e)}")
+                    continue
+            
+            # Send completion
+            yield f"data: {json.dumps({'status': 'complete'})}\n\n"
+            
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
 @app.route('/api/starred-emails')
 @login_required
