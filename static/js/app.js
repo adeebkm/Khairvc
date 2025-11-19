@@ -716,7 +716,7 @@ function switchTab(tabName) {
             applyFilters();
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                const searchText = '';
                 emailCountEl.textContent = `${sentEmailsCache.length} sent email${sentEmailsCache.length !== 1 ? 's' : ''} (cached)${searchText}`;
             }
         } else {
@@ -736,7 +736,7 @@ function switchTab(tabName) {
             applyFilters();
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                const searchText = '';
                 emailCountEl.textContent = `${starredEmailsCache.length} starred email${starredEmailsCache.length !== 1 ? 's' : ''} (cached)${searchText}`;
             }
         } else {
@@ -756,7 +756,7 @@ function switchTab(tabName) {
             applyFilters();
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                const searchText = '';
                 emailCountEl.textContent = `${draftsCache.length} draft${draftsCache.length !== 1 ? 's' : ''} (cached)${searchText}`;
             }
         } else {
@@ -776,7 +776,7 @@ function switchTab(tabName) {
             applyFilters(); // Use applyFilters to include search query
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                const searchText = '';
                 emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''} (cached)${searchText}`;
             }
         } else {
@@ -811,7 +811,7 @@ async function fetchStarredEmails() {
                 
                 const emailCountEl = document.getElementById('emailCount');
                 if (emailCountEl) {
-                    const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                    const searchText = '';
                     emailCountEl.textContent = `${starredEmails.length} starred email${starredEmails.length !== 1 ? 's' : ''}${searchText}`;
                 }
             }
@@ -854,7 +854,7 @@ async function fetchSentEmails() {
                 
                 const emailCountEl = document.getElementById('emailCount');
                 if (emailCountEl) {
-                    const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                    const searchText = '';
                     emailCountEl.textContent = `${sentEmails.length} sent email${sentEmails.length !== 1 ? 's' : ''}${searchText}`;
                 }
             }
@@ -897,7 +897,7 @@ async function fetchDrafts() {
                 
                 const emailCountEl = document.getElementById('emailCount');
                 if (emailCountEl) {
-                    const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                    const searchText = '';
                     emailCountEl.textContent = `${drafts.length} draft${drafts.length !== 1 ? 's' : ''}${searchText}`;
                 }
             }
@@ -917,7 +917,7 @@ async function fetchDrafts() {
 
 // Search functionality
 function handleSearchInput(value) {
-    searchQuery = value.trim().toLowerCase();
+    // Search removed
     const clearBtn = document.getElementById('searchClear');
     if (clearBtn) {
         clearBtn.style.display = searchQuery ? 'flex' : 'none';
@@ -936,7 +936,7 @@ function clearSearch() {
     const searchInput = document.getElementById('emailSearch');
     if (searchInput) {
         searchInput.value = '';
-        searchQuery = '';
+        // Search removed
         const clearBtn = document.getElementById('searchClear');
         if (clearBtn) {
             clearBtn.style.display = 'none';
@@ -1343,7 +1343,7 @@ async function fetchEmails() {
                 applyFilters(); // Apply filters including search
                 const emailCountEl = document.getElementById('emailCount');
                 if (emailCountEl) {
-                    const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                    const searchText = '';
                     if (newEmails.length > 0) {
                         emailCountEl.textContent = `${allEmails.length} total (${newEmails.length} new)${searchText}`;
                     } else if (allEmails.length > 0) {
@@ -2663,7 +2663,7 @@ async function sendReply() {
             applyFilters(); // Apply filters including search
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                const searchText = '';
                 emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''} found${searchText}`;
             }
             
@@ -2716,7 +2716,7 @@ async function markAsRead() {
             applyFilters(); // Apply filters including search
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                const searchText = '';
                 emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''} found${searchText}`;
             }
             
