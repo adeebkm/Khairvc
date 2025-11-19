@@ -989,71 +989,72 @@ async function fetchEmails() {
             
             // Process fallback response normally
             if (data.success) {
-            const newEmails = data.emails || [];
-            
-            // If force_full_sync is enabled, replace cache instead of merging
-            if (forceFullSync) {
-                console.log(`🔄 Force full sync: Replacing cache with ${newEmails.length} emails`);
-                emailCache.data = newEmails;
-                emailCache.timestamp = Date.now();
-                saveEmailCacheToStorage(); // Save to localStorage
-                allEmails = newEmails;
-            } else {
-                // INCREMENTAL SYNC: Merge new emails with existing cache
-                if (newEmails.length > 0) {
-                    // Add new emails, avoiding duplicates by thread_id
-                    const existingThreadIds = new Set(emailCache.data.map(e => e.thread_id));
-                    const uniqueNewEmails = newEmails.filter(e => !existingThreadIds.has(e.thread_id));
-                    
-                    if (uniqueNewEmails.length > 0) {
-                        emailCache.data = [...emailCache.data, ...uniqueNewEmails];
-                        emailCache.timestamp = Date.now();
-                        saveEmailCacheToStorage(); // Save to localStorage
-                        console.log(`✅ Added ${uniqueNewEmails.length} new emails to cache (${newEmails.length} fetched, ${newEmails.length - uniqueNewEmails.length} duplicates skipped)`);
-                    } else {
-                        console.log(`ℹ️  No new unique emails (${newEmails.length} fetched were already in cache)`);
-                    }
-                } else if (emailCache.data.length === 0) {
-                    // Empty result and empty cache - truly no emails
-                    console.log('ℹ️  No emails found (incremental sync returned empty, cache is empty)');
+                const newEmails = data.emails || [];
+                
+                // If force_full_sync is enabled, replace cache instead of merging
+                if (forceFullSync) {
+                    console.log(`🔄 Force full sync: Replacing cache with ${newEmails.length} emails`);
+                    emailCache.data = newEmails;
+                    emailCache.timestamp = Date.now();
+                    saveEmailCacheToStorage(); // Save to localStorage
+                    allEmails = newEmails;
                 } else {
-                    // Empty result but cache exists - no new emails since last sync
-                    console.log(`ℹ️  No new emails (incremental sync returned empty, keeping ${emailCache.data.length} cached emails)`);
+                    // INCREMENTAL SYNC: Merge new emails with existing cache
+                    if (newEmails.length > 0) {
+                        // Add new emails, avoiding duplicates by thread_id
+                        const existingThreadIds = new Set(emailCache.data.map(e => e.thread_id));
+                        const uniqueNewEmails = newEmails.filter(e => !existingThreadIds.has(e.thread_id));
+                        
+                        if (uniqueNewEmails.length > 0) {
+                            emailCache.data = [...emailCache.data, ...uniqueNewEmails];
+                            emailCache.timestamp = Date.now();
+                            saveEmailCacheToStorage(); // Save to localStorage
+                            console.log(`✅ Added ${uniqueNewEmails.length} new emails to cache (${newEmails.length} fetched, ${newEmails.length - uniqueNewEmails.length} duplicates skipped)`);
+                        } else {
+                            console.log(`ℹ️  No new unique emails (${newEmails.length} fetched were already in cache)`);
+                        }
+                    } else if (emailCache.data.length === 0) {
+                        // Empty result and empty cache - truly no emails
+                        console.log('ℹ️  No emails found (incremental sync returned empty, cache is empty)');
+                    } else {
+                        // Empty result but cache exists - no new emails since last sync
+                        console.log(`ℹ️  No new emails (incremental sync returned empty, keeping ${emailCache.data.length} cached emails)`);
+                    }
+                    
+                    // Update cache timestamp
+                    emailCache.timestamp = Date.now();
+                    saveEmailCacheToStorage(); // Save to localStorage
+                    allEmails = emailCache.data; // Use merged cache
                 }
                 
-                // Update cache timestamp
-                emailCache.timestamp = Date.now();
-                saveEmailCacheToStorage(); // Save to localStorage
-                allEmails = emailCache.data; // Use merged cache
-            }
-            
-            applyFilters(); // Apply filters including search
-            const emailCountEl = document.getElementById('emailCount');
-            if (emailCountEl) {
-                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
-                if (newEmails.length > 0) {
-                    emailCountEl.textContent = `${allEmails.length} total (${newEmails.length} new)${searchText}`;
-                } else if (allEmails.length > 0) {
-                    // Loaded from database/cache - unread filter doesn't apply
-                    emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''} (no new emails)${searchText}`;
-                } else {
-                    emailCountEl.textContent = `0 emails${searchText}`;
+                applyFilters(); // Apply filters including search
+                const emailCountEl = document.getElementById('emailCount');
+                if (emailCountEl) {
+                    const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                    if (newEmails.length > 0) {
+                        emailCountEl.textContent = `${allEmails.length} total (${newEmails.length} new)${searchText}`;
+                    } else if (allEmails.length > 0) {
+                        // Loaded from database/cache - unread filter doesn't apply
+                        emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''} (no new emails)${searchText}`;
+                    } else {
+                        emailCountEl.textContent = `0 emails${searchText}`;
+                    }
                 }
-            }
-            
-            // Reload deals if on Deal Flow tab
-            if (currentTab === 'deal-flow') {
-                loadDeals();
-            }
-        } else {
-            // Check for rate limit error
-            if (response.status === 429 || data.rate_limit) {
-                const retryAfter = data.retry_after || 'a few minutes';
-                showAlert('warning', `⚠️ Gmail API rate limit exceeded. Please wait until ${retryAfter} before trying again.`);
-                emailList.innerHTML = `<div class="empty-state"><p>⚠️ Rate Limit Exceeded<br><small style="color: var(--text-secondary);">Please wait until ${retryAfter} before fetching emails again</small></p></div>`;
+                
+                // Reload deals if on Deal Flow tab
+                if (currentTab === 'deal-flow') {
+                    loadDeals();
+                }
             } else {
-                showAlert('error', data.error || 'Failed to fetch emails');
-                emailList.innerHTML = '<div class="empty-state"><p>Failed to fetch emails. Check console for details.</p></div>';
+                // Check for rate limit error
+                if (fallbackResponse.status === 429 || data.rate_limit) {
+                    const retryAfter = data.retry_after || 'a few minutes';
+                    showAlert('warning', `⚠️ Gmail API rate limit exceeded. Please wait until ${retryAfter} before trying again.`);
+                    emailList.innerHTML = `<div class="empty-state"><p>⚠️ Rate Limit Exceeded<br><small style="color: var(--text-secondary);">Please wait until ${retryAfter} before fetching emails again</small></p></div>`;
+                } else {
+                    showAlert('error', data.error || 'Failed to fetch emails');
+                    emailList.innerHTML = '<div class="empty-state"><p>Failed to fetch emails. Check console for details.</p></div>';
+                }
             }
             return; // Exit after fallback processing
         }
