@@ -5,6 +5,7 @@ Each user manages their own Gmail account with complete privacy
 """
 import os
 import json
+from threading import Semaphore
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session, send_file
 from werkzeug.utils import secure_filename
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
@@ -15,6 +16,9 @@ from gmail_client import GmailClient, SCOPES
 from openai_client import OpenAIClient
 from email_classifier import EmailClassifier, CATEGORY_DEAL_FLOW, CATEGORY_NETWORKING, CATEGORY_HIRING, CATEGORY_SPAM, CATEGORY_GENERAL, TAG_DEAL, TAG_GENERAL
 # from tracxn_scorer import TracxnScorer  # Removed - scoring system disabled
+
+# Rate limiting: Max concurrent OpenAI API calls to prevent 429 errors
+CLASSIFICATION_SEMAPHORE = Semaphore(3)  # Max 3 concurrent classifications
 
 # Load environment variables
 load_dotenv()
@@ -783,16 +787,18 @@ def get_emails():
                             }
                         else:
                             try:
-                                classification_result = classifier.classify_email(
-                                    subject=email.get('subject', ''),
-                                    body=email_body_full,  # Includes PDF content
-                                    headers=headers,
-                                    sender=email.get('from', ''),
-                                    links=links,
-                                    has_pdf_attachment=has_pdf_deck,  # Pass PDF indicator
-                                    thread_id=email.get('thread_id'),
-                                    user_id=str(current_user.id)
-                                )
+                                # Rate limit concurrent classifications to prevent 429 errors
+                                with CLASSIFICATION_SEMAPHORE:
+                                    classification_result = classifier.classify_email(
+                                        subject=email.get('subject', ''),
+                                        body=email_body_full,  # Includes PDF content
+                                        headers=headers,
+                                        sender=email.get('from', ''),
+                                        links=links,
+                                        has_pdf_attachment=has_pdf_deck,  # Pass PDF indicator
+                                        thread_id=email.get('thread_id'),
+                                        user_id=str(current_user.id)
+                                    )
                             except Exception as classify_error:
                                 # If classification fails (e.g., OpenAI quota/rate limit), use deterministic only
                                 error_str = str(classify_error)
@@ -1347,15 +1353,17 @@ def reclassify_email():
                 'links': links
             }
         else:
-            classification_result = classifier.classify_email(
-                subject=email.get('subject', ''),
-                body=email_body_for_classification,  # Includes PDF content
-                headers=headers,
-                sender=email.get('from', ''),
-                links=links,
-                thread_id=email.get('thread_id'),
-                user_id=str(current_user.id)
-            )
+            # Rate limit concurrent classifications to prevent 429 errors
+            with CLASSIFICATION_SEMAPHORE:
+                classification_result = classifier.classify_email(
+                    subject=email.get('subject', ''),
+                    body=email_body_for_classification,  # Includes PDF content
+                    headers=headers,
+                    sender=email.get('from', ''),
+                    links=links,
+                    thread_id=email.get('thread_id'),
+                    user_id=str(current_user.id)
+                )
         
         # Store new classification
         new_classification = EmailClassification(
@@ -1512,15 +1520,17 @@ def generate_reply():
             headers = data.get('headers', {})
             links = classifier.extract_links(body)
             
-            classification_result = classifier.classify_email(
-                subject=subject,
-                body=body,  # This should already be combined_text if available
-                headers=headers,
-                sender=sender,
-                links=links,
-                thread_id=data.get('thread_id'),
-                user_id=str(current_user.id)
-            )
+            # Rate limit concurrent classifications to prevent 429 errors
+            with CLASSIFICATION_SEMAPHORE:
+                classification_result = classifier.classify_email(
+                    subject=subject,
+                    body=body,  # This should already be combined_text if available
+                    headers=headers,
+                    sender=sender,
+                    links=links,
+                    thread_id=data.get('thread_id'),
+                    user_id=str(current_user.id)
+                )
             
             category = classification_result['category']
         else:
