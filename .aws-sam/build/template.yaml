@@ -1,0 +1,18 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Lambda Layer for Python Dependencies
+Resources:
+  PythonDependenciesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: python-dependencies-layer
+      Description: OpenAI, cryptography, boto3 for email classifier
+      ContentUri: ../../layer
+      CompatibleRuntimes:
+      - python3.11
+      RetentionPolicy: Retain
+Outputs:
+  LayerVersionArn:
+    Description: ARN of the Lambda Layer
+    Value:
+      Ref: PythonDependenciesLayer

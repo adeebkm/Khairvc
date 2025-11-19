@@ -1,0 +1,96 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "LambdaManagement",
+            "Effect": "Allow",
+            "Action": [
+                "lambda:CreateFunction",
+                "lambda:UpdateFunctionCode",
+                "lambda:GetFunction",
+                "lambda:ListFunctions",
+                "lambda:UpdateFunctionConfiguration",
+                "lambda:PutFunctionConcurrency",
+                "lambda:DeleteFunction"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "IAMRoleManagement",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateRole",
+                "iam:GetRole",
+                "iam:AttachRolePolicy",
+                "iam:PutRolePolicy",
+                "iam:CreateUser",
+                "iam:GetUser",
+                "iam:CreateAccessKey",
+                "iam:AttachUserPolicy",
+                "iam:PutUserPolicy",
+                "iam:ListAttachedUserPolicies",
+                "iam:ListUserPolicies",
+                "iam:ListRoles"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "PassRoleToLambda",
+            "Effect": "Allow",
+            "Action": [
+                "iam:PassRole"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "iam:PassedToService": "lambda.amazonaws.com"
+                }
+            }
+        },
+        {
+            "Sid": "SecretsManagerManagement",
+            "Effect": "Allow",
+            "Action": [
+                "secretsmanager:CreateSecret",
+                "secretsmanager:UpdateSecret",
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+                "secretsmanager:ListSecrets"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "CloudWatchLogsManagement",
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:PutRetentionPolicy",
+                "logs:DescribeLogGroups",
+                "logs:PutLogEvents",
+                "logs:CreateLogStream"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "SNSPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "sns:CreateTopic",
+                "sns:Subscribe",
+                "sns:ListTopics"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "ReadAccountInfo",
+            "Effect": "Allow",
+            "Action": [
+                "sts:GetCallerIdentity",
+                "iam:ListAccountAliases"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+
+![1763424421168](image/iam_policy_minimal/1763424421168.png)![1763424424174](image/iam_policy_minimal/1763424424174.png)![1763424425041](image/iam_policy_minimal/1763424425041.png)![1763424425844](image/iam_policy_minimal/1763424425844.png)
