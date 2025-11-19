@@ -681,6 +681,60 @@ def trigger_email_sync():
             'error': f'Failed to start sync: {str(e)}'
         }), 500
 
+@app.route('/api/workers/status')
+@login_required
+def check_workers_status():
+    """Check if Celery workers are running"""
+    if not CELERY_AVAILABLE:
+        return jsonify({
+            'success': False,
+            'celery_available': False,
+            'message': 'Celery not available'
+        })
+    
+    try:
+        from celery_config import celery
+        
+        # Check active workers
+        inspect = celery.control.inspect()
+        
+        active_workers = inspect.active()
+        registered_workers = inspect.registered()
+        stats = inspect.stats()
+        
+        worker_count = len(active_workers) if active_workers else 0
+        registered_count = len(registered_workers) if registered_workers else 0
+        
+        # Check Redis connection
+        redis_connected = False
+        try:
+            from celery_config import celery
+            celery.control.broadcast('ping', reply=True, timeout=1)
+            redis_connected = True
+        except:
+            pass
+        
+        return jsonify({
+            'success': True,
+            'celery_available': True,
+            'redis_connected': redis_connected,
+            'active_workers': worker_count,
+            'registered_workers': registered_count,
+            'worker_details': {
+                'active': list(active_workers.keys()) if active_workers else [],
+                'registered': list(registered_workers.keys()) if registered_workers else [],
+                'stats': stats if stats else {}
+            },
+            'message': f'Found {worker_count} active worker(s)' if worker_count > 0 else 'No active workers found'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'celery_available': True,
+            'error': str(e),
+            'message': 'Could not check worker status'
+        }), 500
+
 @app.route('/api/emails/sync/status/<task_id>')
 @login_required
 def get_sync_status(task_id):
