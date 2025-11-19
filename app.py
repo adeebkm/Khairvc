@@ -140,7 +140,14 @@ def set_user_context_for_rls():
 
 # Initialize database
 with app.app_context():
-    db.create_all()
+    # Only create tables if they don't exist (safer for production)
+    try:
+        db.create_all()
+    except Exception as e:
+        # Ignore errors about existing tables/sequences (normal in production)
+        if 'already exists' not in str(e).lower() and 'duplicate key' not in str(e).lower():
+            print(f"⚠️  Database initialization warning: {e}")
+        # Tables likely already exist, which is fine
     
     # CRITICAL: Auto-run migration BEFORE any queries
     # Add encryption columns if they don't exist (must run first!)
@@ -633,6 +640,23 @@ def trigger_email_sync():
         }), 503
     
     try:
+        from celery_config import celery
+        
+        # Check if workers are actually running by inspecting active workers
+        try:
+            inspect = celery.control.inspect()
+            active_workers = inspect.active()
+            if not active_workers:
+                # No workers available - return 503 to trigger fallback
+                return jsonify({
+                    'success': False,
+                    'error': 'No Celery workers available. Please use /api/emails endpoint.'
+                }), 503
+        except Exception as worker_check_error:
+            # If we can't check workers, still try to queue the task
+            # Frontend will timeout and fall back if worker isn't running
+            print(f"⚠️  Could not check worker status: {worker_check_error}")
+        
         # Get parameters
         max_emails = min(request.json.get('max', 50), 100)  # Cap at 100
         force_full_sync = request.json.get('force_full_sync', False)

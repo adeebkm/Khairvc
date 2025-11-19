@@ -990,12 +990,9 @@ async function fetchEmails() {
                     await pollTaskStatus(syncData.task_id, loading, emailList, fetchBtn);
                     return; // Success - exit function
                 } catch (pollError) {
-                    console.error('Error polling task status:', pollError);
-                    showAlert('error', `Sync failed: ${pollError.message}`);
-                    loading.style.display = 'none';
-                    if (fetchBtn) fetchBtn.disabled = false;
-                    isFetching = false;
-                    return; // Exit on error
+                    console.warn('⚠️  Background task polling failed, falling back to streaming:', pollError.message);
+                    // Don't show error alert - just fall through to streaming endpoint
+                    // This happens when worker isn't running, which is expected in some deployments
                 }
             } else if (syncResponse.status === 503) {
                 // Celery not available - fall back to streaming
@@ -1183,7 +1180,9 @@ async function fetchEmails() {
 // PHASE 1: Poll background task status
 async function pollTaskStatus(taskId, loading, emailList, fetchBtn) {
     const maxAttempts = 300; // 5 minutes max (300 * 1 second)
+    const pendingTimeout = 30; // If PENDING for 30 seconds, assume worker isn't running
     let attempts = 0;
+    let pendingStartTime = null;
     let pollInterval;
     
     return new Promise((resolve, reject) => {
@@ -1203,8 +1202,25 @@ async function pollTaskStatus(taskId, loading, emailList, fetchBtn) {
                 const status = statusData.status;
                 
                 if (status === 'PENDING') {
-                    loading.innerHTML = '<div class="loading-spinner"></div><p>Waiting for worker...</p><p class="loading-progress">Queued</p>';
+                    // Track how long task has been PENDING
+                    if (pendingStartTime === null) {
+                        pendingStartTime = Date.now();
+                    }
+                    
+                    const pendingDuration = (Date.now() - pendingStartTime) / 1000;
+                    
+                    // If stuck in PENDING for too long, assume worker isn't running
+                    if (pendingDuration > pendingTimeout) {
+                        clearInterval(pollInterval);
+                        console.warn(`⚠️  Task stuck in PENDING for ${pendingDuration}s - worker may not be running, falling back to streaming`);
+                        reject(new Error('Worker not responding - falling back to direct sync'));
+                        return;
+                    }
+                    
+                    loading.innerHTML = `<div class="loading-spinner"></div><p>Waiting for worker...</p><p class="loading-progress">Queued (${Math.floor(pendingDuration)}s)</p>`;
                 } else if (status === 'PROGRESS') {
+                    // Reset pending timer once we see progress
+                    pendingStartTime = null;
                     const progress = statusData.progress || 0;
                     const total = statusData.total || 0;
                     const currentEmail = statusData.current_email || '';
