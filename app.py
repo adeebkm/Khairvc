@@ -359,20 +359,6 @@ def signup():
         
         # Redirect to Gmail OAuth (automatic setup)
         return redirect(url_for('connect_gmail') + '?from_signup=true')
-        # Create user
-        user = User(username=username, email=email)
-        user.set_password(password)
-        db.session.add(user)
-        db.session.commit()
-        
-        login_user(user)
-        # Store user ID in session for additional verification
-        session.permanent = True
-        session['user_id'] = user.id
-        session['username'] = user.username
-        
-        # Redirect to Gmail OAuth (automatic setup)
-        return redirect(url_for('connect_gmail') + '?from_signup=true')
     
     return render_template('signup.html')
 
