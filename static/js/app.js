@@ -318,11 +318,11 @@ async function fetchInitialEmailsStreaming(progressBar, progressText) {
                 if (data.email) {
                     processed++;
                     const percent = Math.min((processed / total) * 100, 90);
-                    progressBar.style.width = `${percent}%`;
-                    progressText.textContent = `Processing ${processed} of ${total} emails...`;
+                    if (progressBar) progressBar.style.width = `${percent}%`;
+                    if (progressText) progressText.textContent = `Processing ${processed} of ${total} emails...`;
                 } else if (data.status === 'complete') {
-                    progressBar.style.width = '100%';
-                    progressText.textContent = 'Setup complete!';
+                    if (progressBar) progressBar.style.width = '100%';
+                    if (progressText) progressText.textContent = 'Setup complete!';
                 }
             }
         }
