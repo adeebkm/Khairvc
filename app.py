@@ -106,10 +106,8 @@ def load_user(user_id):
 
 
 # Initialize database
-# Note: db.create_all() commented out to avoid conflicts with existing PostgreSQL schema
-# Tables are already created. Only uncomment if starting fresh.
-# with app.app_context():
-#     db.create_all()
+with app.app_context():
+    db.create_all()
 
 
 # Global OpenAI client (shared API key from .env)
