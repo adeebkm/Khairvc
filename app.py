@@ -357,10 +357,10 @@ def signup():
         session['user_id'] = new_user.id
         session['username'] = new_user.username
         
-        # Redirect to Gmail OAuth (automatic setup)
-        return redirect(url_for('connect_gmail') + '?from_signup=true')
+        # Return success - frontend will show Gmail connection modal
+        return render_template('signup.html', signup_success=True, username=username)
     
-    return render_template('signup.html')
+    return render_template('signup.html', signup_success=False)
 
 
 @app.route('/logout')
@@ -642,10 +642,7 @@ def oauth2callback():
         session.pop('from_signup', None)
         
         # Redirect to dashboard - setup screen will show automatically if setup_completed is False
-        if from_signup:
-            return redirect(url_for('dashboard') + '?auto_setup=true')
-        else:
-            return redirect(url_for('dashboard') + '?connected=true')
+        return redirect(url_for('dashboard') + '?auto_setup=true' if from_signup else '?connected=true')
     
     except Exception as e:
         import traceback

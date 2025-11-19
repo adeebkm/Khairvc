@@ -104,6 +104,66 @@
             <p>Already have an account? <a href="{{ url_for('login') }}">Sign in</a></p>
         </div>
     </div>
+
+    <!-- Gmail Connection Modal -->
+    {% if signup_success %}
+    <div class="modal-overlay" id="gmailModal" style="display: flex;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>Connect Your Gmail Account</h2>
+            </div>
+            <div style="padding: 30px; text-align: center;">
+                <div style="font-size: 64px; margin-bottom: 20px;">📧</div>
+                <p style="font-size: 16px; color: #666; margin-bottom: 30px; line-height: 1.6;">
+                    Welcome, <strong>{{ username }}</strong>!<br>
+                    To get started, please connect your Gmail account.
+                </p>
+                <a href="{{ url_for('connect_gmail') }}?from_signup=true" class="btn btn-primary btn-large" style="display: inline-block; text-decoration: none;">
+                    Connect Gmail Account
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <style>
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+    </style>
 </body>
 </html>
 
