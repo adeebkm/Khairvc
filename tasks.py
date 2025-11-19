@@ -2,9 +2,16 @@
 Background tasks for email processing
 """
 import os
+import sys
 import json
 from celery import current_task
 from celery_config import celery
+
+# Ensure the app directory is in Python path (for Railway worker)
+if '/app' not in sys.path:
+    sys.path.insert(0, '/app')
+if os.getcwd() not in sys.path:
+    sys.path.insert(0, os.getcwd())
 
 # Import models and clients inside functions to avoid circular imports
 
