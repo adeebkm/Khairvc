@@ -37,6 +37,9 @@ app.config['SESSION_COOKIE_SECURE'] = False  # Let Railway/proxy handle HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Allow cookies on OAuth redirects
 app.config['PERMANENT_SESSION_LIFETIME'] = 1800  # 30 minutes
+# Add domain restriction to prevent session sharing between localhost and Railway
+app.config['SESSION_COOKIE_DOMAIN'] = None  # Restrict to current domain only
+app.config['SESSION_COOKIE_PATH'] = '/'
 
 # Trust proxy headers for HTTPS detection (required for Railway)
 # This allows Flask to detect HTTPS when behind a reverse proxy
