@@ -484,7 +484,10 @@ class GmailClient:
             # Convert headers to dictionary for classification
             headers_dict = {h['name']: h['value'] for h in headers_list}
             
-            body = self._get_email_body(message['payload'])
+            # Extract both plain text and HTML bodies
+            body_plain, body_html = self._get_email_bodies(message['payload'])
+            # For classification and snippet we prefer plain text, fall back to HTML if needed
+            body = body_plain or body_html or ''
             
             # Extract and parse attachments
             attachments_data = self._extract_attachments(message['payload'], message_id)
@@ -497,12 +500,12 @@ class GmailClient:
                 if att.get('mime_type') == 'application/pdf':
                     pdf_attachments.append(att)
             
-            # Combine body with attachment text
+            # Combine body with attachment text (for classification)
             combined_text = body
             if attachment_texts:
                 combined_text = f"{body}\n\n--- Attachment Content ---\n\n" + "\n\n".join(attachment_texts)
             
-            # Decode HTML entities in body and snippet
+            # Decode HTML entities in body and snippet (classification uses plain text)
             if body:
                 body = html.unescape(body)
             if combined_text:
@@ -526,6 +529,7 @@ class GmailClient:
                 'from': sender,
                 'to': recipient,  # Add 'to' field for sent emails
                 'body': body,
+                'body_html': body_html,  # Raw HTML body (for rich rendering in UI)
                 'combined_text': combined_text,  # Body + attachment text
                 'snippet': snippet,
                 'date': message.get('internalDate'),  # Gmail timestamp in milliseconds
@@ -556,30 +560,67 @@ class GmailClient:
             print(f"Error fetching email details for {message_id}: {str(e)}")
             return None
     
-    def _get_email_body(self, payload):
-        """Extract email body from payload"""
-        body = ""
+    def _get_email_bodies(self, payload):
+        """
+        Extract both plain text and HTML bodies from payload.
+        Returns: (body_plain, body_html)
+        """
+        body_plain = ""
+        body_html = ""
+        
+        def decode_part(part_body):
+            try:
+                return base64.urlsafe_b64decode(part_body['data']).decode('utf-8')
+            except Exception:
+                try:
+                    return base64.urlsafe_b64decode(part_body['data']).decode('latin-1', errors='ignore')
+                except Exception:
+                    return ""
         
         if 'parts' in payload:
             for part in payload['parts']:
-                if part['mimeType'] == 'text/plain':
-                    if 'data' in part['body']:
-                        body = base64.urlsafe_b64decode(
-                            part['body']['data']
-                        ).decode('utf-8')
-                        break
-                elif part['mimeType'] == 'text/html' and not body:
-                    if 'data' in part['body']:
-                        body = base64.urlsafe_b64decode(
-                            part['body']['data']
-                        ).decode('utf-8')
+                mime_type = part.get('mimeType', '')
+                part_body = part.get('body', {})
+                
+                # Nested multi-part (e.g., alternative)
+                if 'parts' in part:
+                    p_plain, p_html = self._get_email_bodies(part)
+                    if p_plain and not body_plain:
+                        body_plain = p_plain
+                    if p_html and not body_html:
+                        body_html = p_html
+                    continue
+                
+                if 'data' not in part_body:
+                    continue
+                
+                if mime_type == 'text/plain' and not body_plain:
+                    body_plain = decode_part(part_body)
+                elif mime_type == 'text/html' and not body_html:
+                    body_html = decode_part(part_body)
         else:
-            if 'body' in payload and 'data' in payload['body']:
-                body = base64.urlsafe_b64decode(
-                    payload['body']['data']
-                ).decode('utf-8')
+            # Single-part message
+            mime_type = payload.get('mimeType', '')
+            body = payload.get('body', {})
+            if 'data' in body:
+                decoded = decode_part(body)
+                if mime_type == 'text/plain':
+                    body_plain = decoded
+                elif mime_type == 'text/html':
+                    body_html = decoded
+                else:
+                    # Unknown type - treat as plain text fallback
+                    body_plain = decoded
         
-        return body
+        return body_plain, body_html
+    
+    def _get_email_body(self, payload):
+        """
+        Backwards-compatible helper: return a single body string.
+        Prefer plain text, fall back to HTML.
+        """
+        body_plain, body_html = self._get_email_bodies(payload)
+        return body_plain or body_html or ""
     
     def _extract_attachments(self, payload, message_id):
         """Extract attachments from email payload and parse text content"""

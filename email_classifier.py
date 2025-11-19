@@ -184,8 +184,8 @@ class EmailClassifier:
         sender_lower = sender.lower()
         return any(pattern in sender_lower for pattern in noreply_patterns)
     
-    def check_newsletter_sender(self, sender: str, subject: str, headers: Dict[str, str], body: str = "") -> bool:
-        """Check if email is from a newsletter service (including forwarded newsletters)"""
+    def check_newsletter_sender(self, sender: str, subject: str, headers: Dict[str, str]) -> bool:
+        """Check if email is from a newsletter service"""
         # Common newsletter platforms and services
         newsletter_domains = [
             'substack.com',
@@ -199,11 +199,7 @@ class EmailClassifier:
             'sendinblue.com',
             'mail.google.com',  # Google notifications
             'accounts.google.com',  # Google account alerts
-            'bounce.google.com',
-            'engage.canva.com',  # Canva marketing
-            'marketing@',  # Generic marketing emails
-            'no-reply@',
-            'noreply@'
+            'bounce.google.com'
         ]
         
         sender_lower = sender.lower()
@@ -212,25 +208,8 @@ class EmailClassifier:
         if any(domain in sender_lower for domain in newsletter_domains):
             return True
         
-        # Check for forwarded newsletters
-        # Look for "---------- Forwarded message ---------" pattern
-        if '---------- Forwarded message ---------' in body or 'Forwarded message' in body:
-            # Extract original sender from forwarded content
-            import re
-            # Look for "From: <email>" pattern in forwarded content
-            forwarded_from_match = re.search(r'From:\s*([^\n<]*<?[^\s>]+@[^\s>]+>?)', body, re.IGNORECASE)
-            if forwarded_from_match:
-                original_sender = forwarded_from_match.group(1).lower()
-                # Check if original sender is from a newsletter domain
-                if any(domain in original_sender for domain in newsletter_domains):
-                    return True
-        
         # Check for unsubscribe links in headers
         if 'List-Unsubscribe' in headers or 'List-Id' in headers:
-            return True
-        
-        # Check for unsubscribe links in body (common in forwarded newsletters)
-        if 'unsubscribe' in body.lower() and ('click here' in body.lower() or 'preferences' in body.lower()):
             return True
         
         # Check subject for newsletter indicators
@@ -278,27 +257,11 @@ class EmailClassifier:
             'startup building', 'company building'
         ]
         
-        # VC-specific referral patterns (stronger indicators)
-        vc_referral_patterns = [
-            'we may invest', 'may invest in', 'invest in them', 'invest in this',
-            'fits our thesis', 'fits your thesis', 'fits the thesis',
-            'check them out', 'check this out', 'take a look at them',
-            'worth looking at', 'worth evaluating', 'worth considering',
-            'good fit for', 'fit for your', 'fit for the fund',
-            'introducing you to', 'intro to a', 'introducing a'
-        ]
-        
-        # Strong indicator: VC-specific referral language
-        has_vc_referral = any(pattern in text for pattern in vc_referral_patterns)
-        
-        # Traditional intro pattern
+        # Must have intro pattern AND mention of team/startup/founder
         has_intro_pattern = any(pattern in text for pattern in intro_patterns)
-        has_startup_mention = any(word in text for word in ['team', 'founder', 'startup', 'building', 'company', 'them', 'this'])
+        has_startup_mention = any(word in text for word in ['team', 'founder', 'startup', 'building', 'company'])
         
-        # Return True if either:
-        # 1. VC-specific referral pattern (high confidence), OR
-        # 2. Traditional intro pattern + startup mention
-        return has_vc_referral or (has_intro_pattern and has_startup_mention)
+        return has_intro_pattern and has_startup_mention
     
     def check_follow_up_indicators(self, subject: str, body: str) -> bool:
         """Check if email is a follow-up that might be investment-related"""
@@ -412,7 +375,7 @@ class EmailClassifier:
         # RULE 3: GENERAL CHECK (newsletters, automated emails, subscriptions)
         # Check for newsletters and automated emails BEFORE deal flow
         # These should NEVER be deal flow, even if they mention startup keywords
-        is_newsletter = self.check_newsletter_sender(sender, subject, headers, body)
+        is_newsletter = self.check_newsletter_sender(sender, subject, headers)
         is_noreply = self.check_noreply_sender(sender)
         
         if is_newsletter or is_noreply:
@@ -838,13 +801,10 @@ Return ONLY the JSON object. No additional text."""
             
             # Apply tie-breaker hierarchy (if deterministic strongly suggests something)
             # But generally trust OpenAI's comprehensive analysis
-            if deterministic_category == CATEGORY_DEAL_FLOW:
-                # If deterministic believes it's deal flow (especially with high confidence from warm intro detection)
-                # Override AI classification unless AI is very confident (>0.90) it's something else
-                if confidence < 0.90:
-                    # Trust deterministic for deal flow (warm intros, fundraising keywords, etc.)
-                    category = CATEGORY_DEAL_FLOW
-                    confidence = max(0.85, confidence)
+            if deterministic_category == CATEGORY_DEAL_FLOW and confidence < 0.80:
+                # If deterministic strongly believes it's deal flow, and AI is uncertain, lean toward deal flow
+                category = CATEGORY_DEAL_FLOW
+                confidence = 0.85
             
             return (category, confidence)
         

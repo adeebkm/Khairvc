@@ -5,20 +5,19 @@ Each user manages their own Gmail account with complete privacy
 """
 import os
 import json
-from dotenv import load_dotenv
-
-# Load environment variables FIRST (before any imports that use them)
-load_dotenv()
-
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session, send_file
 from werkzeug.utils import secure_filename
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from dotenv import load_dotenv
 from models import db, User, GmailToken, EmailClassification, Deal
 from auth import encrypt_token, decrypt_token
 from gmail_client import GmailClient, SCOPES
 from openai_client import OpenAIClient
 from email_classifier import EmailClassifier, CATEGORY_DEAL_FLOW, CATEGORY_NETWORKING, CATEGORY_HIRING, CATEGORY_SPAM, CATEGORY_GENERAL, TAG_DEAL, TAG_GENERAL
 # from tracxn_scorer import TracxnScorer  # Removed - scoring system disabled
+
+# Load environment variables
+load_dotenv()
 
 # Debug: Print SEND_EMAILS value on startup
 send_emails_debug = os.getenv('SEND_EMAILS', 'false')

@@ -1516,7 +1516,8 @@ function renderThreadMessage(email, isFirst = false) {
     const { senderName, senderEmail } = parseSender(email.from || '');
     const avatarLetter = (senderName || senderEmail).charAt(0).toUpperCase();
     const dateText = formatDate(email.date);
-    const bodyHtml = formatEmailBody(email.body || email.snippet || '');
+    const hasHtmlBody = !!(email.body_html || email.bodyHtml);
+    const plainBodyHtml = formatEmailBody(email.body || email.snippet || '');
     
     // Handle attachments - use message_id for each attachment
     let attachmentsHtml = '';
@@ -1531,12 +1532,33 @@ function renderThreadMessage(email, isFirst = false) {
             if (mimeType === 'application/pdf') {
                 // Use message_id instead of thread_id so each message's attachments work correctly
                 return `<a href="/api/attachment/${escapeHtml(email.id)}/${encodedFilename}" target="_blank" class="attachment-link" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; color: var(--primary-color); text-decoration: none; margin-right: 8px; margin-bottom: 8px;">📎 ${escapeHtml(filename)}</a>`;
+            } else if (mimeType.startsWith('image/')) {
+                // Inline preview for image attachments
+                const url = `/api/attachment/${escapeHtml(email.id)}/${encodedFilename}`;
+                return `
+                    <a href="${url}" target="_blank" class="attachment-link" style="display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; text-decoration: none; margin-right: 8px; margin-bottom: 8px;">
+                        <span style="color: var(--text-secondary); font-size: 12px; margin-bottom: 4px;">📎 ${escapeHtml(filename)}</span>
+                        <img src="${url}" alt="${escapeHtml(filename)}" style="max-width: 220px; max-height: 160px; border-radius: 6px; display: block; object-fit: contain; background: #fff;" />
+                    </a>
+                `;
             } else {
-                return `<span class="attachment-link" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-secondary); margin-right: 8px; margin-bottom: 8px;">📎 ${escapeHtml(filename)}</span>`;
+                // Generic downloadable attachment
+                const url = `/api/attachment/${escapeHtml(email.id)}/${encodedFilename}`;
+                return `<a href="${url}" target="_blank" class="attachment-link" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-secondary); text-decoration: none; margin-right: 8px; margin-bottom: 8px;">📎 ${escapeHtml(filename)}</a>`;
             }
         }).join('');
         attachmentsHtml = `<div style="margin-bottom: 16px; margin-top: 12px;"><strong style="color: var(--text-primary); font-size: 13px;">Attachments:</strong><div style="margin-top: 8px;">${attHtml}</div></div>`;
     }
+    
+    const bodySection = hasHtmlBody
+        ? `
+            <div class="thread-message-body html-mode" data-email-id="${escapeHtml(email.id || '')}" style="padding-left: 52px; line-height: 1.6; color: var(--text-primary); margin-bottom: 16px;"></div>
+            <div class="thread-message-body plain-fallback" style="padding-left: 52px; line-height: 1.6; color: var(--text-secondary); font-size: 13px;">
+                ${plainBodyHtml}
+            </div>`
+        : `<div class="thread-message-body" style="padding-left: 52px; line-height: 1.6; color: var(--text-primary);">
+                ${plainBodyHtml}
+           </div>`;
     
     return `
         <div class="thread-message" style="border-bottom: 1px solid var(--border-color); padding: 20px 0; ${isFirst ? 'padding-top: 0;' : ''}">
@@ -1555,11 +1577,80 @@ function renderThreadMessage(email, isFirst = false) {
                 </div>
             </div>
             ${attachmentsHtml}
-            <div class="thread-message-body" style="padding-left: 52px; line-height: 1.6; color: var(--text-primary);">
-                ${bodyHtml}
-            </div>
+            ${bodySection}
         </div>
     `;
+}
+
+// Enhance HTML emails by rendering body_html inside sandboxed iframes
+function sanitizeEmailHtml(rawHtml) {
+    if (!rawHtml) return '';
+    try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(rawHtml, 'text/html');
+        
+        // Remove scripts
+        doc.querySelectorAll('script').forEach(el => el.remove());
+        
+        // Remove inline event handlers (onclick, onload, etc.)
+        doc.querySelectorAll('*').forEach(el => {
+            [...el.attributes].forEach(attr => {
+                if (attr.name.toLowerCase().startsWith('on')) {
+                    el.removeAttribute(attr.name);
+                }
+            });
+        });
+        
+        return doc.documentElement.innerHTML;
+    } catch (e) {
+        console.error('Error sanitizing email HTML:', e);
+        return rawHtml;
+    }
+}
+
+function enhanceHtmlEmails(emails) {
+    try {
+        if (!emails || !emails.length) return;
+        const threadContainer = document.getElementById('threadContainer');
+        if (!threadContainer) return;
+        
+        emails.forEach(email => {
+            const htmlBody = email.body_html || email.bodyHtml;
+            if (!htmlBody || !htmlBody.trim()) return;
+            if (!email.id) return;
+            
+            const selector = `.thread-message-body.html-mode[data-email-id="${CSS && CSS.escape ? CSS.escape(email.id) : email.id}"]`;
+            const node = threadContainer.querySelector(selector);
+            if (!node) return;
+            
+            node.innerHTML = '';
+            const iframe = document.createElement('iframe');
+            iframe.className = 'email-html-frame';
+            iframe.setAttribute('sandbox', 'allow-same-origin'); // no scripts, but allow styles
+            iframe.style.width = '100%';
+            iframe.style.border = 'none';
+            iframe.style.minHeight = '400px';
+            
+            node.appendChild(iframe);
+            
+            const safeHtml = sanitizeEmailHtml(htmlBody);
+            iframe.srcdoc = safeHtml;
+            
+            iframe.addEventListener('load', () => {
+                try {
+                    const doc = iframe.contentDocument || iframe.contentWindow.document;
+                    const height = doc.body ? doc.body.scrollHeight : 0;
+                    if (height) {
+                        iframe.style.height = height + 'px';
+                    }
+                } catch (e) {
+                    // Ignore cross-origin or other iframe errors
+                }
+            });
+        });
+    } catch (e) {
+        console.error('Error enhancing HTML emails:', e);
+    }
 }
 
 // Open email in modal - fetch and display full thread
@@ -1690,6 +1781,7 @@ async function openEmail(indexOrEmail) {
     if (currentEmail.body || currentEmail.combined_text) {
         // Render the cached email first
         threadContainer.innerHTML = renderThreadMessage(currentEmail, true);
+        enhanceHtmlEmails([currentEmail]);
     } else {
         threadContainer.innerHTML = '<div class="spinner-small"></div><p>Loading thread...</p>';
     }
@@ -1725,6 +1817,7 @@ async function openEmail(indexOrEmail) {
                     threadHtml += renderThreadMessage(email, idx === 0);
                 });
                 threadContainer.innerHTML = threadHtml;
+                enhanceHtmlEmails(data.emails);
                 
                 // Use the latest email for reply generation, but preserve original email fields
                 const latestEmail = data.emails[data.emails.length - 1];
