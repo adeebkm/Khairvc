@@ -116,8 +116,8 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
             
             # Initialize classifier
             openai_client = OpenAIClient()
-            lambda_client = LambdaClient()
-            classifier = EmailClassifier(openai_client, lambda_client)
+            # EmailClassifier initializes LambdaClient internally, don't pass it
+            classifier = EmailClassifier(openai_client)
             
             # Process emails
             emails_processed = 0
