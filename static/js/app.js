@@ -1231,19 +1231,45 @@ function clearSearch() {
 function applyFilters() {
     // Reset to first page when filters change
     currentPage = 1;
+    
+    // Ensure allEmails is an array
+    if (!Array.isArray(allEmails)) {
+        console.warn('⚠️ allEmails is not an array, resetting to empty array');
+        allEmails = [];
+    }
+    
     let filtered = allEmails;
     
-    // Apply category filter
+    // Apply category filter - check both email.category and email.classification?.category
     if (currentTab === 'networking') {
-        filtered = allEmails.filter(e => e.classification?.category === 'NETWORKING');
+        filtered = allEmails.filter(e => {
+            const cat = e.category || e.classification?.category || '';
+            return cat.toLowerCase() === 'networking';
+        });
     } else if (currentTab === 'hiring') {
-        filtered = allEmails.filter(e => e.classification?.category === 'HIRING');
+        filtered = allEmails.filter(e => {
+            const cat = e.category || e.classification?.category || '';
+            return cat.toLowerCase() === 'hiring';
+        });
     } else if (currentTab === 'general') {
-        filtered = allEmails.filter(e => e.classification?.category === 'GENERAL');
+        filtered = allEmails.filter(e => {
+            const cat = e.category || e.classification?.category || '';
+            return cat.toLowerCase() === 'general';
+        });
     } else if (currentTab === 'spam') {
-        filtered = allEmails.filter(e => e.classification?.category === 'SPAM');
-    } else if (currentTab === 'deal-flow') {
-        filtered = allEmails.filter(e => e.classification?.category === 'DEAL_FLOW');
+        filtered = allEmails.filter(e => {
+            const cat = e.category || e.classification?.category || '';
+            return cat.toLowerCase() === 'spam';
+        });
+    } else if (currentTab === 'dealflow' || currentTab === 'deal-flow') {
+        filtered = allEmails.filter(e => {
+            const cat = e.category || e.classification?.category || '';
+            return cat.toLowerCase() === 'dealflow' || cat.toLowerCase() === 'deal_flow';
+        });
+    } else if (currentTab === 'sent') {
+        filtered = allEmails.filter(e => e.from_me === true);
+    } else if (currentTab === 'starred') {
+        filtered = allEmails.filter(e => e.starred === true);
     }
     // 'all' shows everything
     
