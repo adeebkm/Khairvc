@@ -284,19 +284,19 @@ Return ONLY the JSON object. No additional text."""
     
     # Create OpenAI-compatible client for Moonshot API (NO logging will occur because we disabled it above)
     # Moonshot uses OpenAI-compatible API, so we can use the OpenAI client with custom base_url
-    # Set timeout at client level (50 seconds to allow for Lambda timeout of 60s)
+    # Set timeout at client level (110 seconds to allow for Lambda timeout of 120s)
     import httpx
     client = OpenAI(
         base_url="https://api.moonshot.ai/v1",
         api_key=api_key,
-        timeout=httpx.Timeout(50.0, connect=10.0)  # 50s total, 10s connect (Lambda timeout is 60s)
+        timeout=httpx.Timeout(110.0, connect=10.0)  # 110s total, 10s connect (Lambda timeout is 120s)
     )
     
     # Call Moonshot API (NO logging - requests/responses won't appear in CloudWatch)
-    # Using kimi-k2-thinking model for test environment
+    # Using kimi-k2-turbo-preview model (faster than kimi-k2-thinking)
     try:
         response = client.chat.completions.create(
-            model="kimi-k2-thinking",
+            model="kimi-k2-turbo-preview",  # Faster model for better performance
             messages=[
                 {"role": "system", "content": "You are a deterministic email classifier for a venture capital firm. Return ONLY valid JSON. No markdown, no explanation, no additional text."},
                 {"role": "user", "content": prompt}

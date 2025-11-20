@@ -253,6 +253,14 @@ async function startSetup() {
             
             // Load emails and display
             await loadEmailsFromDatabase();
+            
+            // Ensure emails are actually loaded before proceeding
+            if (allEmails.length === 0) {
+                console.warn('⚠️ No emails found even though setup says complete - retrying...');
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                await loadEmailsFromDatabase();
+            }
+            
             // Hide setup screen FIRST
             if (setupScreen) setupScreen.style.display = 'none';
             const compactHeader = document.querySelector('.main-content > .compact-header');
@@ -264,6 +272,17 @@ async function startSetup() {
             // Then apply filters and display emails
             applyFilters();
             updatePagination();
+            
+            // Double-check emails are displayed
+            setTimeout(() => {
+                const visibleCount = emailListEl ? emailListEl.querySelectorAll('.email-item').length : 0;
+                if (visibleCount === 0 && allEmails.length > 0) {
+                    console.warn('⚠️ Emails not visible, forcing display...');
+                    applyFilters();
+                    updatePagination();
+                }
+            }, 500);
+            
             showAlert('success', `Setup complete! Found ${data.email_count} existing emails.`);
             return; // Exit early since setup is already complete
         } else if (data.success && data.task_id) {
@@ -302,10 +321,27 @@ async function startSetup() {
         
         // Load emails FIRST before hiding setup screen
         console.log('📧 Loading emails from database after setup...');
-        await loadEmailsFromDatabase();
         
-        // Wait a moment for emails to be processed
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Wait a bit for background classification to complete (emails might still be processing)
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Try loading emails multiple times (classification might still be in progress)
+        let retryCount = 0;
+        const maxRetries = 5;
+        while (retryCount < maxRetries) {
+            await loadEmailsFromDatabase();
+            
+            if (allEmails.length > 0) {
+                console.log(`✅ Loaded ${allEmails.length} emails after ${retryCount + 1} attempt(s)`);
+                break;
+            }
+            
+            retryCount++;
+            if (retryCount < maxRetries) {
+                console.log(`⏳ No emails yet, retrying in 2 seconds... (${retryCount}/${maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
         
         // Verify emails were loaded
         console.log(`📧 Setup complete: ${allEmails.length} emails loaded`);
@@ -313,10 +349,10 @@ async function startSetup() {
         // If no emails were loaded, don't hide setup screen - show error instead
         if (allEmails.length === 0) {
             console.warn('⚠️ No emails loaded after setup - keeping setup screen visible');
-            if (progressText) progressText.textContent = 'No emails were loaded. Please check worker configuration and try again.';
+            if (progressText) progressText.textContent = 'No emails were loaded. Emails may still be processing. Please wait or refresh the page.';
             if (startBtn) startBtn.style.display = 'block';
             if (progressDiv) progressDiv.style.display = 'none';
-            showAlert('warning', 'Setup completed but no emails were loaded. This may be due to worker configuration issues.');
+            showAlert('warning', 'Setup completed but no emails were loaded yet. Emails may still be processing in the background. Please wait a moment and refresh.');
             return; // Don't continue if no emails
         }
         
