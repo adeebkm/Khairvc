@@ -1663,7 +1663,10 @@ async function loadEmailsFromDatabase() {
             const emails = data.emails || [];
             emailCache.data = emails;
             emailCache.timestamp = Date.now();
-            localStorage.setItem('emailCache', JSON.stringify(emailCache));
+            saveEmailCacheToStorage();
+            // CRITICAL: Set allEmails so applyFilters() can use it
+            allEmails = emails;
+            console.log(`✅ Loaded ${emails.length} emails from database`);
             applyFilters();
         } else {
             throw new Error(data.error || 'Failed to load emails');
