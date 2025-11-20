@@ -51,6 +51,12 @@ celery.conf.broker_connection_max_retries = 10  # Max retries
 celery.conf.worker_disable_rate_limits = False  # Keep rate limiting enabled
 celery.conf.worker_send_task_events = True  # Send task events for monitoring
 
+# Railway-specific: Keep worker alive even when idle
+celery.conf.worker_pool_restarts = True  # Allow pool restarts
+celery.conf.worker_hijack_root_logger = False  # Don't hijack root logger (prevents Railway from thinking worker is dead)
+celery.conf.worker_log_format = '[%(asctime)s: %(levelname)s/%(processName)s] %(message)s'
+celery.conf.worker_task_log_format = '[%(asctime)s: %(levelname)s/%(processName)s][%(task_name)s(%(task_id)s)] %(message)s'
+
 # Import tasks to register them with Celery
 # This ensures tasks are available when the worker starts
 try:
