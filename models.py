@@ -58,6 +58,10 @@ class GmailToken(db.Model):
     encrypted_token = db.Column(db.Text, nullable=False)  # Encrypted JSON token
     selected_signature_email = db.Column(db.String(255))  # Email address of selected send-as alias for signature
     history_id = db.Column(db.String(255))  # Gmail history ID for incremental sync
+    # Pub/Sub fields for push notifications (test environment)
+    pubsub_topic = db.Column(db.String(255))  # Pub/Sub topic name (e.g., projects/PROJECT_ID/topics/gmail-notifications)
+    pubsub_subscription = db.Column(db.String(255))  # Pub/Sub subscription name
+    watch_expiration = db.Column(db.BigInteger)  # Unix timestamp when Gmail watch expires (7 days max)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

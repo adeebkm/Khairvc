@@ -240,6 +240,44 @@ with app.app_context():
             except Exception as user_mig_error:
                 db.session.rollback()
                 print(f"⚠️  User table migration error (non-critical): {user_mig_error}")
+            
+            # Check and add GmailToken table columns for Pub/Sub (test environment)
+            try:
+                result = db.session.execute(text("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'gmail_tokens' 
+                    AND column_name IN ('pubsub_topic', 'pubsub_subscription', 'watch_expiration')
+                """))
+                existing_pubsub_columns = [row[0] for row in result]
+                
+                if 'pubsub_topic' not in existing_pubsub_columns:
+                    db.session.execute(text("""
+                        ALTER TABLE gmail_tokens 
+                        ADD COLUMN IF NOT EXISTS pubsub_topic VARCHAR(255);
+                    """))
+                    print("   ✅ Added pubsub_topic column to gmail_tokens table")
+                
+                if 'pubsub_subscription' not in existing_pubsub_columns:
+                    db.session.execute(text("""
+                        ALTER TABLE gmail_tokens 
+                        ADD COLUMN IF NOT EXISTS pubsub_subscription VARCHAR(255);
+                    """))
+                    print("   ✅ Added pubsub_subscription column to gmail_tokens table")
+                
+                if 'watch_expiration' not in existing_pubsub_columns:
+                    db.session.execute(text("""
+                        ALTER TABLE gmail_tokens 
+                        ADD COLUMN IF NOT EXISTS watch_expiration BIGINT;
+                    """))
+                    print("   ✅ Added watch_expiration column to gmail_tokens table")
+                
+                if len(existing_pubsub_columns) < 3:
+                    db.session.commit()
+                    print("✅ GmailToken Pub/Sub migration completed successfully")
+            except Exception as pubsub_mig_error:
+                db.session.rollback()
+                print(f"⚠️  Pub/Sub migration error (non-critical): {pubsub_mig_error}")
     except Exception as e:
         # Ignore errors for SQLite or if table doesn't exist yet
         if 'sqlite' not in str(e).lower():
@@ -2990,6 +3028,183 @@ def background_fetch_emails():
             'success': False,
             'error': str(e)
         }), 500
+
+
+# ==================== PUB/SUB WEBHOOK (TEST ENVIRONMENT) ====================
+
+@app.route('/api/pubsub/gmail-notifications', methods=['POST'])
+def pubsub_webhook():
+    """
+    Pub/Sub webhook endpoint for Gmail push notifications (test environment).
+    Receives notifications when new emails arrive, reducing API polling.
+    """
+    try:
+        # Verify the request is from Pub/Sub (optional but recommended)
+        # In production, verify the JWT token from Pub/Sub
+        
+        # Parse Pub/Sub message
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data received'}), 400
+        
+        # Pub/Sub sends messages in this format:
+        # {
+        #   "message": {
+        #     "data": "base64-encoded-json",
+        #     "messageId": "...",
+        #     "publishTime": "..."
+        #   },
+        #   "subscription": "..."
+        # }
+        
+        message = data.get('message', {})
+        message_data = message.get('data', '')
+        
+        if not message_data:
+            print("⚠️  Pub/Sub webhook: No message data")
+            return jsonify({'status': 'no_data'}), 200
+        
+        # Decode base64 message data
+        import base64
+        try:
+            decoded_data = base64.b64decode(message_data).decode('utf-8')
+            notification = json.loads(decoded_data)
+        except Exception as e:
+            print(f"⚠️  Error decoding Pub/Sub message: {str(e)}")
+            return jsonify({'error': 'Invalid message format'}), 400
+        
+        # Gmail notification format:
+        # {
+        #   "emailAddress": "user@example.com",
+        #   "historyId": "12345"
+        # }
+        
+        email_address = notification.get('emailAddress')
+        history_id = notification.get('historyId')
+        
+        if not email_address or not history_id:
+            print("⚠️  Pub/Sub webhook: Missing emailAddress or historyId")
+            return jsonify({'status': 'invalid_notification'}), 200
+        
+        print(f"📬 Pub/Sub notification received for {email_address}, historyId: {history_id}")
+        
+        # Find user by email address
+        user = User.query.filter_by(email=email_address).first()
+        if not user:
+            print(f"⚠️  User not found for email: {email_address}")
+            return jsonify({'status': 'user_not_found'}), 200
+        
+        # Get Gmail client for this user
+        gmail = get_user_gmail_client(user)
+        if not gmail:
+            print(f"⚠️  Could not get Gmail client for user {user.id}")
+            return jsonify({'status': 'gmail_client_error'}), 200
+        
+        # Update history_id in database
+        if user.gmail_token:
+            user.gmail_token.history_id = str(history_id)
+            db.session.commit()
+        
+        # Trigger email sync in background (if Celery is available)
+        if CELERY_AVAILABLE:
+            try:
+                task = sync_user_emails.delay(user.id)
+                print(f"✅ Background sync task queued: {task.id}")
+            except Exception as e:
+                print(f"⚠️  Could not queue background task: {str(e)}")
+                # Fallback: sync synchronously (not recommended for production)
+                # This is just for testing
+        else:
+            print("⚠️  Celery not available - sync not triggered automatically")
+        
+        return jsonify({
+            'status': 'success',
+            'email': email_address,
+            'history_id': history_id
+        }), 200
+        
+    except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
+        print(f"❌ Error in Pub/Sub webhook: {str(e)}")
+        print(f"Traceback:\n{error_traceback}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/setup-pubsub', methods=['POST'])
+@login_required
+def setup_pubsub():
+    """
+    Set up Gmail Watch with Pub/Sub for the current user (test environment).
+    Requires USE_PUBSUB=true and PUBSUB_TOPIC environment variables.
+    """
+    try:
+        # Check if Pub/Sub is enabled for test environment
+        use_pubsub = os.getenv('USE_PUBSUB', 'false').lower() == 'true'
+        if not use_pubsub:
+            return jsonify({
+                'success': False,
+                'error': 'Pub/Sub is not enabled. Set USE_PUBSUB=true in environment variables.'
+            }), 400
+        
+        # Get Pub/Sub topic from environment
+        pubsub_topic = os.getenv('PUBSUB_TOPIC')
+        if not pubsub_topic:
+            return jsonify({
+                'success': False,
+                'error': 'PUBSUB_TOPIC not set in environment variables'
+            }), 400
+        
+        # Get user's Gmail client
+        gmail = get_user_gmail_client(current_user)
+        if not gmail:
+            return jsonify({
+                'success': False,
+                'error': 'Gmail not connected'
+            }), 400
+        
+        # Set up Gmail Watch
+        watch_result = gmail.setup_pubsub_watch(pubsub_topic, user_id=current_user.id)
+        
+        if not watch_result:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to set up Gmail Watch. Check logs for details.'
+            }), 500
+        
+        # Store Pub/Sub info in database
+        if not current_user.gmail_token:
+            return jsonify({
+                'success': False,
+                'error': 'Gmail token not found'
+            }), 400
+        
+        gmail_token = current_user.gmail_token
+        gmail_token.pubsub_topic = pubsub_topic
+        gmail_token.watch_expiration = watch_result.get('expiration')
+        
+        if watch_result.get('history_id'):
+            gmail_token.history_id = str(watch_result['history_id'])
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'expiration': watch_result.get('expiration'),
+            'history_id': watch_result.get('history_id'),
+            'message': 'Gmail Watch with Pub/Sub set up successfully. Watch expires in 7 days.'
+        }), 200
+        
+    except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
+        print(f"❌ Error setting up Pub/Sub: {str(e)}")
+        print(f"Traceback:\n{error_traceback}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 
 if __name__ == '__main__':
     print("=" * 60)

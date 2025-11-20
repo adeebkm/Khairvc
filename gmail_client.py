@@ -33,7 +33,8 @@ except ImportError:
 # Gmail API scopes
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.modify',
-    'https://www.googleapis.com/auth/gmail.settings.basic'  # For fetching signatures
+    'https://www.googleapis.com/auth/gmail.settings.basic',  # For fetching signatures
+    'https://www.googleapis.com/auth/pubsub'  # For Pub/Sub push notifications (test environment)
 ]
 
 
@@ -1079,3 +1080,80 @@ class GmailClient:
         except Exception as e:
             print(f"Error getting Gmail profile: {str(e)}")
             return None
+    
+    def setup_pubsub_watch(self, topic_name, user_id=None):
+        """
+        Set up Gmail Watch with Pub/Sub for push notifications (test environment).
+        This reduces API calls by receiving real-time notifications instead of polling.
+        
+        Args:
+            topic_name: Full Pub/Sub topic name (e.g., 'projects/PROJECT_ID/topics/gmail-notifications')
+            user_id: Optional user ID for logging
+        
+        Returns:
+            dict: Watch response with expiration timestamp, or None if failed
+        """
+        if not self.service:
+            print("❌ Gmail service not initialized")
+            return None
+        
+        try:
+            # Gmail Watch API - sets up push notifications via Pub/Sub
+            # Watch expires after 7 days (604800 seconds), must be renewed
+            watch_request = {
+                'topicName': topic_name,
+                'labelIds': ['INBOX'],  # Only watch inbox
+                'labelFilterAction': 'include'  # Include only inbox messages
+            }
+            
+            print(f"📡 Setting up Gmail Watch with Pub/Sub topic: {topic_name}")
+            if user_id:
+                print(f"   User ID: {user_id}")
+            
+            watch_response = self.service.users().watch(
+                userId='me',
+                body=watch_request
+            ).execute()
+            
+            expiration = watch_response.get('expiration')
+            history_id = watch_response.get('historyId')
+            
+            print(f"✅ Gmail Watch established successfully")
+            print(f"   Expiration: {expiration} (Unix timestamp)")
+            print(f"   History ID: {history_id}")
+            
+            return {
+                'expiration': expiration,
+                'history_id': history_id
+            }
+            
+        except Exception as e:
+            error_str = str(e)
+            print(f"❌ Error setting up Gmail Watch: {error_str}")
+            
+            # Common errors:
+            if '403' in error_str or 'permission' in error_str.lower():
+                print("   → Make sure Pub/Sub API is enabled in Google Cloud Console")
+                print("   → Verify the topic exists and the service account has publish permissions")
+            elif '404' in error_str:
+                print("   → Topic not found. Create it in Google Cloud Console first")
+            
+            return None
+    
+    def stop_watch(self):
+        """
+        Stop Gmail Watch (cleanup when disconnecting or switching to polling)
+        
+        Returns:
+            bool: True if successful
+        """
+        if not self.service:
+            return False
+        
+        try:
+            self.service.users().stop(userId='me').execute()
+            print("✅ Gmail Watch stopped")
+            return True
+        except Exception as e:
+            print(f"⚠️  Error stopping Gmail Watch: {str(e)}")
+            return False
