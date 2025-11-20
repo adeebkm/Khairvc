@@ -43,6 +43,14 @@ celery.conf.task_soft_time_limit = 540  # 9 minutes soft limit
 # Result expiration (clean up old results)
 celery.conf.result_expires = 3600  # 1 hour
 
+# Keep worker alive and prevent premature shutdowns
+celery.conf.worker_max_tasks_per_child = 1000  # Restart worker after 1000 tasks (prevents memory leaks)
+celery.conf.broker_connection_retry = True  # Retry broker connections
+celery.conf.broker_connection_retry_on_startup = True  # Retry on startup (for Railway)
+celery.conf.broker_connection_max_retries = 10  # Max retries
+celery.conf.worker_disable_rate_limits = False  # Keep rate limiting enabled
+celery.conf.worker_send_task_events = True  # Send task events for monitoring
+
 # Import tasks to register them with Celery
 # This ensures tasks are available when the worker starts
 try:

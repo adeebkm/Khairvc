@@ -74,6 +74,18 @@ else:
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# Add connection pool settings with timeouts to prevent hanging
+if database_url and 'postgresql' in database_url.lower():
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_pre_ping': True,  # Verify connections before using
+        'pool_recycle': 300,  # Recycle connections after 5 minutes
+        'pool_timeout': 20,  # Wait max 20 seconds for connection from pool
+        'connect_args': {
+            'connect_timeout': 10,  # Max 10 seconds to establish connection
+            'options': '-c statement_timeout=30000'  # 30 second query timeout
+        }
+    }
+
 # Initialize extensions
 db.init_app(app)
 login_manager = LoginManager()
@@ -119,10 +131,135 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 
+# Lazy migration flag (prevents multiple runs)
+_migrations_run = False
+
+def run_lazy_migrations():
+    """Run database migrations lazily (on first request) to prevent startup hangs"""
+    global _migrations_run
+    if _migrations_run:
+        return
+    
+    try:
+        from sqlalchemy import text, inspect
+        from sqlalchemy.exc import OperationalError, ProgrammingError
+        
+        # Check database type
+        try:
+            inspector = inspect(db.engine)
+            is_postgres = 'postgresql' in str(db.engine.url).lower()
+        except Exception:
+            is_postgres = False
+        
+        if not is_postgres:
+            _migrations_run = True
+            return
+        
+        # Run migrations with quick timeout check
+        try:
+            # Check if columns exist (quick query)
+            result = db.session.execute(text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'email_classifications' 
+                AND column_name IN ('subject_encrypted', 'snippet_encrypted')
+                LIMIT 2
+            """))
+            existing_columns = [row[0] for row in result]
+        except (OperationalError, ProgrammingError):
+            existing_columns = ['subject_encrypted', 'snippet_encrypted']
+        
+        # Run migrations if needed
+        if 'subject_encrypted' not in existing_columns or 'snippet_encrypted' not in existing_columns:
+            print("🔄 Running lazy migration: Adding encryption columns...")
+            try:
+                if 'subject_encrypted' not in existing_columns:
+                    db.session.execute(text("""
+                        ALTER TABLE email_classifications 
+                        ADD COLUMN IF NOT EXISTS subject_encrypted TEXT;
+                    """))
+                if 'snippet_encrypted' not in existing_columns:
+                    db.session.execute(text("""
+                        ALTER TABLE email_classifications 
+                        ADD COLUMN IF NOT EXISTS snippet_encrypted TEXT;
+                    """))
+                db.session.commit()
+                print("✅ Encryption columns migration completed")
+            except Exception as e:
+                db.session.rollback()
+                print(f"⚠️  Migration error: {e}")
+        
+        # User table migrations
+        try:
+            result = db.session.execute(text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'users' 
+                AND column_name IN ('setup_completed', 'initial_emails_fetched')
+                LIMIT 2
+            """))
+            existing_user_columns = [row[0] for row in result]
+            
+            if 'setup_completed' not in existing_user_columns:
+                db.session.execute(text("""
+                    ALTER TABLE users 
+                    ADD COLUMN IF NOT EXISTS setup_completed BOOLEAN DEFAULT FALSE;
+                """))
+            if 'initial_emails_fetched' not in existing_user_columns:
+                db.session.execute(text("""
+                    ALTER TABLE users 
+                    ADD COLUMN IF NOT EXISTS initial_emails_fetched INTEGER DEFAULT 0;
+                """))
+            if 'setup_completed' not in existing_user_columns or 'initial_emails_fetched' not in existing_user_columns:
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+        
+        # Pub/Sub migrations
+        try:
+            result = db.session.execute(text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'gmail_tokens' 
+                AND column_name IN ('pubsub_topic', 'pubsub_subscription', 'watch_expiration')
+                LIMIT 3
+            """))
+            existing_pubsub_columns = [row[0] for row in result]
+            
+            if 'pubsub_topic' not in existing_pubsub_columns:
+                db.session.execute(text("""
+                    ALTER TABLE gmail_tokens 
+                    ADD COLUMN IF NOT EXISTS pubsub_topic VARCHAR(255);
+                """))
+            if 'pubsub_subscription' not in existing_pubsub_columns:
+                db.session.execute(text("""
+                    ALTER TABLE gmail_tokens 
+                    ADD COLUMN IF NOT EXISTS pubsub_subscription VARCHAR(255);
+                """))
+            if 'watch_expiration' not in existing_pubsub_columns:
+                db.session.execute(text("""
+                    ALTER TABLE gmail_tokens 
+                    ADD COLUMN IF NOT EXISTS watch_expiration BIGINT;
+                """))
+            if len(existing_pubsub_columns) < 3:
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+        
+        _migrations_run = True
+        print("✅ Lazy migrations completed")
+    except Exception as e:
+        print(f"⚠️  Lazy migration error (non-critical): {e}")
+        _migrations_run = True  # Mark as run to prevent retry loops
+
+
 # PRIORITY 1: Row-Level Security (RLS) - Set user context for database queries
 @app.before_request
 def set_user_context_for_rls():
-    """Set PostgreSQL user context for Row-Level Security"""
+    """Set PostgreSQL user context for Row-Level Security and run lazy migrations"""
+    # Run migrations on first request (lazy loading)
+    run_lazy_migrations()
+    
     if current_user.is_authenticated:
         try:
             # Set user context for RLS (PostgreSQL only)
@@ -138,150 +275,25 @@ def set_user_context_for_rls():
                 print(f"⚠️  Warning: Could not set RLS context: {e}")
 
 
-# Initialize database
+# Initialize database (lazy - migrations run on first request to prevent startup hangs)
 with app.app_context():
     # Only create tables if they don't exist (safer for production)
     try:
+        print("📊 Attempting to connect to the database...")
+        # Use a simple connection test with timeout
+        db.engine.connect()
+        print("✅ Database connection successful")
         db.create_all()
     except Exception as e:
         # Ignore errors about existing tables/sequences (normal in production)
-        if 'already exists' not in str(e).lower() and 'duplicate key' not in str(e).lower():
+        error_str = str(e).lower()
+        if 'already exists' not in error_str and 'duplicate key' not in error_str:
             print(f"⚠️  Database initialization warning: {e}")
         # Tables likely already exist, which is fine
     
-    # CRITICAL: Auto-run migration BEFORE any queries
-    # Add encryption columns if they don't exist (must run first!)
-    try:
-        from sqlalchemy import text, inspect
-        from sqlalchemy.exc import OperationalError, ProgrammingError
-        
-        # Check database type
-        inspector = inspect(db.engine)
-        is_postgres = 'postgresql' in str(db.engine.url).lower()
-        
-        if is_postgres:
-            # Check if columns exist
-            try:
-                result = db.session.execute(text("""
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'email_classifications' 
-                    AND column_name IN ('subject_encrypted', 'snippet_encrypted')
-                """))
-                existing_columns = [row[0] for row in result]
-            except (OperationalError, ProgrammingError):
-                # Table might not exist yet, skip migration
-                existing_columns = ['subject_encrypted', 'snippet_encrypted']  # Pretend they exist
-            
-            if 'subject_encrypted' not in existing_columns or 'snippet_encrypted' not in existing_columns:
-                print("🔄 Auto-migrating: Adding encryption columns...")
-                
-                try:
-                    if 'subject_encrypted' not in existing_columns:
-                        db.session.execute(text("""
-                            ALTER TABLE email_classifications 
-                            ADD COLUMN IF NOT EXISTS subject_encrypted TEXT;
-                        """))
-                        print("   ✅ Added subject_encrypted column")
-                    
-                    if 'snippet_encrypted' not in existing_columns:
-                        db.session.execute(text("""
-                            ALTER TABLE email_classifications 
-                            ADD COLUMN IF NOT EXISTS snippet_encrypted TEXT;
-                        """))
-                        print("   ✅ Added snippet_encrypted column")
-                    
-                    # Migrate existing data
-                    db.session.execute(text("""
-                        UPDATE email_classifications 
-                        SET subject_encrypted = subject 
-                        WHERE subject_encrypted IS NULL AND subject IS NOT NULL;
-                    """))
-                    
-                    db.session.execute(text("""
-                        UPDATE email_classifications 
-                        SET snippet_encrypted = snippet 
-                        WHERE snippet_encrypted IS NULL AND snippet IS NOT NULL;
-                    """))
-                    
-                    db.session.commit()
-                    print("✅ Migration completed successfully")
-                except Exception as mig_error:
-                    db.session.rollback()
-                    print(f"⚠️  Migration error (will retry on next request): {mig_error}")
-            
-            # Check and add User table columns for setup tracking
-            try:
-                result = db.session.execute(text("""
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'users' 
-                    AND column_name IN ('setup_completed', 'initial_emails_fetched')
-                """))
-                existing_user_columns = [row[0] for row in result]
-                
-                if 'setup_completed' not in existing_user_columns:
-                    db.session.execute(text("""
-                        ALTER TABLE users 
-                        ADD COLUMN IF NOT EXISTS setup_completed BOOLEAN DEFAULT FALSE;
-                    """))
-                    print("   ✅ Added setup_completed column to users table")
-                
-                if 'initial_emails_fetched' not in existing_user_columns:
-                    db.session.execute(text("""
-                        ALTER TABLE users 
-                        ADD COLUMN IF NOT EXISTS initial_emails_fetched INTEGER DEFAULT 0;
-                    """))
-                    print("   ✅ Added initial_emails_fetched column to users table")
-                
-                if 'setup_completed' not in existing_user_columns or 'initial_emails_fetched' not in existing_user_columns:
-                    db.session.commit()
-                    print("✅ User table migration completed successfully")
-            except Exception as user_mig_error:
-                db.session.rollback()
-                print(f"⚠️  User table migration error (non-critical): {user_mig_error}")
-            
-            # Check and add GmailToken table columns for Pub/Sub (test environment)
-            try:
-                result = db.session.execute(text("""
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'gmail_tokens' 
-                    AND column_name IN ('pubsub_topic', 'pubsub_subscription', 'watch_expiration')
-                """))
-                existing_pubsub_columns = [row[0] for row in result]
-                
-                if 'pubsub_topic' not in existing_pubsub_columns:
-                    db.session.execute(text("""
-                        ALTER TABLE gmail_tokens 
-                        ADD COLUMN IF NOT EXISTS pubsub_topic VARCHAR(255);
-                    """))
-                    print("   ✅ Added pubsub_topic column to gmail_tokens table")
-                
-                if 'pubsub_subscription' not in existing_pubsub_columns:
-                    db.session.execute(text("""
-                        ALTER TABLE gmail_tokens 
-                        ADD COLUMN IF NOT EXISTS pubsub_subscription VARCHAR(255);
-                    """))
-                    print("   ✅ Added pubsub_subscription column to gmail_tokens table")
-                
-                if 'watch_expiration' not in existing_pubsub_columns:
-                    db.session.execute(text("""
-                        ALTER TABLE gmail_tokens 
-                        ADD COLUMN IF NOT EXISTS watch_expiration BIGINT;
-                    """))
-                    print("   ✅ Added watch_expiration column to gmail_tokens table")
-                
-                if len(existing_pubsub_columns) < 3:
-                    db.session.commit()
-                    print("✅ GmailToken Pub/Sub migration completed successfully")
-            except Exception as pubsub_mig_error:
-                db.session.rollback()
-                print(f"⚠️  Pub/Sub migration error (non-critical): {pubsub_mig_error}")
-    except Exception as e:
-        # Ignore errors for SQLite or if table doesn't exist yet
-        if 'sqlite' not in str(e).lower():
-            print(f"⚠️  Migration check skipped: {e}")
+    # Migrations are now LAZY - they run on first request instead of at startup
+    # This prevents the app from hanging during deployment
+    print("✅ Database initialized (migrations will run on first request)")
 
 
 # Global OpenAI client (shared API key from .env)

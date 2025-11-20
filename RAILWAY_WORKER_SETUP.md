@@ -32,9 +32,11 @@ Railway only runs the `web` process by default. The `worker` process from your P
    - Find **"Start Command"** field
    - Enter:
      ```
-     celery -A celery_config worker --loglevel=info --concurrency=10 --queues=email_sync
+     celery -A celery_config worker --loglevel=info --concurrency=10 --queues=email_sync --max-tasks-per-child=1000
      ```
    - Click **"Save"**
+   
+   **Note**: The `--max-tasks-per-child=1000` flag helps prevent memory leaks and keeps the worker stable on Railway.
 
 ### Step 3: Add Environment Variables
 

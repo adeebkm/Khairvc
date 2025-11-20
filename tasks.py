@@ -63,8 +63,25 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                 meta={'status': 'initializing', 'progress': 0, 'total': max_emails}
             )
             
-            # Get user
-            user = User.query.get(user_id)
+            # Get user with retry on connection errors
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    user = User.query.get(user_id)
+                    break
+                except Exception as db_error:
+                    if 'EOF' in str(db_error) or 'SSL SYSCALL' in str(db_error) or 'connection' in str(db_error).lower():
+                        if attempt < max_retries - 1:
+                            print(f"⚠️  Database connection error (attempt {attempt + 1}/{max_retries}), retrying...")
+                            db.session.rollback()
+                            import time
+                            time.sleep(1)  # Wait 1 second before retry
+                            continue
+                        else:
+                            raise
+                    else:
+                        raise
+            
             if not user:
                 return {'status': 'error', 'error': 'User not found'}
             
@@ -99,7 +116,24 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                 # Update history_id even if no new emails
                 if new_history_id and gmail_token:
                     gmail_token.history_id = new_history_id
-                    db.session.commit()
+                    # Commit with retry on connection errors
+                    max_commit_retries = 3
+                    for commit_attempt in range(max_commit_retries):
+                        try:
+                            db.session.commit()
+                            break
+                        except Exception as commit_error:
+                            if 'EOF' in str(commit_error) or 'SSL SYSCALL' in str(commit_error) or 'connection' in str(commit_error).lower():
+                                if commit_attempt < max_commit_retries - 1:
+                                    db.session.rollback()
+                                    import time
+                                    time.sleep(0.5)
+                                    gmail_token.history_id = new_history_id
+                                    continue
+                                else:
+                                    raise
+                            else:
+                                raise
                 
                 return {
                     'status': 'complete',
@@ -114,8 +148,26 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                 meta={'status': 'classifying', 'progress': 0, 'total': len(emails)}
             )
             
-            # Initialize classifier
-            openai_client = OpenAIClient()
+            # Initialize classifier (with error handling for missing API key)
+            try:
+                openai_client = OpenAIClient()
+            except Exception as openai_error:
+                error_msg = str(openai_error)
+                # Check if using Moonshot or OpenAI
+                use_moonshot = os.getenv('USE_MOONSHOT', 'false').lower() == 'true'
+                api_key_name = 'MOONSHOT_API_KEY' if use_moonshot else 'OPENAI_API_KEY'
+                
+                if 'API key' in error_msg or 'OPENAI_API_KEY' in error_msg or 'MOONSHOT_API_KEY' in error_msg:
+                    return {
+                        'status': 'error',
+                        'error': f'API key not configured in worker. Please set {api_key_name} (or OPENAI_API_KEY as fallback) and USE_MOONSHOT={str(use_moonshot).lower()} environment variables in the worker service. Error: {error_msg}'
+                    }
+                else:
+                    return {
+                        'status': 'error',
+                        'error': f'Failed to initialize AI client: {error_msg}'
+                    }
+            
             # EmailClassifier initializes LambdaClient internally, don't pass it
             classifier = EmailClassifier(openai_client)
             
@@ -139,11 +191,27 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                         }
                     )
                     
-                    # Check if already classified
-                    existing = EmailClassification.query.filter_by(
-                        user_id=user_id,
-                        thread_id=email.get('thread_id', '')
-                    ).first()
+                    # Check if already classified (with retry on connection errors)
+                    max_retries = 3
+                    existing = None
+                    for attempt in range(max_retries):
+                        try:
+                            existing = EmailClassification.query.filter_by(
+                                user_id=user_id,
+                                thread_id=email.get('thread_id', '')
+                            ).first()
+                            break
+                        except Exception as db_error:
+                            if 'EOF' in str(db_error) or 'SSL SYSCALL' in str(db_error) or 'connection' in str(db_error).lower():
+                                if attempt < max_retries - 1:
+                                    db.session.rollback()
+                                    import time
+                                    time.sleep(0.5)
+                                    continue
+                                else:
+                                    raise
+                            else:
+                                raise
                     
                     if existing:
                         emails_processed += 1
@@ -194,7 +262,25 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                     new_classification.set_snippet_encrypted(email.get('snippet', ''))
                     
                     db.session.add(new_classification)
-                    db.session.commit()
+                    # Commit with retry on connection errors
+                    max_commit_retries = 3
+                    for commit_attempt in range(max_commit_retries):
+                        try:
+                            db.session.commit()
+                            break
+                        except Exception as commit_error:
+                            if 'EOF' in str(commit_error) or 'SSL SYSCALL' in str(commit_error) or 'connection' in str(commit_error).lower():
+                                if commit_attempt < max_commit_retries - 1:
+                                    db.session.rollback()
+                                    import time
+                                    time.sleep(0.5)
+                                    # Re-add the classification
+                                    db.session.add(new_classification)
+                                    continue
+                                else:
+                                    raise
+                            else:
+                                raise
                     
                     emails_processed += 1
                     emails_classified += 1
@@ -241,7 +327,24 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                             state='New'  # Default state
                         )
                         db.session.add(deal)
-                        db.session.commit()
+                        # Commit with retry on connection errors
+                        max_commit_retries = 3
+                        for commit_attempt in range(max_commit_retries):
+                            try:
+                                db.session.commit()
+                                break
+                            except Exception as commit_error:
+                                if 'EOF' in str(commit_error) or 'SSL SYSCALL' in str(commit_error) or 'connection' in str(commit_error).lower():
+                                    if commit_attempt < max_commit_retries - 1:
+                                        db.session.rollback()
+                                        import time
+                                        time.sleep(0.5)
+                                        db.session.add(deal)
+                                        continue
+                                    else:
+                                        raise
+                                else:
+                                    raise
                     
                 except Exception as e:
                     error_msg = f"Error processing email {idx + 1}: {str(e)}"
@@ -256,7 +359,25 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                 else:
                     gmail_token = GmailToken(user_id=user_id, history_id=new_history_id)
                     db.session.add(gmail_token)
-                db.session.commit()
+                # Commit with retry on connection errors
+                max_commit_retries = 3
+                for commit_attempt in range(max_commit_retries):
+                    try:
+                        db.session.commit()
+                        break
+                    except Exception as commit_error:
+                        if 'EOF' in str(commit_error) or 'SSL SYSCALL' in str(commit_error) or 'connection' in str(commit_error).lower():
+                            if commit_attempt < max_commit_retries - 1:
+                                db.session.rollback()
+                                import time
+                                time.sleep(0.5)
+                                if gmail_token:
+                                    db.session.add(gmail_token)
+                                continue
+                            else:
+                                raise
+                        else:
+                            raise
             
             # Return results
             result = {
