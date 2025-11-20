@@ -286,8 +286,9 @@ Return ONLY the JSON object. No additional text."""
     client = OpenAI(api_key=openai_key)
     
     # Call OpenAI API (NO logging - requests/responses won't appear in CloudWatch)
+    # Using gpt-4o-mini for testing (much cheaper than gpt-4o)
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a deterministic email classifier for a venture capital firm. Return ONLY valid JSON. No markdown, no explanation, no additional text."},
             {"role": "user", "content": prompt}
