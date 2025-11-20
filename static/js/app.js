@@ -256,11 +256,23 @@ async function startSetup() {
         if (setupScreen) setupScreen.style.display = 'none';
         const compactHeader = document.querySelector('.main-content > .compact-header');
         if (compactHeader) compactHeader.style.display = 'block';
-        const emailList = document.getElementById('emailList');
-        if (emailList) emailList.style.display = 'block';
+        const emailListEl = document.getElementById('emailList');
+        if (emailListEl) emailListEl.style.display = 'block';
         
-        // Load emails
+        // Load emails and ensure they're displayed
         await loadEmailsFromDatabase();
+        
+        // Verify emails were loaded and displayed
+        if (emailListEl) {
+            const displayedCount = emailListEl.querySelectorAll('.email-item').length;
+            console.log(`📧 Setup complete: ${allEmails.length} emails loaded, ${displayedCount} displayed`);
+            
+            // If emails are loaded but not displayed, force display
+            if (allEmails.length > 0 && displayedCount === 0) {
+                console.warn('⚠️ Emails loaded but not displayed, forcing display...');
+                applyFilters(); // Re-apply filters to force display
+            }
+        }
         
         // Start background fetching immediately (silently continue to 150 emails)
         console.log('🔄 Starting silent background fetch to reach 150 emails...');
@@ -1088,15 +1100,18 @@ function applyFilters() {
     
     filteredEmails = sortedFiltered; // Store sorted filtered emails for openEmail
     
-    // Use pagination if we have more than 40 emails
-    if (sortedFiltered.length > EMAILS_PER_PAGE) {
-        // Ensure filteredEmails is set before calling updatePagination
-        if (filteredEmails.length === 0 && sortedFiltered.length > 0) {
-            filteredEmails = sortedFiltered;
-        }
+    console.log(`🔍 applyFilters: allEmails=${allEmails.length}, filtered=${filtered.length}, sortedFiltered=${sortedFiltered.length}, currentTab=${currentTab}`);
+    
+    // Always display emails, regardless of count
+    if (sortedFiltered.length === 0) {
+        // No emails match the filter - show empty state
+        console.warn(`⚠️ No emails match filter (tab: ${currentTab})`);
+        displayEmails([]);
+    } else if (sortedFiltered.length > EMAILS_PER_PAGE) {
+        // More than one page - use pagination
         updatePagination();
     } else {
-        // Display all emails if less than one page
+        // One page or less - display directly
         displayEmails(sortedFiltered);
     }
     
@@ -1687,8 +1702,24 @@ async function loadEmailsFromDatabase() {
             // allEmails should contain ALL emails, not filtered by category
             allEmails = emails;
             console.log(`✅ Loaded ${emails.length} emails from database`);
+            console.log(`📊 Current tab: ${currentTab}, allEmails length: ${allEmails.length}`);
+            
+            // Ensure we have emails before filtering
+            if (allEmails.length === 0) {
+                console.warn('⚠️ No emails loaded, displaying empty state');
+                displayEmails([]);
+                return;
+            }
+            
             // applyFilters() will handle category filtering based on currentTab
             applyFilters();
+            
+            // Double-check that emails were displayed
+            const emailList = document.getElementById('emailList');
+            if (emailList && emailList.children.length === 0 && filteredEmails.length > 0) {
+                console.warn('⚠️ Emails loaded but not displayed, forcing display');
+                displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
+            }
         } else {
             throw new Error(data.error || 'Failed to load emails');
         }
