@@ -160,16 +160,7 @@ function toggleAutoFetch(enabled) {
     console.log('ℹ️  Auto-fetch disabled - using Pub/Sub for real-time email notifications');
     
     // Pub/Sub handles new email notifications automatically
-    // No polling needed
-        setTimeout(autoFetchNewEmails, 30000);
-    } else {
-        // Stop polling
-        if (autoFetchInterval) {
-            clearInterval(autoFetchInterval);
-            autoFetchInterval = null;
-        }
-        console.log('⏸️  Auto-fetch disabled');
-    }
+    // No polling needed - Pub/Sub will trigger background sync when new emails arrive
 }
 
 // Toggle Gmail dropdown

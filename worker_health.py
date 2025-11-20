@@ -9,6 +9,7 @@ import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import subprocess
+import multiprocessing
 
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -36,27 +37,33 @@ def start_health_server():
         print(f"❌ Health server error: {e}")
         sys.exit(1)
 
-if __name__ == '__main__':
-    # Start health server in a separate thread (daemon so it doesn't block exit)
-    health_thread = threading.Thread(target=start_health_server, daemon=True)
-    health_thread.start()
-    
-    # Give health server a moment to start
-    import time
-    time.sleep(1)
-    
-    # Start Celery worker in the main process
-    # This blocks until worker stops
+def run_celery_worker():
+    """Run Celery worker in a separate process"""
     print("🚀 Starting Celery worker...")
-    from celery_config import celery
+    try:
+        from celery_config import celery
+        celery.worker_main([
+            'worker',
+            '--loglevel=info',
+            '--concurrency=10',
+            '--queues=email_sync',
+            '--max-tasks-per-child=1000'
+        ])
+    except Exception as e:
+        print(f"❌ Celery worker error: {e}")
+        import traceback
+        traceback.print_exc()
+
+if __name__ == '__main__':
+    # Start Celery worker in a separate process
+    celery_process = multiprocessing.Process(target=run_celery_worker, daemon=False)
+    celery_process.start()
     
-    # Use worker_main to start the worker
-    # This is the same as running: celery -A celery_config worker ...
-    celery.worker_main([
-        'worker',
-        '--loglevel=info',
-        '--concurrency=10',
-        '--queues=email_sync',
-        '--max-tasks-per-child=1000'
-    ])
+    # Give Celery a moment to start
+    import time
+    time.sleep(2)
+    
+    # Run health server in main thread (this blocks and keeps container alive)
+    print("✅ Health check server will run in main thread to keep container alive")
+    start_health_server()  # This blocks forever
 

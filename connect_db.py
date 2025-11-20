@@ -185,6 +185,37 @@ def main():
     # Enter interactive mode
     interactive_mode(engine)
 
+def clear_all_rows(engine):
+    """Clear all rows from specified tables in correct order (respecting foreign keys)"""
+    print("🗑️  Clearing all rows from database...")
+    tables_to_clear = ['deals', 'email_classifications', 'gmail_tokens', 'users']
+    
+    with engine.connect() as conn:
+        for table_name in tables_to_clear:
+            try:
+                result = conn.execute(text(f"DELETE FROM {table_name};"))
+                print(f"✅ Cleared {result.rowcount} rows from {table_name}")
+            except Exception as e:
+                print(f"❌ Error clearing table {table_name}: {e}")
+        conn.commit()
+    print("\n✅ Database cleared successfully!")
+
 if __name__ == '__main__':
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == 'clear':
+        engine = connect_to_database()
+        clear_all_rows(engine)
+        # Show stats after clearing
+        print("\n📈 Quick Statistics (after clearing):")
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text("SELECT COUNT(*) FROM users;"))
+                print(f"  👥 Users: {result.fetchone()[0]}")
+                result = conn.execute(text("SELECT COUNT(*) FROM email_classifications;"))
+                print(f"  📧 Emails: {result.fetchone()[0]}")
+                result = conn.execute(text("SELECT COUNT(*) FROM gmail_tokens;"))
+                print(f"  🔑 Gmail Tokens: {result.fetchone()[0]}")
+        except Exception as e:
+            print(f"  ⚠️  Could not fetch statistics: {e}")
+    else:
+        main()
 
