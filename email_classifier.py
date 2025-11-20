@@ -752,7 +752,7 @@ Return ONLY the JSON object. No additional text."""
             
             # Check if using Moonshot (test environment)
             use_moonshot = os.getenv('USE_MOONSHOT', 'false').lower() == 'true'
-            model = "kimi-k2-turbo-preview" if use_moonshot else "gpt-4o-mini"
+            model = "kimi-k2-thinking" if use_moonshot else "gpt-4o-mini"
             
             # Use appropriate model based on environment
             response = client.chat.completions.create(
@@ -1072,7 +1072,7 @@ IMPORTANT:
                     
                     # Check if using Moonshot (test environment)
                     use_moonshot = os.getenv('USE_MOONSHOT', 'false').lower() == 'true'
-                    model = "kimi-k2-turbo-preview" if use_moonshot else "gpt-4o-mini"
+                    model = "kimi-k2-thinking" if use_moonshot else "gpt-4o-mini"
                     
                     response = client.chat.completions.create(
                         model=model,
@@ -1132,7 +1132,7 @@ IMPORTANT: Do NOT include signature placeholders like "[Your Name]", "[Your Posi
                     
                     # Check if using Moonshot (test environment)
                     use_moonshot = os.getenv('USE_MOONSHOT', 'false').lower() == 'true'
-                    model = "kimi-k2-turbo-preview" if use_moonshot else "gpt-4o-mini"
+                    model = "kimi-k2-thinking" if use_moonshot else "gpt-4o-mini"
                     
                     response = client.chat.completions.create(
                         model=model,

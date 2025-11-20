@@ -290,9 +290,9 @@ Return ONLY the JSON object. No additional text."""
     )
     
     # Call Moonshot API (NO logging - requests/responses won't appear in CloudWatch)
-    # Using kimi-k2-turbo-preview model for test environment
+    # Using kimi-k2-thinking model for test environment
     response = client.chat.completions.create(
-        model="kimi-k2-turbo-preview",
+        model="kimi-k2-thinking",
         messages=[
             {"role": "system", "content": "You are a deterministic email classifier for a venture capital firm. Return ONLY valid JSON. No markdown, no explanation, no additional text."},
             {"role": "user", "content": prompt}

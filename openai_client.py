@@ -19,7 +19,7 @@ class OpenAIClient:
                 base_url="https://api.moonshot.ai/v1",
                 api_key=self.api_key
             )
-            self.model = "kimi-k2-turbo-preview"
+            self.model = "kimi-k2-thinking"
             print("✓ Moonshot (Kimi) client initialized")
         else:
             # Use OpenAI API (production)
