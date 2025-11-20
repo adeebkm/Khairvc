@@ -1,5 +1,5 @@
 """
-OpenAI Client for generating email replies
+OpenAI Client for generating email replies (supports OpenAI and Moonshot)
 """
 import os
 from openai import OpenAI
@@ -7,12 +7,28 @@ from openai import OpenAI
 
 class OpenAIClient:
     def __init__(self, api_key=None):
-        self.api_key = api_key or os.getenv('OPENAI_API_KEY')
-        if not self.api_key:
-            raise ValueError("OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
+        # Check if we should use Moonshot (test environment)
+        use_moonshot = os.getenv('USE_MOONSHOT', 'false').lower() == 'true'
         
-        self.client = OpenAI(api_key=self.api_key)
-        print("✓ OpenAI client initialized")
+        if use_moonshot:
+            # Use Moonshot API
+            self.api_key = api_key or os.getenv('MOONSHOT_API_KEY') or os.getenv('OPENAI_API_KEY')
+            if not self.api_key:
+                raise ValueError("Moonshot API key not found. Please set MOONSHOT_API_KEY or OPENAI_API_KEY environment variable.")
+            self.client = OpenAI(
+                base_url="https://api.moonshot.cn/v1",
+                api_key=self.api_key
+            )
+            self.model = "kimi-k2-thinking"
+            print("✓ Moonshot (Kimi) client initialized")
+        else:
+            # Use OpenAI API (production)
+            self.api_key = api_key or os.getenv('OPENAI_API_KEY')
+            if not self.api_key:
+                raise ValueError("OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
+            self.client = OpenAI(api_key=self.api_key)
+            self.model = "gpt-4o-mini"
+            print("✓ OpenAI client initialized")
     
     def generate_reply(self, email_subject, email_body, sender):
         """
@@ -39,7 +55,7 @@ Generate only the email reply body (no subject line, no greetings like "Dear [Na
 """
             
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=self.model,
                 messages=[
                     {"role": "system", "content": "You are a helpful email assistant that generates professional email replies."},
                     {"role": "user", "content": prompt}
@@ -87,7 +103,7 @@ Reply "YES" if the email is:
 """
             
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=self.model,
                 messages=[
                     {"role": "system", "content": "You are an email classification assistant."},
                     {"role": "user", "content": prompt}
