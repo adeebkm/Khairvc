@@ -2177,7 +2177,7 @@ function renderThreadMessage(email, isFirst = false) {
     const bodySection = hasHtmlBody
         ? `
             <div class="thread-message-body html-mode" data-email-id="${escapeHtml(email.id || '')}" style="padding-left: 52px; line-height: 1.6; color: var(--text-primary); margin-bottom: 16px;"></div>
-            <div class="thread-message-body plain-fallback" style="padding-left: 52px; line-height: 1.6; color: var(--text-secondary); font-size: 13px;">
+            <div class="thread-message-body plain-fallback" style="display: none; padding-left: 52px; line-height: 1.6; color: var(--text-secondary); font-size: 13px;">
                 ${plainBodyHtml}
             </div>`
         : `<div class="thread-message-body" style="padding-left: 52px; line-height: 1.6; color: var(--text-primary);">
@@ -2268,9 +2268,25 @@ function enhanceHtmlEmails(emails) {
                         iframe.style.height = height + 'px';
                     }
                 } catch (e) {
-                    // Ignore cross-origin or other iframe errors
+                    // If iframe fails to load, show plain text fallback
+                    const plainFallback = node.parentElement.querySelector('.plain-fallback');
+                    if (plainFallback) {
+                        plainFallback.style.display = 'block';
+                        node.style.display = 'none';
+                    }
                 }
             });
+            
+            // If iframe fails to load after timeout, show plain text fallback
+            setTimeout(() => {
+                if (!iframe.contentDocument || !iframe.contentDocument.body) {
+                    const plainFallback = node.parentElement.querySelector('.plain-fallback');
+                    if (plainFallback && plainFallback.style.display === 'none') {
+                        plainFallback.style.display = 'block';
+                        node.style.display = 'none';
+                    }
+                }
+            }, 3000); // 3 second timeout
         });
     } catch (e) {
         console.error('Error enhancing HTML emails:', e);
