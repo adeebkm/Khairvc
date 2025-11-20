@@ -362,15 +362,31 @@ async function startSetup() {
         const compactHeader = document.querySelector('.main-content > .compact-header');
         const emailListEl = document.getElementById('emailList');
         
+        // Ensure all emails have category before filtering
+        allEmails.forEach(email => {
+            if (!email.category && email.classification?.category) {
+                email.category = email.classification.category.toLowerCase();
+            } else if (!email.category) {
+                email.category = 'general';
+            }
+        });
+        
         // Apply filters and update pagination BEFORE hiding setup screen
         // This ensures emails are ready to display
         console.log('🔄 Applying filters and preparing emails for display...');
         applyFilters();
-        updatePagination();
         
         // Verify emails are ready to display
         if (filteredEmails.length === 0 && allEmails.length > 0) {
             console.warn('⚠️ filteredEmails is empty but allEmails has data - forcing filter application');
+            // Ensure categories are set again
+            allEmails.forEach(email => {
+                if (!email.category && email.classification?.category) {
+                    email.category = email.classification.category.toLowerCase();
+                } else if (!email.category) {
+                    email.category = 'general';
+                }
+            });
             applyFilters(); // Try again
         }
         
@@ -384,26 +400,24 @@ async function startSetup() {
         }
         
         // Wait a moment for DOM to update after hiding setup screen
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 100));
         
-        // Force display emails one more time to ensure they're visible
+        // Force display emails - always call updatePagination which will display emails
+        console.log(`📧 Displaying emails: ${filteredEmails.length} filtered, ${allEmails.length} total`);
         if (filteredEmails.length > 0) {
-            console.log(`📧 Displaying ${filteredEmails.length} filtered emails`);
-            displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
-            updatePagination();
+            updatePagination(); // This will call displayEmails internally
         } else if (allEmails.length > 0) {
-            console.warn('⚠️ filteredEmails is empty, using allEmails directly');
-            // Ensure all emails have category
-            allEmails.forEach(email => {
-                if (!email.category && email.classification?.category) {
-                    email.category = email.classification.category.toLowerCase();
-                } else if (!email.category) {
-                    email.category = 'general';
-                }
-            });
-            applyFilters();
-            displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
-            updatePagination();
+            // If filteredEmails is still empty, display allEmails directly
+            console.warn('⚠️ filteredEmails still empty, displaying allEmails directly');
+            displayEmails(allEmails.slice(0, EMAILS_PER_PAGE));
+            // Create a simple pagination for allEmails
+            const totalPages = Math.ceil(allEmails.length / EMAILS_PER_PAGE);
+            if (totalPages > 1) {
+                updatePagination(); // This will create pagination controls
+            }
+        } else {
+            // No emails at all
+            displayEmails([]);
         }
         
         // Double-check that emails are displayed after a short delay
@@ -600,10 +614,21 @@ function updatePagination() {
     if (!emailList) return;
     
     // Safety check: ensure filteredEmails is set
+    // If filteredEmails is empty but allEmails has data, try applying filters again
     if (!filteredEmails || filteredEmails.length === 0) {
-        console.warn('⚠️ updatePagination: filteredEmails is empty, displaying empty state');
-        displayEmails([]);
-        return;
+        if (allEmails.length > 0) {
+            console.warn('⚠️ updatePagination: filteredEmails is empty but allEmails has data, applying filters...');
+            applyFilters();
+            // If still empty after applying filters, use allEmails
+            if (!filteredEmails || filteredEmails.length === 0) {
+                console.warn('⚠️ updatePagination: filteredEmails still empty, using allEmails');
+                filteredEmails = allEmails;
+            }
+        } else {
+            console.warn('⚠️ updatePagination: filteredEmails is empty, displaying empty state');
+            displayEmails([]);
+            return;
+        }
     }
     
     // Remove existing pagination
@@ -1077,11 +1102,19 @@ async function fetchStarredEmails() {
         
         if (data.success) {
             // Format starred emails similar to received emails
-            const starredEmails = data.emails.map(email => ({
-                ...email,
-                classification: { category: 'STARRED' },
-                is_starred: true
-            }));
+            const starredEmails = data.emails.map(email => {
+                const labelIds = email.label_ids || [];
+                if (!labelIds.includes('STARRED')) {
+                    labelIds.push('STARRED');
+                }
+                return {
+                    ...email,
+                    classification: { category: 'STARRED' },
+                    is_starred: true,
+                    starred: true, // Also set starred property for filter compatibility
+                    label_ids: labelIds
+                };
+            });
             
             // Update cache
             starredEmailsCache = starredEmails;
@@ -1267,7 +1300,12 @@ function applyFilters() {
     } else if (currentTab === 'sent') {
         filtered = allEmails.filter(e => e.from_me === true);
     } else if (currentTab === 'starred') {
-        filtered = allEmails.filter(e => e.starred === true);
+        filtered = allEmails.filter(e => {
+            // Check multiple ways an email can be starred
+            return e.is_starred === true || 
+                   e.starred === true || 
+                   (e.label_ids && e.label_ids.includes('STARRED'));
+        });
     }
     // 'all' shows everything
     
