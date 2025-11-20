@@ -237,12 +237,15 @@ async function startSetup() {
             await fetch('/api/setup/complete', { method: 'POST' });
             // Load emails and display
             await loadEmailsFromDatabase();
-            // Hide setup screen
+            // Hide setup screen FIRST
             if (setupScreen) setupScreen.style.display = 'none';
             const compactHeader = document.querySelector('.main-content > .compact-header');
             if (compactHeader) compactHeader.style.display = 'block';
             const emailListEl = document.getElementById('emailList');
             if (emailListEl) emailListEl.style.display = 'block';
+            // Wait for DOM to update
+            await new Promise(resolve => setTimeout(resolve, 100));
+            // Then apply filters and display emails
             applyFilters();
             updatePagination();
             showAlert('success', `Setup complete! Found ${data.email_count} existing emails.`);
@@ -274,9 +277,7 @@ async function startSetup() {
         await new Promise(resolve => setTimeout(resolve, 500));
         
         // Verify emails were loaded
-        const emailListEl = document.getElementById('emailList');
-        const displayedCount = emailListEl ? emailListEl.querySelectorAll('.email-item').length : 0;
-        console.log(`📧 Setup complete: ${allEmails.length} emails loaded, ${displayedCount} displayed`);
+        console.log(`📧 Setup complete: ${allEmails.length} emails loaded`);
         
         // If no emails were loaded, don't hide setup screen - show error instead
         if (allEmails.length === 0) {
@@ -288,34 +289,36 @@ async function startSetup() {
             return; // Don't continue if no emails
         }
         
-        // Hide setup screen and show main content
+        // Hide setup screen and show main content FIRST
         if (setupScreen) setupScreen.style.display = 'none';
         const compactHeader = document.querySelector('.main-content > .compact-header');
         if (compactHeader) compactHeader.style.display = 'block';
+        const emailListEl = document.getElementById('emailList');
         if (emailListEl) {
             emailListEl.style.display = 'block';
             // Force scroll to top of email list
             emailListEl.scrollTop = 0;
         }
         
-        // If emails are loaded but not displayed, force display
-        if (allEmails.length > 0 && displayedCount === 0) {
-            console.warn('⚠️ Emails loaded but not displayed, forcing display...');
-            // Force display by calling applyFilters and displayEmails
-            applyFilters();
-            // Double-check display
-            setTimeout(() => {
-                const checkCount = emailListEl ? emailListEl.querySelectorAll('.email-item').length : 0;
-                if (checkCount === 0 && filteredEmails.length > 0) {
-                    console.log('🔄 Force displaying emails...');
-                    displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
-                    updatePagination();
-                }
-            }, 200);
-        } else if (displayedCount > 0) {
-            // Emails are displayed, update pagination
-            updatePagination();
-        }
+        // Wait a moment for DOM to update after hiding setup screen
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // ALWAYS call applyFilters and updatePagination after hiding setup screen
+        // This ensures emails are displayed even if they weren't visible before
+        console.log('🔄 Applying filters and displaying emails...');
+        applyFilters();
+        updatePagination();
+        
+        // Double-check that emails are displayed after a short delay
+        setTimeout(() => {
+            const checkCount = emailListEl ? emailListEl.querySelectorAll('.email-item').length : 0;
+            console.log(`📊 After display: ${checkCount} emails visible, ${filteredEmails.length} filtered`);
+            if (checkCount === 0 && filteredEmails.length > 0) {
+                console.warn('⚠️ Emails still not displayed, forcing display...');
+                displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
+                updatePagination();
+            }
+        }, 300);
         
         // Show success message
         showAlert('success', `Setup complete! Loaded ${allEmails.length} emails.`);
