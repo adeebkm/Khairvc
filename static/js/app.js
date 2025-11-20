@@ -233,6 +233,20 @@ async function startSetup() {
             if (progressText) progressText.textContent = `Found ${data.email_count} existing emails!`;
             // Wait a moment then proceed
             await new Promise(resolve => setTimeout(resolve, 1500));
+            // Mark as complete and load emails
+            await fetch('/api/setup/complete', { method: 'POST' });
+            // Load emails and display
+            await loadEmailsFromDatabase();
+            // Hide setup screen
+            if (setupScreen) setupScreen.style.display = 'none';
+            const compactHeader = document.querySelector('.main-content > .compact-header');
+            if (compactHeader) compactHeader.style.display = 'block';
+            const emailListEl = document.getElementById('emailList');
+            if (emailListEl) emailListEl.style.display = 'block';
+            applyFilters();
+            updatePagination();
+            showAlert('success', `Setup complete! Found ${data.email_count} existing emails.`);
+            return; // Exit early since setup is already complete
         } else if (data.success && data.task_id) {
             // Poll for progress
             try {
@@ -252,38 +266,59 @@ async function startSetup() {
         // Mark setup as complete
         await fetch('/api/setup/complete', { method: 'POST' });
         
+        // Load emails FIRST before hiding setup screen
+        console.log('📧 Loading emails from database after setup...');
+        await loadEmailsFromDatabase();
+        
+        // Wait a moment for emails to be processed
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Verify emails were loaded
+        const emailListEl = document.getElementById('emailList');
+        const displayedCount = emailListEl ? emailListEl.querySelectorAll('.email-item').length : 0;
+        console.log(`📧 Setup complete: ${allEmails.length} emails loaded, ${displayedCount} displayed`);
+        
+        // If no emails were loaded, don't hide setup screen - show error instead
+        if (allEmails.length === 0) {
+            console.warn('⚠️ No emails loaded after setup - keeping setup screen visible');
+            if (progressText) progressText.textContent = 'No emails were loaded. Please check worker configuration and try again.';
+            if (startBtn) startBtn.style.display = 'block';
+            if (progressDiv) progressDiv.style.display = 'none';
+            showAlert('warning', 'Setup completed but no emails were loaded. This may be due to worker configuration issues.');
+            return; // Don't continue if no emails
+        }
+        
         // Hide setup screen and show main content
         if (setupScreen) setupScreen.style.display = 'none';
         const compactHeader = document.querySelector('.main-content > .compact-header');
         if (compactHeader) compactHeader.style.display = 'block';
-        const emailListEl = document.getElementById('emailList');
-        if (emailListEl) emailListEl.style.display = 'block';
-        
-        // Load emails and ensure they're displayed
-        await loadEmailsFromDatabase();
-        
-        // Verify emails were loaded and displayed
         if (emailListEl) {
-            const displayedCount = emailListEl.querySelectorAll('.email-item').length;
-            console.log(`📧 Setup complete: ${allEmails.length} emails loaded, ${displayedCount} displayed`);
-            
-            // If no emails were loaded, don't hide setup screen - show error instead
-            if (allEmails.length === 0) {
-                console.warn('⚠️ No emails loaded after setup - keeping setup screen visible');
-                if (setupScreen) setupScreen.style.display = 'block';
-                if (progressText) progressText.textContent = 'No emails were loaded. Please check worker configuration and try again.';
-                if (startBtn) startBtn.style.display = 'block';
-                if (progressDiv) progressDiv.style.display = 'none';
-                showAlert('warning', 'Setup completed but no emails were loaded. This may be due to worker configuration issues.');
-                return; // Don't continue if no emails
-            }
-            
-            // If emails are loaded but not displayed, force display
-            if (allEmails.length > 0 && displayedCount === 0) {
-                console.warn('⚠️ Emails loaded but not displayed, forcing display...');
-                applyFilters(); // Re-apply filters to force display
-            }
+            emailListEl.style.display = 'block';
+            // Force scroll to top of email list
+            emailListEl.scrollTop = 0;
         }
+        
+        // If emails are loaded but not displayed, force display
+        if (allEmails.length > 0 && displayedCount === 0) {
+            console.warn('⚠️ Emails loaded but not displayed, forcing display...');
+            // Force display by calling applyFilters and displayEmails
+            applyFilters();
+            // Double-check display
+            setTimeout(() => {
+                const checkCount = emailListEl ? emailListEl.querySelectorAll('.email-item').length : 0;
+                if (checkCount === 0 && filteredEmails.length > 0) {
+                    console.log('🔄 Force displaying emails...');
+                    displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
+                    updatePagination();
+                }
+            }, 200);
+        } else if (displayedCount > 0) {
+            // Emails are displayed, update pagination
+            updatePagination();
+        }
+        
+        // Show success message
+        showAlert('success', `Setup complete! Loaded ${allEmails.length} emails.`);
         
         // Start background fetching immediately (silently continue to 150 emails)
         console.log('🔄 Starting silent background fetch to reach 150 emails...');

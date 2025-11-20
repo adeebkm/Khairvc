@@ -285,14 +285,14 @@ Return ONLY the JSON object. No additional text."""
     # Create OpenAI-compatible client for Moonshot API (NO logging will occur because we disabled it above)
     # Moonshot uses OpenAI-compatible API, so we can use the OpenAI client with custom base_url
     client = OpenAI(
-        base_url="https://api.moonshot.cn/v1",
+        base_url="https://api.moonshot.ai/v1",
         api_key=api_key
     )
     
     # Call Moonshot API (NO logging - requests/responses won't appear in CloudWatch)
-    # Using kimi-k2-thinking model for test environment
+    # Using kimi-k2-turbo-preview model for test environment
     response = client.chat.completions.create(
-        model="kimi-k2-thinking",
+        model="kimi-k2-turbo-preview",
         messages=[
             {"role": "system", "content": "You are a deterministic email classifier for a venture capital firm. Return ONLY valid JSON. No markdown, no explanation, no additional text."},
             {"role": "user", "content": prompt}

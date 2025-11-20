@@ -16,10 +16,10 @@ class OpenAIClient:
             if not self.api_key:
                 raise ValueError("Moonshot API key not found. Please set MOONSHOT_API_KEY or OPENAI_API_KEY environment variable.")
             self.client = OpenAI(
-                base_url="https://api.moonshot.cn/v1",
+                base_url="https://api.moonshot.ai/v1",
                 api_key=self.api_key
             )
-            self.model = "kimi-k2-thinking"
+            self.model = "kimi-k2-turbo-preview"
             print("✓ Moonshot (Kimi) client initialized")
         else:
             # Use OpenAI API (production)
