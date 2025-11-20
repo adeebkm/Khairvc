@@ -235,6 +235,22 @@ async function startSetup() {
             await new Promise(resolve => setTimeout(resolve, 1500));
             // Mark as complete and load emails
             await fetch('/api/setup/complete', { method: 'POST' });
+            
+            // Auto-setup Pub/Sub if enabled (test environment)
+            try {
+                const pubsubResponse = await fetch('/api/setup-pubsub', { method: 'POST' });
+                const pubsubData = await pubsubResponse.json();
+                if (pubsubData.success) {
+                    console.log('✅ Pub/Sub watch configured automatically');
+                } else if (pubsubResponse.status === 400 && pubsubData.error?.includes('not enabled')) {
+                    console.log('ℹ️  Pub/Sub not enabled (production environment)');
+                } else {
+                    console.warn('⚠️  Pub/Sub setup failed (non-critical):', pubsubData.error);
+                }
+            } catch (error) {
+                console.warn('⚠️  Pub/Sub setup error (non-critical):', error);
+            }
+            
             // Load emails and display
             await loadEmailsFromDatabase();
             // Hide setup screen FIRST
@@ -268,6 +284,21 @@ async function startSetup() {
         
         // Mark setup as complete
         await fetch('/api/setup/complete', { method: 'POST' });
+        
+        // Auto-setup Pub/Sub if enabled (test environment)
+        try {
+            const pubsubResponse = await fetch('/api/setup-pubsub', { method: 'POST' });
+            const pubsubData = await pubsubResponse.json();
+            if (pubsubData.success) {
+                console.log('✅ Pub/Sub watch configured automatically');
+            } else if (pubsubResponse.status === 400 && pubsubData.error?.includes('not enabled')) {
+                console.log('ℹ️  Pub/Sub not enabled (production environment)');
+            } else {
+                console.warn('⚠️  Pub/Sub setup failed (non-critical):', pubsubData.error);
+            }
+        } catch (error) {
+            console.warn('⚠️  Pub/Sub setup error (non-critical):', error);
+        }
         
         // Load emails FIRST before hiding setup screen
         console.log('📧 Loading emails from database after setup...');

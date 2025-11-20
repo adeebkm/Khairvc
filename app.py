@@ -2877,13 +2877,41 @@ def get_setup_status():
 @app.route('/api/setup/complete', methods=['POST'])
 @login_required
 def complete_setup():
-    """Mark setup as complete"""
+    """Mark setup as complete and auto-setup Pub/Sub if enabled"""
     try:
         current_user.setup_completed = True
         db.session.commit()
+        
+        # Auto-setup Pub/Sub if enabled (test environment)
+        pubsub_setup_result = None
+        use_pubsub = os.getenv('USE_PUBSUB', 'false').lower() == 'true'
+        if use_pubsub and current_user.gmail_token:
+            try:
+                pubsub_topic = os.getenv('PUBSUB_TOPIC')
+                if pubsub_topic:
+                    gmail = get_user_gmail_client(current_user)
+                    if gmail:
+                        watch_result = gmail.setup_pubsub_watch(pubsub_topic, user_id=current_user.id)
+                        if watch_result:
+                            gmail_token = current_user.gmail_token
+                            gmail_token.pubsub_topic = pubsub_topic
+                            gmail_token.watch_expiration = watch_result.get('expiration')
+                            if watch_result.get('history_id'):
+                                gmail_token.history_id = str(watch_result['history_id'])
+                            db.session.commit()
+                            pubsub_setup_result = 'success'
+                            print(f"✅ Auto-setup Pub/Sub for user {current_user.id}")
+                        else:
+                            pubsub_setup_result = 'failed'
+                            print(f"⚠️  Pub/Sub setup failed for user {current_user.id}")
+            except Exception as pubsub_error:
+                pubsub_setup_result = 'error'
+                print(f"⚠️  Pub/Sub auto-setup error (non-critical): {pubsub_error}")
+        
         return jsonify({
             'success': True,
-            'message': 'Setup completed'
+            'message': 'Setup completed',
+            'pubsub_setup': pubsub_setup_result
         })
     except Exception as e:
         db.session.rollback()

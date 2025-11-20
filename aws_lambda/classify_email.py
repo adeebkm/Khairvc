@@ -284,12 +284,12 @@ Return ONLY the JSON object. No additional text."""
     
     # Create OpenAI-compatible client for Moonshot API (NO logging will occur because we disabled it above)
     # Moonshot uses OpenAI-compatible API, so we can use the OpenAI client with custom base_url
-    # Set timeout at client level (30 seconds)
+    # Set timeout at client level (50 seconds to allow for Lambda timeout of 60s)
     import httpx
     client = OpenAI(
         base_url="https://api.moonshot.ai/v1",
         api_key=api_key,
-        timeout=httpx.Timeout(30.0, connect=10.0)  # 30s total, 10s connect
+        timeout=httpx.Timeout(50.0, connect=10.0)  # 50s total, 10s connect (Lambda timeout is 60s)
     )
     
     # Call Moonshot API (NO logging - requests/responses won't appear in CloudWatch)
@@ -303,7 +303,7 @@ Return ONLY the JSON object. No additional text."""
             ],
             temperature=0.0,
             top_p=0.0,
-            max_tokens=300
+            max_tokens=1000  # Increased from 300 to prevent finish_reason=length (response cutoff)
         )
     except Exception as api_error:
         logger.error(f"API call failed: {type(api_error).__name__}: {str(api_error)[:200]}")
