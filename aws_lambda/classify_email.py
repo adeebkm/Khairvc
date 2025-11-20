@@ -309,49 +309,70 @@ Return ONLY the JSON object. No additional text."""
         logger.error(f"API call failed: {type(api_error).__name__}: {str(api_error)[:200]}")
         raise
     
-    # Extract response (NO logging)
-    if not response.choices or len(response.choices) == 0:
-        raise ValueError("No choices in API response")
+    # Extract response with detailed error handling
+    result = None  # Initialize EARLY to avoid UnboundLocalError
     
-    message_content = response.choices[0].message.content
-    if not message_content:
-        # Log the full response structure for debugging
-        logger.error(f"Empty message content. Response structure: choices={len(response.choices) if response.choices else 0}, finish_reason={response.choices[0].finish_reason if response.choices else 'N/A'}")
-        raise ValueError("Empty message content in API response - model may have been cut off or failed")
-    
-    ai_response = message_content.strip()
-    
-    # If response is still empty after strip, raise error
-    if not ai_response:
-        raise ValueError("Empty response after stripping whitespace")
-    
-    # Parse JSON response
-    if ai_response.startswith('```'):
-        ai_response = ai_response.split('```')[1]
-        if ai_response.startswith('json'):
-            ai_response = ai_response[4:]
-        ai_response = ai_response.strip()
-    
-    # Try to parse JSON with better error handling
     try:
-        result = json.loads(ai_response)
-    except json.JSONDecodeError as e:
-        # Log the problematic response (first 1000 chars for debugging)
-        response_preview = ai_response[:1000] if ai_response else "(empty response)"
-        logger.error(f"JSON decode error. Response length: {len(ai_response) if ai_response else 0}, Preview: {response_preview}")
-        # Try to extract JSON from the response if it's embedded in text
-        import re
-        # More flexible regex to find JSON object
-        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*"label"[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', ai_response, re.DOTALL)
-        if json_match:
-            try:
-                result = json.loads(json_match.group(0))
-                logger.info("Successfully extracted JSON from response")
-            except Exception as extract_error:
-                logger.error(f"Failed to parse extracted JSON: {str(extract_error)}")
-                raise ValueError(f"Failed to parse OpenAI response as JSON: {str(e)}")
-        else:
-            raise ValueError(f"Failed to parse OpenAI response as JSON: {str(e)}. Response preview: {response_preview[:200]}")
+        if not response.choices or len(response.choices) == 0:
+            raise ValueError("No choices in API response")
+        
+        message_content = response.choices[0].message.content
+        if not message_content:
+            # Log the full response structure for debugging
+            finish_reason = response.choices[0].finish_reason if response.choices else 'N/A'
+            logger.error(f"Empty message content. Response structure: choices={len(response.choices) if response.choices else 0}, finish_reason={finish_reason}")
+            raise ValueError("Empty message content in API response - model may have been cut off or failed")
+        
+        ai_response = message_content.strip()
+        
+        # If response is still empty after strip, raise error
+        if not ai_response:
+            raise ValueError("Empty response after stripping whitespace")
+        
+        # Parse JSON response
+        if ai_response.startswith('```'):
+            ai_response = ai_response.split('```')[1]
+            if ai_response.startswith('json'):
+                ai_response = ai_response[4:]
+            ai_response = ai_response.strip()
+        
+        # Try to parse JSON with better error handling
+        try:
+            result = json.loads(ai_response)
+        except json.JSONDecodeError as e:
+            # Log the problematic response (first 1000 chars for debugging)
+            response_preview = ai_response[:1000] if ai_response else "(empty response)"
+            logger.error(f"JSON decode error. Response length: {len(ai_response) if ai_response else 0}, Preview: {response_preview}")
+            # Try to extract JSON from the response if it's embedded in text
+            import re
+            # More flexible regex to find JSON object
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*"label"[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', ai_response, re.DOTALL)
+            if json_match:
+                try:
+                    result = json.loads(json_match.group(0))
+                    logger.info("Successfully extracted JSON from response")
+                except Exception as extract_error:
+                    logger.error(f"Failed to parse extracted JSON: {str(extract_error)}")
+                    raise ValueError(f"Failed to parse OpenAI response as JSON: {str(e)}")
+            else:
+                raise ValueError(f"Failed to parse OpenAI response as JSON: {str(e)}. Response preview: {response_preview[:200]}")
+        
+        # Verify result was assigned
+        if result is None:
+            raise ValueError("Failed to parse OpenAI response - result is None")
+            
+    except Exception as parse_error:
+        # Log the full error with traceback for debugging
+        import traceback
+        error_trace = traceback.format_exc()
+        error_type = type(parse_error).__name__
+        error_msg = str(parse_error)
+        logger.error(f"Error parsing API response: {error_type}: {error_msg}")
+        logger.error(f"Traceback: {error_trace}")
+        # Ensure result is set to None if parsing failed
+        if result is None:
+            logger.error("Result is None after parsing error - this will cause UnboundLocalError")
+        raise
     
     # Clear sensitive data from memory
     del email_data
