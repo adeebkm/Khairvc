@@ -262,7 +262,8 @@ async function startSetup() {
         // Load emails
         await loadEmailsFromDatabase();
         
-        // Start background fetching
+        // Start background fetching immediately (silently continue to 150 emails)
+        console.log('🔄 Starting silent background fetch to reach 150 emails...');
         startBackgroundFetching();
         
     } catch (error) {
@@ -418,6 +419,13 @@ function updatePagination() {
     const emailList = document.getElementById('emailList');
     if (!emailList) return;
     
+    // Safety check: ensure filteredEmails is set
+    if (!filteredEmails || filteredEmails.length === 0) {
+        console.warn('⚠️ updatePagination: filteredEmails is empty, displaying empty state');
+        displayEmails([]);
+        return;
+    }
+    
     // Remove existing pagination
     const existingPagination = emailList.querySelector('.pagination');
     if (existingPagination) {
@@ -428,15 +436,16 @@ function updatePagination() {
     const totalEmails = filteredEmails.length;
     const totalPages = Math.ceil(totalEmails / EMAILS_PER_PAGE);
     
-    if (totalPages <= 1) return; // No pagination needed
-    
     // Get emails for current page
     const startIndex = (currentPage - 1) * EMAILS_PER_PAGE;
     const endIndex = startIndex + EMAILS_PER_PAGE;
     paginatedEmails = filteredEmails.slice(startIndex, endIndex);
     
-    // Display current page emails
+    // Display current page emails (always display, even if only 1 page)
     displayEmails(paginatedEmails);
+    
+    // Only show pagination controls if more than 1 page
+    if (totalPages <= 1) return;
     
     // Create pagination controls
     const pagination = document.createElement('div');
@@ -485,8 +494,8 @@ async function startBackgroundFetching() {
     
     backgroundFetchActive = true;
     
-    // Check every 2 minutes if we need to fetch more emails
-    backgroundFetchInterval = setInterval(async () => {
+    // Start immediately, then check every 3 minutes (more conservative to avoid rate limits)
+    const triggerBackgroundFetch = async () => {
         try {
             const response = await fetch('/api/emails/background-fetch', {
                 method: 'POST',
@@ -496,18 +505,24 @@ async function startBackgroundFetching() {
             const data = await response.json();
             
             if (data.success && data.task_id) {
-                console.log(`🔄 Background fetch started: ${data.fetching} emails (${data.current_count}/${data.target_total})`);
+                console.log(`🔄 Silent background fetch: ${data.fetching} emails (${data.current_count}/${data.target_total})`);
                 
                 // Poll for completion (silently)
                 pollBackgroundTask(data.task_id);
             } else if (data.message === 'Already have enough emails') {
-                console.log('✅ Background fetch: Already have 150 emails');
+                console.log('✅ Background fetch complete: 150 emails loaded');
                 stopBackgroundFetching();
             }
         } catch (error) {
             console.error('Background fetch error:', error);
         }
-    }, 2 * 60 * 1000); // Every 2 minutes
+    };
+    
+    // Start immediately
+    await triggerBackgroundFetch();
+    
+    // Then check every 3 minutes (more conservative to avoid rate limits)
+    backgroundFetchInterval = setInterval(triggerBackgroundFetch, 3 * 60 * 1000);
 }
 
 async function pollBackgroundTask(taskId) {
@@ -1075,6 +1090,10 @@ function applyFilters() {
     
     // Use pagination if we have more than 40 emails
     if (sortedFiltered.length > EMAILS_PER_PAGE) {
+        // Ensure filteredEmails is set before calling updatePagination
+        if (filteredEmails.length === 0 && sortedFiltered.length > 0) {
+            filteredEmails = sortedFiltered;
+        }
         updatePagination();
     } else {
         // Display all emails if less than one page
@@ -1651,10 +1670,10 @@ async function pollTaskStatus(taskId, loading, emailList, fetchBtn) {
 // Load emails from database after background sync completes
 async function loadEmailsFromDatabase() {
     try {
-        const categoryParam = currentTab !== 'all' ? currentTab.toUpperCase().replace('-', '_') : null;
-        let url = `/api/emails?db_only=true&max=100&`;
-        if (categoryParam) url += `category=${categoryParam}&`;
-        url += 'show_spam=true';
+        // ALWAYS load ALL emails from database (no category filter)
+        // Let applyFilters() handle category filtering on the frontend
+        // This ensures allEmails contains all emails, and filtering happens client-side
+        let url = `/api/emails?db_only=true&max=100&show_spam=true`;
         
         const response = await fetch(url);
         const data = await response.json();
@@ -1665,8 +1684,10 @@ async function loadEmailsFromDatabase() {
             emailCache.timestamp = Date.now();
             saveEmailCacheToStorage();
             // CRITICAL: Set allEmails so applyFilters() can use it
+            // allEmails should contain ALL emails, not filtered by category
             allEmails = emails;
             console.log(`✅ Loaded ${emails.length} emails from database`);
+            // applyFilters() will handle category filtering based on currentTab
             applyFilters();
         } else {
             throw new Error(data.error || 'Failed to load emails');

@@ -124,6 +124,8 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
             emails_classified = 0
             errors = []
             
+            import time  # For rate limiting delays
+            
             for idx, email in enumerate(emails):
                 try:
                     # Update progress
@@ -169,6 +171,11 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                             thread_id=email.get('thread_id', ''),
                             user_id=str(user_id)
                         )
+                    
+                    # Add delay between classifications to avoid rate limits
+                    # 1 second delay for background fetches (silent, can take time)
+                    if idx < len(emails) - 1:  # Don't delay after last email
+                        time.sleep(1.0)  # 1 second delay between emails
                     
                     # Store classification
                     new_classification = EmailClassification(

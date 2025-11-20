@@ -921,13 +921,17 @@ def get_emails():
             print("📂 No new emails from Gmail. Loading all classified emails from database...")
             print(f"   (Ignoring 'unread_only' filter - database doesn't track read status)")
             
-            # Get all classified emails from database (no limit - show all stored emails)
-            # Only apply limit if force_full_sync is requested (user wants fresh fetch from Gmail)
+            # Get all classified emails from database
             # NOTE: We ignore unread_only filter here because database doesn't store read/unread status
             query = EmailClassification.query.filter_by(user_id=current_user.id)
             
+            # Apply category filter in SQL query (more efficient than filtering in Python)
+            if category_filter:
+                query = query.filter_by(category=category_filter)
+            
             # Limit to max_emails (user can request 20, 50, or 100)
-            print(f"   Loading latest {max_emails} emails from database")
+            # When category filter is applied, we still limit to max_emails since filter is in SQL
+            print(f"   Loading latest {max_emails} emails from database" + (f" (category: {category_filter})" if category_filter else ""))
             db_classifications = query.order_by(EmailClassification.classified_at.desc()).limit(max_emails).all()
             
             classified_emails = []
@@ -971,7 +975,8 @@ def get_emails():
                 if classification.category == CATEGORY_SPAM and not show_spam:
                     continue
                 
-                # Filter by category if requested
+                # Category filter already applied in SQL query, so no need to check here
+                # (Keeping this check as safety, but it should never trigger)
                 if category_filter and classification.category != category_filter:
                     continue
                 
@@ -2942,7 +2947,9 @@ def background_fetch_emails():
         
         # Calculate how many more to fetch (with rate limiting)
         remaining = target_total - current_count
-        max_to_fetch = min(remaining, 20)  # Fetch 20 at a time to avoid rate limits
+        # Fetch smaller batches (10 at a time) to avoid rate limits
+        # This allows more time between batches for rate limit recovery
+        max_to_fetch = min(remaining, 10)  # Reduced from 20 to 10 for better rate limit handling
         
         if CELERY_AVAILABLE:
             try:
