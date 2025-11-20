@@ -28,15 +28,22 @@ Railway only runs the `web` process by default. The `worker` process from your P
    - Go to **"Settings"** tab
    - Scroll to **"Deploy"** section
 
-2. **Set Start Command**
-   - Find **"Start Command"** field
+2. **Set Start Command (Optional)**
+   
+   **Option A: Use Procfile (Recommended)**
+   - Leave **"Start Command"** field **EMPTY**
+   - Railway will automatically detect and use the `worker:` process from your Procfile
+   - This keeps your code and Railway config in sync
+   
+   **Option B: Custom Start Command**
+   - If you need to override the Procfile, find **"Start Command"** field
    - Enter:
      ```
-     celery -A celery_config worker --loglevel=info --concurrency=10 --queues=email_sync --max-tasks-per-child=1000
+     celery -A celery_config worker --loglevel=info --concurrency=10 --queues=email_sync --max-tasks-per-child=1000 --without-gossip --without-mingle --without-heartbeat
      ```
    - Click **"Save"**
    
-   **Note**: The `--max-tasks-per-child=1000` flag helps prevent memory leaks and keeps the worker stable on Railway.
+   **Note**: The `--max-tasks-per-child=1000` flag helps prevent memory leaks. The `--without-gossip --without-mingle --without-heartbeat` flags reduce overhead and may help with Railway's container management.
 
 ### Step 3: Add Environment Variables
 
