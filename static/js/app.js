@@ -267,6 +267,17 @@ async function startSetup() {
             const displayedCount = emailListEl.querySelectorAll('.email-item').length;
             console.log(`📧 Setup complete: ${allEmails.length} emails loaded, ${displayedCount} displayed`);
             
+            // If no emails were loaded, don't hide setup screen - show error instead
+            if (allEmails.length === 0) {
+                console.warn('⚠️ No emails loaded after setup - keeping setup screen visible');
+                if (setupScreen) setupScreen.style.display = 'block';
+                if (progressText) progressText.textContent = 'No emails were loaded. Please check worker configuration and try again.';
+                if (startBtn) startBtn.style.display = 'block';
+                if (progressDiv) progressDiv.style.display = 'none';
+                showAlert('warning', 'Setup completed but no emails were loaded. This may be due to worker configuration issues.');
+                return; // Don't continue if no emails
+            }
+            
             // If emails are loaded but not displayed, force display
             if (allEmails.length > 0 && displayedCount === 0) {
                 console.warn('⚠️ Emails loaded but not displayed, forcing display...');
@@ -349,9 +360,16 @@ async function pollSetupProgress(taskId, progressBar, progressText) {
                     if (progressBar) progressBar.style.width = '100%';
                     if (progressText) progressText.textContent = 'Setup complete!';
                     setTimeout(resolve, 1000);
-                } else if (data.status === 'FAILURE') {
+                } else if (data.status === 'FAILURE' || data.status === 'error') {
                     clearInterval(interval);
-                    reject(new Error(data.error || 'Setup failed'));
+                    const errorMsg = data.error || data.message || 'Setup failed';
+                    console.error('❌ Setup task failed:', errorMsg);
+                    // If it's an API key error, provide helpful message
+                    if (errorMsg.includes('API key') || errorMsg.includes('MOONSHOT') || errorMsg.includes('OPENAI')) {
+                        reject(new Error('Worker configuration error: API key not set. Please check Railway worker environment variables.'));
+                    } else {
+                        reject(new Error(errorMsg));
+                    }
                 }
                 
                 // Timeout after MAX_POLLS
