@@ -998,7 +998,8 @@ def get_emails():
                         if exception:
                             return
                         if response:
-                            msg_id = request_id
+                            # Extract message_id from request_id (format: "star_{idx}_{msg_id}")
+                            msg_id = request_id.split('_', 2)[-1] if '_' in request_id else request_id
                             label_ids = response.get('labelIds', [])
                             star_status_results[msg_id] = {
                                 'is_starred': 'STARRED' in label_ids,
@@ -1006,12 +1007,13 @@ def get_emails():
                             }
                     
                     batch = gmail.service.new_batch_http_request(callback=star_callback)
-                    for msg_id in message_ids[:100]:  # Limit to 100 to avoid rate limits
+                    for idx, msg_id in enumerate(message_ids[:100]):  # Limit to 100 to avoid rate limits
+                        # Use index as request_id to avoid duplicates
                         batch.add(gmail.service.users().messages().get(
                             userId='me',
                             id=msg_id,
                             format='metadata'
-                        ), request_id=msg_id)
+                        ), request_id=f"star_{idx}_{msg_id}")
                     
                     if message_ids:
                         batch.execute()

@@ -284,26 +284,46 @@ Return ONLY the JSON object. No additional text."""
     
     # Create OpenAI-compatible client for Moonshot API (NO logging will occur because we disabled it above)
     # Moonshot uses OpenAI-compatible API, so we can use the OpenAI client with custom base_url
+    # Set timeout at client level (30 seconds)
+    import httpx
     client = OpenAI(
         base_url="https://api.moonshot.ai/v1",
-        api_key=api_key
+        api_key=api_key,
+        timeout=httpx.Timeout(30.0, connect=10.0)  # 30s total, 10s connect
     )
     
     # Call Moonshot API (NO logging - requests/responses won't appear in CloudWatch)
     # Using kimi-k2-thinking model for test environment
-    response = client.chat.completions.create(
-        model="kimi-k2-thinking",
-        messages=[
-            {"role": "system", "content": "You are a deterministic email classifier for a venture capital firm. Return ONLY valid JSON. No markdown, no explanation, no additional text."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.0,
-        top_p=0.0,
-        max_tokens=300
-    )
+    try:
+        response = client.chat.completions.create(
+            model="kimi-k2-thinking",
+            messages=[
+                {"role": "system", "content": "You are a deterministic email classifier for a venture capital firm. Return ONLY valid JSON. No markdown, no explanation, no additional text."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.0,
+            top_p=0.0,
+            max_tokens=300
+        )
+    except Exception as api_error:
+        logger.error(f"API call failed: {type(api_error).__name__}: {str(api_error)[:200]}")
+        raise
     
     # Extract response (NO logging)
-    ai_response = response.choices[0].message.content.strip()
+    if not response.choices or len(response.choices) == 0:
+        raise ValueError("No choices in API response")
+    
+    message_content = response.choices[0].message.content
+    if not message_content:
+        # Log the full response structure for debugging
+        logger.error(f"Empty message content. Response structure: choices={len(response.choices) if response.choices else 0}, finish_reason={response.choices[0].finish_reason if response.choices else 'N/A'}")
+        raise ValueError("Empty message content in API response - model may have been cut off or failed")
+    
+    ai_response = message_content.strip()
+    
+    # If response is still empty after strip, raise error
+    if not ai_response:
+        raise ValueError("Empty response after stripping whitespace")
     
     # Parse JSON response
     if ai_response.startswith('```'):
@@ -316,19 +336,22 @@ Return ONLY the JSON object. No additional text."""
     try:
         result = json.loads(ai_response)
     except json.JSONDecodeError as e:
-        # Log the problematic response (first 500 chars only for debugging)
-        logger.error(f"JSON decode error. Response preview: {ai_response[:500]}")
+        # Log the problematic response (first 1000 chars for debugging)
+        response_preview = ai_response[:1000] if ai_response else "(empty response)"
+        logger.error(f"JSON decode error. Response length: {len(ai_response) if ai_response else 0}, Preview: {response_preview}")
         # Try to extract JSON from the response if it's embedded in text
         import re
-        json_match = re.search(r'\{[^{}]*"label"[^{}]*\}', ai_response, re.DOTALL)
+        # More flexible regex to find JSON object
+        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*"label"[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', ai_response, re.DOTALL)
         if json_match:
             try:
                 result = json.loads(json_match.group(0))
                 logger.info("Successfully extracted JSON from response")
-            except:
+            except Exception as extract_error:
+                logger.error(f"Failed to parse extracted JSON: {str(extract_error)}")
                 raise ValueError(f"Failed to parse OpenAI response as JSON: {str(e)}")
         else:
-            raise ValueError(f"Failed to parse OpenAI response as JSON: {str(e)}")
+            raise ValueError(f"Failed to parse OpenAI response as JSON: {str(e)}. Response preview: {response_preview[:200]}")
     
     # Clear sensitive data from memory
     del email_data
