@@ -1,9 +1,9 @@
 """
 AWS Lambda function for email classification
 - Receives encrypted email content
-- Calls OpenAI API (with logging disabled)
+- Calls Moonshot API (OpenAI-compatible, with logging disabled)
 - Returns encrypted classification result
-- Only logs metadata (no email content, no OpenAI requests/responses)
+- Only logs metadata (no email content, no API requests/responses)
 """
 import json
 import logging
@@ -27,14 +27,14 @@ secrets_client = boto3.client('secretsmanager')
 
 
 def get_openai_api_key() -> str:
-    """Retrieve OpenAI API key from AWS Secrets Manager"""
+    """Retrieve API key from AWS Secrets Manager (supports OpenAI or Moonshot)"""
     try:
         secret_name = os.getenv('OPENAI_SECRET_NAME', 'openai-api-key')
         response = secrets_client.get_secret_value(SecretId=secret_name)
         secret = json.loads(response['SecretString'])
-        return secret.get('api_key') or secret.get('OPENAI_API_KEY')
+        return secret.get('api_key') or secret.get('OPENAI_API_KEY') or secret.get('MOONSHOT_API_KEY')
     except Exception as e:
-        logger.error(f"Failed to retrieve OpenAI API key: {type(e).__name__}")
+        logger.error(f"Failed to retrieve API key: {type(e).__name__}")
         raise
 
 
@@ -279,16 +279,20 @@ YOU MUST FOLLOW ALL RULES ABOVE. ZERO HALLUCINATION.
 
 Return ONLY the JSON object. No additional text."""
 
-    # Get OpenAI API key from Secrets Manager
-    openai_key = get_openai_api_key()
+    # Get API key from Secrets Manager
+    api_key = get_openai_api_key()
     
-    # Create OpenAI client (NO logging will occur because we disabled it above)
-    client = OpenAI(api_key=openai_key)
+    # Create OpenAI-compatible client for Moonshot API (NO logging will occur because we disabled it above)
+    # Moonshot uses OpenAI-compatible API, so we can use the OpenAI client with custom base_url
+    client = OpenAI(
+        base_url="https://api.moonshot.cn/v1",
+        api_key=api_key
+    )
     
-    # Call OpenAI API (NO logging - requests/responses won't appear in CloudWatch)
-    # Using gpt-4o-mini for testing (much cheaper than gpt-4o)
+    # Call Moonshot API (NO logging - requests/responses won't appear in CloudWatch)
+    # Using kimi-k2-thinking model for test environment
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="kimi-k2-thinking",
         messages=[
             {"role": "system", "content": "You are a deterministic email classifier for a venture capital firm. Return ONLY valid JSON. No markdown, no explanation, no additional text."},
             {"role": "user", "content": prompt}
@@ -308,7 +312,23 @@ Return ONLY the JSON object. No additional text."""
             ai_response = ai_response[4:]
         ai_response = ai_response.strip()
     
-    result = json.loads(ai_response)
+    # Try to parse JSON with better error handling
+    try:
+        result = json.loads(ai_response)
+    except json.JSONDecodeError as e:
+        # Log the problematic response (first 500 chars only for debugging)
+        logger.error(f"JSON decode error. Response preview: {ai_response[:500]}")
+        # Try to extract JSON from the response if it's embedded in text
+        import re
+        json_match = re.search(r'\{[^{}]*"label"[^{}]*\}', ai_response, re.DOTALL)
+        if json_match:
+            try:
+                result = json.loads(json_match.group(0))
+                logger.info("Successfully extracted JSON from response")
+            except:
+                raise ValueError(f"Failed to parse OpenAI response as JSON: {str(e)}")
+        else:
+            raise ValueError(f"Failed to parse OpenAI response as JSON: {str(e)}")
     
     # Clear sensitive data from memory
     del email_data
