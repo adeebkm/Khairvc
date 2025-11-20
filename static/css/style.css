@@ -2069,13 +2069,17 @@ body::before {
         display: flex;
         justify-content: center;
         align-items: center;
-        gap: 8px;
-        margin: 32px 0;
-        padding: 20px;
+        gap: 12px;
+        margin: 40px 0;
+        padding: 16px 24px;
+        background: var(--bg-secondary);
+        border-radius: 12px;
+        border: 1px solid var(--border-color);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
     }
 
     .pagination button {
-        padding: 8px 16px;
+        padding: 10px 20px;
         border: 1px solid var(--border-color);
         background: white;
         border-radius: 8px;
@@ -2083,17 +2087,22 @@ body::before {
         font-size: 14px;
         font-weight: 500;
         color: var(--text-primary);
-        transition: all 0.2s;
+        transition: all 0.2s ease;
+        min-width: 100px;
     }
 
     .pagination button:hover:not(:disabled) {
-        background: var(--bg-secondary);
+        background: var(--primary-color);
+        color: white;
         border-color: var(--primary-color);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     }
 
     .pagination button:disabled {
-        opacity: 0.5;
+        opacity: 0.4;
         cursor: not-allowed;
+        background: var(--bg-secondary);
     }
 
     .pagination button.active {
@@ -2103,9 +2112,31 @@ body::before {
     }
 
     .pagination-info {
-        font-size: 14px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        font-size: 13px;
         color: var(--text-secondary);
-        margin: 0 16px;
+        margin: 0 20px;
+        text-align: center;
+    }
+
+    .pagination-info .pagination-text {
+        font-size: 13px;
+        color: var(--text-secondary);
+    }
+
+    .pagination-info .pagination-text strong {
+        color: var(--text-primary);
+        font-weight: 600;
+    }
+
+    .pagination-info .pagination-pages {
+        font-size: 12px;
+        color: var(--text-light);
+        font-weight: 500;
+        letter-spacing: 0.3px;
     }
 
     .container {

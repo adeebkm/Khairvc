@@ -8,7 +8,7 @@ let searchQuery = ''; // Current search query
 
 // Pagination state
 let currentPage = 1;
-const EMAILS_PER_PAGE = 40;
+const EMAILS_PER_PAGE = 20;
 let paginatedEmails = []; // Emails for current page
 
 // Track if we're currently fetching to prevent multiple simultaneous requests
@@ -478,7 +478,9 @@ function updatePagination() {
     // Page info
     const pageInfo = document.createElement('span');
     pageInfo.className = 'pagination-info';
-    pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${totalEmails} emails)`;
+    const startEmail = startIndex + 1;
+    const endEmail = Math.min(endIndex, totalEmails);
+    pageInfo.innerHTML = `<span class="pagination-text">Showing <strong>${startEmail}-${endEmail}</strong> of <strong>${totalEmails}</strong> emails</span><span class="pagination-pages">Page ${currentPage} of ${totalPages}</span>`;
     pagination.appendChild(pageInfo);
     
     // Next button
