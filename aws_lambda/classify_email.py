@@ -292,22 +292,56 @@ Return ONLY the JSON object. No additional text."""
         timeout=httpx.Timeout(110.0, connect=10.0)  # 110s total, 10s connect (Lambda timeout is 120s)
     )
     
-    # Call Moonshot API (NO logging - requests/responses won't appear in CloudWatch)
+    # Call Moonshot API with retry logic for rate limits
     # Using kimi-k2-turbo-preview model (faster than kimi-k2-thinking)
-    try:
-        response = client.chat.completions.create(
-            model="kimi-k2-turbo-preview",  # Faster model for better performance
-            messages=[
-                {"role": "system", "content": "You are a deterministic email classifier for a venture capital firm. Return ONLY valid JSON. No markdown, no explanation, no additional text."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.0,
-            top_p=0.0,
-            max_tokens=1000  # Increased from 300 to prevent finish_reason=length (response cutoff)
-        )
-    except Exception as api_error:
-        logger.error(f"API call failed: {type(api_error).__name__}: {str(api_error)[:200]}")
-        raise
+    import time
+    max_retries = 3
+    retry_delay = 2  # Start with 2 seconds
+    
+    response = None
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model="kimi-k2-turbo-preview",  # Faster model for better performance
+                messages=[
+                    {"role": "system", "content": "You are a deterministic email classifier for a venture capital firm. Return ONLY valid JSON. No markdown, no explanation, no additional text."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.0,
+                top_p=0.0,
+                max_tokens=1000  # Increased from 300 to prevent finish_reason=length (response cutoff)
+            )
+            # Success - break out of retry loop
+            break
+        except Exception as api_error:
+            last_error = api_error
+            error_type = type(api_error).__name__
+            error_msg = str(api_error)
+            
+            # Check if it's a rate limit error
+            is_rate_limit = (
+                error_type == 'RateLimitError' or 
+                '429' in error_msg or 
+                'overloaded' in error_msg.lower() or
+                'rate limit' in error_msg.lower()
+            )
+            
+            if is_rate_limit and attempt < max_retries - 1:
+                # Exponential backoff for rate limits
+                wait_time = retry_delay * (2 ** attempt)
+                logger.warning(f"Rate limit hit (attempt {attempt + 1}/{max_retries}), waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
+                continue
+            else:
+                # Not a rate limit or out of retries - log and raise
+                logger.error(f"API call failed: {error_type}: {error_msg[:200]}")
+                raise
+    
+    # If we exhausted retries, raise the last error
+    if response is None and last_error:
+        raise last_error
     
     # Extract response with detailed error handling
     result = None  # Initialize EARLY to avoid UnboundLocalError
@@ -360,6 +394,9 @@ Return ONLY the JSON object. No additional text."""
         # Verify result was assigned
         if result is None:
             raise ValueError("Failed to parse OpenAI response - result is None")
+        
+        # Store result in a local variable before cleanup to avoid UnboundLocalError
+        final_result = result
             
     except Exception as parse_error:
         # Log the full error with traceback for debugging
@@ -369,18 +406,34 @@ Return ONLY the JSON object. No additional text."""
         error_msg = str(parse_error)
         logger.error(f"Error parsing API response: {error_type}: {error_msg}")
         logger.error(f"Traceback: {error_trace}")
-        # Ensure result is set to None if parsing failed
-        if result is None:
-            logger.error("Result is None after parsing error - this will cause UnboundLocalError")
+        # Check if result exists in this scope
+        try:
+            logger.error(f"Result variable state: result={result}, type={type(result)}")
+        except NameError:
+            logger.error("Result variable does not exist in this scope (UnboundLocalError)")
+        # Re-raise the error
         raise
     
-    # Clear sensitive data from memory
-    del email_data
-    del prompt
-    del ai_response
-    del openai_key
+    # Clear sensitive data from memory (safely)
+    try:
+        del email_data
+    except NameError:
+        pass
+    try:
+        del prompt
+    except NameError:
+        pass
+    try:
+        del ai_response
+    except NameError:
+        pass
+    try:
+        del openai_key
+    except NameError:
+        pass
     
-    return result
+    # Return the stored result
+    return final_result
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:

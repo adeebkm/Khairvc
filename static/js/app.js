@@ -147,26 +147,20 @@ async function autoFetchNewEmails() {
 
 // Start/stop auto-fetch polling
 function toggleAutoFetch(enabled) {
-    autoFetchEnabled = enabled;
+    // Auto-fetch disabled - using Pub/Sub for real-time notifications instead
+    // This function is kept for compatibility but does nothing
+    autoFetchEnabled = false;
     
-    // Save preference to localStorage
-    localStorage.setItem('autoFetchEnabled', enabled ? 'true' : 'false');
-    
-    // Update checkbox if it exists
-    const checkbox = document.getElementById('autoFetchCheck');
-    if (checkbox) {
-        checkbox.checked = enabled;
+    // Stop any existing polling
+    if (autoFetchInterval) {
+        clearInterval(autoFetchInterval);
+        autoFetchInterval = null;
     }
     
-    if (enabled) {
-        // Start polling
-        if (autoFetchInterval) {
-            clearInterval(autoFetchInterval);
-        }
-        autoFetchInterval = setInterval(autoFetchNewEmails, AUTO_FETCH_INTERVAL);
-        console.log('✅ Auto-fetch enabled: Checking for new emails every 5 minutes');
-        
-        // Do an initial check after 30 seconds
+    console.log('ℹ️  Auto-fetch disabled - using Pub/Sub for real-time email notifications');
+    
+    // Pub/Sub handles new email notifications automatically
+    // No polling needed
         setTimeout(autoFetchNewEmails, 30000);
     } else {
         // Stop polling
@@ -408,7 +402,16 @@ async function startSetup() {
             updatePagination();
         } else if (allEmails.length > 0) {
             console.warn('⚠️ filteredEmails is empty, using allEmails directly');
-            displayEmails(allEmails.slice(0, EMAILS_PER_PAGE));
+            // Ensure all emails have category
+            allEmails.forEach(email => {
+                if (!email.category && email.classification?.category) {
+                    email.category = email.classification.category.toLowerCase();
+                } else if (!email.category) {
+                    email.category = 'general';
+                }
+            });
+            applyFilters();
+            displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
             updatePagination();
         }
         
@@ -416,18 +419,23 @@ async function startSetup() {
         setTimeout(() => {
             const checkCount = emailListEl ? emailListEl.querySelectorAll('.email-item').length : 0;
             console.log(`📊 After display check: ${checkCount} emails visible, ${filteredEmails.length} filtered, ${allEmails.length} total`);
-            if (checkCount === 0) {
+            if (checkCount === 0 && allEmails.length > 0) {
+                console.warn('⚠️ Emails still not displayed, forcing display again...');
+                // Ensure categories are set
+                allEmails.forEach(email => {
+                    if (!email.category && email.classification?.category) {
+                        email.category = email.classification.category.toLowerCase();
+                    } else if (!email.category) {
+                        email.category = 'general';
+                    }
+                });
+                applyFilters();
                 if (filteredEmails.length > 0) {
-                    console.warn('⚠️ Emails still not displayed, forcing display again...');
                     displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
                     updatePagination();
-                } else if (allEmails.length > 0) {
-                    console.warn('⚠️ No filtered emails, displaying all emails...');
-                    allEmails.forEach(email => {
-                        if (!email.category) email.category = 'general'; // Ensure category exists
-                    });
-                    applyFilters();
-                    displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
+                } else {
+                    // Last resort - display all emails directly
+                    displayEmails(allEmails.slice(0, EMAILS_PER_PAGE));
                     updatePagination();
                 }
             }
@@ -760,10 +768,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         return;
     }
     
-    // Restore auto-fetch preference from localStorage (default to true)
-    const savedAutoFetch = localStorage.getItem('autoFetchEnabled');
-    const shouldAutoFetch = savedAutoFetch === null ? true : savedAutoFetch === 'true';
-    toggleAutoFetch(shouldAutoFetch);
+    // Auto-fetch is disabled - using Pub/Sub for real-time notifications
+    // Pub/Sub automatically notifies when new emails arrive
+    toggleAutoFetch(false);
     
     // Start background fetching if setup is complete
     try {
@@ -1552,6 +1559,15 @@ async function loadConfig() {
 }
 
 // Fetch emails from Gmail
+async function refreshEmails() {
+    // Refresh emails by reloading from database
+    console.log('🔄 Refreshing emails from database...');
+    await loadEmailsFromDatabase();
+    applyFilters();
+    updatePagination();
+    showAlert('success', 'Emails refreshed');
+}
+
 async function fetchEmails() {
     // Prevent multiple simultaneous fetches
     if (isFetching) {
@@ -1562,7 +1578,7 @@ async function fetchEmails() {
     isFetching = true;
     const loading = document.getElementById('loading');
     const emailList = document.getElementById('emailList');
-    const fetchBtn = document.getElementById('fetchEmailsBtn');
+    const fetchBtn = document.getElementById('refreshEmailsBtn');
     
     // Show loading state
     loading.style.display = 'block';
@@ -1571,7 +1587,7 @@ async function fetchEmails() {
     fetchBtn.disabled = true;
     
     try {
-        const forceFullSync = document.getElementById('forceFullSyncCheck')?.checked || false;
+        const forceFullSync = false; // Removed force full sync option
         const maxEmails = 100; // Fixed to 100 emails
         
         // PHASE 1: Try background task first (if available)

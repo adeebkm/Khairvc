@@ -216,16 +216,8 @@
                 
                 <!-- Controls -->
                 <div class="controls-compact">
-                    <button class="btn btn-small btn-primary" id="fetchEmailsBtn" onclick="fetchEmails()">🔄 Fetch</button>
+                    <button class="btn btn-small btn-primary" id="refreshEmailsBtn" onclick="refreshEmails()">🔄 Refresh</button>
                     <div class="email-count-compact" id="emailCount"></div>
-                    <label class="checkbox-compact" title="Force full sync from Gmail (uses more API calls - use sparingly)">
-                        <input type="checkbox" id="forceFullSyncCheck">
-                        <span>Force Full Sync</span>
-                    </label>
-                    <label class="checkbox-compact" title="Automatically check for new emails every 5 minutes (only fetches new emails)">
-                        <input type="checkbox" id="autoFetchCheck" checked onchange="toggleAutoFetch(this.checked)">
-                        <span>Auto-Fetch</span>
-                    </label>
                 </div>
             </div>
 
