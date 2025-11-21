@@ -1523,16 +1523,6 @@ function displayDeals(deals) {
             }
         }
         
-        // NEW Scores: team_background_score, white_space_score, overall_score
-        // Check for null/undefined explicitly (0 is a valid score)
-        const overallScore = (deal.overall_score !== null && deal.overall_score !== undefined) ? Math.round(deal.overall_score) : 'N/A';
-        const teamScore = (deal.team_background_score !== null && deal.team_background_score !== undefined) ? Math.round(deal.team_background_score) : 'N/A';
-        const whiteSpaceScore = (deal.white_space_score !== null && deal.white_space_score !== undefined) ? Math.round(deal.white_space_score) : 'N/A';
-        
-        const scoreBadge = (deal.overall_score !== null && deal.overall_score !== undefined) ? 
-            `<span class="score-badge score-${overallScore >= 70 ? 'high' : overallScore >= 50 ? 'medium' : 'low'}">${overallScore}</span>` :
-            'N/A';
-        
         return `
             <tr>
                 <td>
@@ -1547,18 +1537,6 @@ function displayDeals(deals) {
                 <td class="basics">${basics}</td>
                 <td>
                     <div class="overlap-info">${escapeHtml(overlapText)}</div>
-                </td>
-                <td>
-                    <div class="score-display">
-                        ${scoreBadge}
-                        <div class="score-details">
-                            <strong>Breakdown:</strong><br>
-                            Team: ${teamScore}<br>
-                            White Space: ${whiteSpaceScore}<br>
-                            Overall: ${overallScore}
-                            ${deal.score_summary ? `<br><br><strong>Summary:</strong><br><span style="font-size: 11px; color: var(--text-secondary); line-height: 1.4;">${escapeHtml(deal.score_summary)}</span>` : ''}
-                        </div>
-                    </div>
                 </td>
                 <td>${new Date(deal.created_at).toLocaleDateString()}</td>
                 <td>
@@ -2740,58 +2718,7 @@ async function openEmail(indexOrEmail) {
     const tagsHtml = tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('');
     document.getElementById('modalTags').innerHTML = tagsHtml || '';
     
-    // Load deal scores if this is a DEAL_FLOW email
-    const modalDealScores = document.getElementById('modalDealScores');
-    if (classification.category === 'DEAL_FLOW') {
-        // Show scores section
-        modalDealScores.style.display = 'block';
-        
-        // Fetch deal data to get scores
-        try {
-            const dealsResponse = await fetch('/api/deals');
-            const dealsData = await dealsResponse.json();
-            
-            if (dealsData.success && dealsData.deals) {
-                // Find the deal with matching thread_id
-                const deal = dealsData.deals.find(d => d.thread_id === currentEmail.thread_id);
-                
-                if (deal) {
-                    // Display scores
-                    document.getElementById('modalTeamScore').textContent = 
-                        deal.team_background_score !== null && deal.team_background_score !== undefined 
-                        ? Math.round(deal.team_background_score) : '0';
-                    
-                    document.getElementById('modalWhiteSpaceScore').textContent = 
-                        deal.white_space_score !== null && deal.white_space_score !== undefined 
-                        ? Math.round(deal.white_space_score) : '0';
-                    
-                    document.getElementById('modalOverallScore').textContent = 
-                        deal.overall_score !== null && deal.overall_score !== undefined 
-                        ? Math.round(deal.overall_score) : '0';
-                    
-                    // Display score summary if available
-                    const modalScoreSummary = document.getElementById('modalScoreSummary');
-                    if (deal.score_summary) {
-                        modalScoreSummary.style.display = 'block';
-                        modalScoreSummary.querySelector('.score-summary-text').textContent = deal.score_summary;
-                    } else {
-                        modalScoreSummary.style.display = 'none';
-                    }
-                } else {
-                    // Deal not found, hide scores
-                    modalDealScores.style.display = 'none';
-                }
-            } else {
-                modalDealScores.style.display = 'none';
-            }
-        } catch (error) {
-            console.error('Error fetching deal scores:', error);
-            modalDealScores.style.display = 'none';
-        }
-    } else {
-        // Not a deal flow email, hide scores
-        modalDealScores.style.display = 'none';
-    }
+    // Deal scores section removed
     
     // Hide single email section, show thread container
     document.getElementById('singleEmailSection').style.display = 'none';

@@ -51,7 +51,10 @@ echo "👤 Creating IAM user..."
 aws iam create-user --user-name $IAM_USER_NAME 2>/dev/null || \
     echo -e "${YELLOW}⚠️  User already exists, continuing...${NC}"
 
-# Create policy document
+# Get account ID for Secrets Manager ARN
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# Create policy document (Lambda invoke + Secrets Manager read)
 cat > /tmp/test-lambda-policy.json <<EOF
 {
     "Version": "2012-10-17",
@@ -60,6 +63,11 @@ cat > /tmp/test-lambda-policy.json <<EOF
             "Effect": "Allow",
             "Action": "lambda:InvokeFunction",
             "Resource": "$FUNCTION_ARN"
+        },
+        {
+            "Effect": "Allow",
+            "Action": "secretsmanager:GetSecretValue",
+            "Resource": "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:openai-api-key-test-*"
         }
     ]
 }
