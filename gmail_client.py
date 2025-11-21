@@ -811,7 +811,14 @@ class GmailClient:
         # Fallback to environment variables (Railway)
         moonshot_key = os.getenv('MOONSHOT_API_KEY') or os.getenv('OPENAI_API_KEY')
         if moonshot_key:
-            print(f"   🔑 Using Moonshot API key from environment variables")
+            # Log first few characters for debugging (don't log full key for security)
+            key_preview = moonshot_key[:10] + "..." if len(moonshot_key) > 10 else moonshot_key[:len(moonshot_key)]
+            print(f"   🔑 Using Moonshot API key from environment variables (key starts with: {key_preview})")
+            # Validate key format
+            if not moonshot_key.startswith('sk-'):
+                print(f"   ⚠️  WARNING: API key doesn't start with 'sk-' - may be invalid")
+        else:
+            print(f"   ❌ No Moonshot API key found in environment variables (checked MOONSHOT_API_KEY and OPENAI_API_KEY)")
         return moonshot_key
     
     def _extract_pdf_text(self, file_data, filename):
