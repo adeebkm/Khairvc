@@ -371,8 +371,28 @@ async function startSetup() {
             }
         });
         
-        // Apply filters and update pagination BEFORE hiding setup screen
-        // This ensures emails are ready to display
+        // NOW hide setup screen and show main content FIRST
+        // This ensures emailList element is available before we try to display emails
+        if (setupScreen) setupScreen.style.display = 'none';
+        if (compactHeader) compactHeader.style.display = 'block';
+        if (emailListEl) {
+            emailListEl.style.display = 'block';
+            // Force scroll to top of email list
+            emailListEl.scrollTop = 0;
+        }
+        
+        // Wait for DOM to update after hiding setup screen
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Verify emailList element is now available
+        const emailListCheck = document.getElementById('emailList');
+        if (!emailListCheck) {
+            console.error('❌ emailList element still not found after hiding setup screen');
+            showAlert('error', 'Failed to display emails. Please refresh the page.');
+            return;
+        }
+        
+        // Now apply filters and display emails (emailList is now available)
         console.log('🔄 Applying filters and preparing emails for display...');
         applyFilters();
         
@@ -389,18 +409,6 @@ async function startSetup() {
             });
             applyFilters(); // Try again
         }
-        
-        // Now hide setup screen and show main content
-        if (setupScreen) setupScreen.style.display = 'none';
-        if (compactHeader) compactHeader.style.display = 'block';
-        if (emailListEl) {
-            emailListEl.style.display = 'block';
-            // Force scroll to top of email list
-            emailListEl.scrollTop = 0;
-        }
-        
-        // Wait a moment for DOM to update after hiding setup screen
-        await new Promise(resolve => setTimeout(resolve, 100));
         
         // Force display emails - always call updatePagination which will display emails
         console.log(`📧 Displaying emails: ${filteredEmails.length} filtered, ${allEmails.length} total`);
@@ -2010,6 +2018,12 @@ async function loadEmailsFromDatabase() {
 // Display emails in the list
 function displayEmails(emails) {
     const emailList = document.getElementById('emailList');
+    
+    // Safety check: ensure email list element exists
+    if (!emailList) {
+        console.warn('⚠️ displayEmails: emailList element not found, skipping display');
+        return;
+    }
     
     if (emails.length === 0) {
         const currentTabName = document.querySelector('.tab-btn.active, .tab-btn-compact.active')?.textContent?.trim() || 'All Emails';
