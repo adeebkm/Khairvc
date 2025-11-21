@@ -238,47 +238,80 @@ async function startSetup() {
             // Wait a bit for any background classification to complete
             await new Promise(resolve => setTimeout(resolve, 2000));
             
-            // Load emails and wait until we get the expected count (or timeout)
+            // Load emails and wait until we get 60 emails OR all available if less than 60
+            // Setup screen should NOT disappear until emails are ready
             let retryCount = 0;
-            const maxRetries = 15; // 15 attempts = ~15 seconds max wait
-            const expectedCount = data.email_count || 60;
+            const maxRetries = 60; // 60 seconds max wait (1 second per retry)
+            let previousCount = 0;
+            let stableCount = 0; // Track how many times count stayed the same
+            const targetCount = 60; // Always target 60 emails
             
             while (retryCount < maxRetries) {
                 await loadEmailsFromDatabase();
+                const currentCount = allEmails.length;
                 
-                // If we have emails and they match expected count (or close), we're done
-                if (allEmails.length > 0 && allEmails.length >= Math.min(expectedCount, 60)) {
-                    console.log(`✅ Loaded ${allEmails.length} emails (expected ~${expectedCount})`);
+                console.log(`📊 Email count: ${currentCount} (attempt ${retryCount + 1}/${maxRetries}, target: ${targetCount})`);
+                
+                // If we have 60+ emails, we're done
+                if (currentCount >= targetCount) {
+                    console.log(`✅ Loaded ${currentCount} emails (target: ${targetCount}+)`);
                     break;
                 }
                 
-                // If we have some emails but not enough, wait a bit more for classification
-                if (allEmails.length > 0 && allEmails.length < expectedCount) {
-                    console.log(`⏳ Loaded ${allEmails.length} emails, waiting for more to classify... (${retryCount + 1}/${maxRetries})`);
-                    if (progressText) progressText.textContent = `Loading ${allEmails.length} of ${expectedCount} emails...`;
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    retryCount++;
-                } else if (allEmails.length === 0) {
-                    // No emails yet, wait and retry
-                    console.log(`⏳ No emails yet, waiting... (${retryCount + 1}/${maxRetries})`);
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    retryCount++;
+                // If count hasn't changed for 5 consecutive checks AND we have some emails, assume we have all available
+                if (currentCount === previousCount && currentCount > 0) {
+                    stableCount++;
+                    if (stableCount >= 5) {
+                        console.log(`✅ Email count stable at ${currentCount} for 5 checks - assuming all available emails are loaded`);
+                        break;
+                    }
                 } else {
-                    // We have enough emails
-                    break;
+                    stableCount = 0; // Reset if count changed
+                }
+                
+                previousCount = currentCount;
+                
+                // Update progress text - keep setup screen visible
+                if (progressText) {
+                    if (currentCount === 0) {
+                        progressText.textContent = `Waiting for emails to be classified... (${retryCount + 1}/${maxRetries})`;
+                    } else {
+                        progressText.textContent = `Loading ${currentCount} of ${targetCount} emails... (${retryCount + 1}/${maxRetries})`;
+                    }
+                }
+                if (progressBar) {
+                    // Update progress bar based on email count
+                    const progressPercent = Math.min(90 + (currentCount / targetCount) * 10, 100);
+                    progressBar.style.width = `${progressPercent}%`;
+                }
+                
+                retryCount++;
+                if (retryCount < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second between checks
                 }
             }
             
+            // Final check - if no emails, don't hide setup screen
             if (allEmails.length === 0) {
-                console.warn('⚠️ No emails found even after waiting - showing empty state');
+                console.warn('⚠️ No emails found even after waiting - keeping setup screen visible');
+                if (progressText) progressText.textContent = 'No emails were loaded. Emails may still be processing. Please wait or refresh the page.';
+                if (progressBar) progressBar.style.width = '100%';
+                if (startBtn) {
+                    startBtn.style.display = 'block';
+                    startBtn.textContent = 'Refresh Page';
+                    startBtn.onclick = () => window.location.reload();
+                }
+                if (progressDiv) progressDiv.style.display = 'none';
+                showAlert('warning', 'Setup completed but no emails were loaded yet. Emails may still be processing in the background. Please wait a moment and refresh.');
+                return; // Don't hide setup screen if no emails
             }
             
-            // Show completion
+            // Show completion - setup screen still visible
             if (progressBar) progressBar.style.width = '100%';
             if (progressText) progressText.textContent = `Loaded ${allEmails.length} emails!`;
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Brief pause to show completion
             
-            // Hide setup screen FIRST
+            // NOW hide setup screen - emails are ready
             if (setupScreen) setupScreen.style.display = 'none';
             const compactHeader = document.querySelector('.main-content > .compact-header');
             if (compactHeader) compactHeader.style.display = 'block';
@@ -299,6 +332,15 @@ async function startSetup() {
                     updatePagination();
                 }
             }, 500);
+            
+            // Start fetching older emails if we have 60 emails but less than 200
+            if (allEmails.length >= 60 && allEmails.length < 200) {
+                console.log('🔄 Setup complete with 60 emails, starting older email fetch...');
+                // Wait a moment before starting to ensure setup is fully complete
+                setTimeout(() => {
+                    startFetchOlderEmailsSilently(200);
+                }, 2000);
+            }
             
             showAlert('success', `Setup complete! Found ${data.email_count} existing emails.`);
             return; // Exit early since setup is already complete
@@ -344,26 +386,56 @@ async function startSetup() {
         // Wait a bit for background classification to complete (emails might still be processing)
         await new Promise(resolve => setTimeout(resolve, 2000));
         
-        // Try loading emails multiple times (classification might still be in progress)
+        // Try loading emails multiple times - wait for 60 emails OR all available if less than 60
+        // Setup screen should NOT disappear until emails are ready
         let retryCount = 0;
-        const maxRetries = 10; // Increased retries
-        let emailsLoaded = false;
+        const maxRetries = 60; // 60 seconds max wait (1 second per retry)
+        let previousCount = 0;
+        let stableCount = 0; // Track how many times count stayed the same
+        const targetCount = 60; // Always target 60 emails
         
-        while (retryCount < maxRetries && !emailsLoaded) {
+        while (retryCount < maxRetries) {
             await loadEmailsFromDatabase();
+            const currentCount = allEmails.length;
             
-            if (allEmails.length > 0) {
-                console.log(`✅ Loaded ${allEmails.length} emails after ${retryCount + 1} attempt(s)`);
-                emailsLoaded = true;
+            console.log(`📊 Email count: ${currentCount} (attempt ${retryCount + 1}/${maxRetries}, target: ${targetCount})`);
+            
+            // If we have 60+ emails, we're done
+            if (currentCount >= targetCount) {
+                console.log(`✅ Loaded ${currentCount} emails (target: ${targetCount}+)`);
                 break;
+            }
+            
+            // If count hasn't changed for 5 consecutive checks AND we have some emails, assume we have all available
+            if (currentCount === previousCount && currentCount > 0) {
+                stableCount++;
+                if (stableCount >= 5) {
+                    console.log(`✅ Email count stable at ${currentCount} for 5 checks - assuming all available emails are loaded`);
+                    break;
+                }
+            } else {
+                stableCount = 0; // Reset if count changed
+            }
+            
+            previousCount = currentCount;
+            
+            // Update progress text - keep setup screen visible
+            if (progressText) {
+                if (currentCount === 0) {
+                    progressText.textContent = `Waiting for emails to be classified... (${retryCount + 1}/${maxRetries})`;
+                } else {
+                    progressText.textContent = `Loading ${currentCount} of ${targetCount} emails... (${retryCount + 1}/${maxRetries})`;
+                }
+            }
+            if (progressBar) {
+                // Update progress bar based on email count
+                const progressPercent = Math.min(95 + (currentCount / targetCount) * 5, 100);
+                progressBar.style.width = `${progressPercent}%`;
             }
             
             retryCount++;
             if (retryCount < maxRetries) {
-                const waitTime = Math.min(2000 + (retryCount * 500), 5000); // Progressive backoff, max 5s
-                console.log(`⏳ No emails yet, retrying in ${waitTime/1000}s... (${retryCount}/${maxRetries})`);
-                if (progressText) progressText.textContent = `Waiting for emails to be classified... (${retryCount}/${maxRetries})`;
-                await new Promise(resolve => setTimeout(resolve, waitTime));
+                await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second between checks
             }
         }
         
@@ -385,10 +457,10 @@ async function startSetup() {
             return; // Don't continue if no emails
         }
         
-        // Update progress to show completion
+        // Update progress to show completion - setup screen still visible
         if (progressText) progressText.textContent = `Loaded ${allEmails.length} emails!`;
         if (progressBar) progressBar.style.width = '100%';
-        await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause to show completion
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Brief pause to show completion
         
         // Get DOM elements BEFORE hiding setup screen
         const compactHeader = document.querySelector('.main-content > .compact-header');
@@ -487,22 +559,20 @@ async function startSetup() {
         }, 500);
         
         // Show success message
-        showAlert('success', `Setup complete! Loaded ${allEmails.length} emails. Refreshing page...`);
+        showAlert('success', `Setup complete! Loaded ${allEmails.length} emails.`);
         
-        // Start background fetching immediately (silently continue to 150 emails)
-        console.log('🔄 Starting silent background fetch to reach 150 emails...');
-        startBackgroundFetching();
-        
-        // Automatically start fetching older emails (up to 200) in the background
-        // This runs super slowly to avoid rate limits - no UI, completely silent
-        console.log('🔄 Starting automatic older email fetch in background (up to 200 emails)...');
-        startFetchOlderEmailsSilently(200);
-        
-        // Refresh page after a short delay to ensure everything is saved
-        setTimeout(() => {
-            console.log('🔄 Refreshing page after setup completion...');
-            window.location.reload();
-        }, 2000);
+        // Start fetching older emails if we have 60 emails but less than 200
+        if (allEmails.length >= 60 && allEmails.length < 200) {
+            console.log('🔄 Setup complete with 60 emails, starting older email fetch...');
+            // Wait a moment before starting to ensure setup is fully complete
+            setTimeout(() => {
+                startFetchOlderEmailsSilently(200);
+            }, 2000);
+        } else if (allEmails.length < 60) {
+            console.log(`ℹ️  Only ${allEmails.length} emails loaded (less than 60), skipping older email fetch`);
+        } else {
+            console.log(`✅ Already have ${allEmails.length} emails (200+), skipping older email fetch`);
+        }
         
     } catch (error) {
         console.error('Setup error:', error);
@@ -709,7 +779,8 @@ function updatePagination() {
     
     // Previous button
     const prevBtn = document.createElement('button');
-    prevBtn.textContent = '← Previous';
+    prevBtn.className = 'pagination-btn pagination-btn-nav';
+    prevBtn.innerHTML = '<span class="pagination-icon">←</span> Previous';
     prevBtn.disabled = currentPage === 1;
     prevBtn.onclick = () => {
         if (currentPage > 1) {
@@ -719,17 +790,82 @@ function updatePagination() {
     };
     pagination.appendChild(prevBtn);
     
-    // Page info
-    const pageInfo = document.createElement('span');
-    pageInfo.className = 'pagination-info';
-    const startEmail = startIndex + 1;
-    const endEmail = Math.min(endIndex, totalEmails);
-    pageInfo.innerHTML = `<span class="pagination-text">Showing <strong>${startEmail}-${endEmail}</strong> of <strong>${totalEmails}</strong> emails</span><span class="pagination-pages">Page ${currentPage} of ${totalPages}</span>`;
-    pagination.appendChild(pageInfo);
+    // Page number buttons
+    const pageNumbers = document.createElement('div');
+    pageNumbers.className = 'pagination-numbers';
+    
+    // Calculate which page numbers to show (max 7 pages visible)
+    let startPage = Math.max(1, currentPage - 3);
+    let endPage = Math.min(totalPages, currentPage + 3);
+    
+    // Adjust if we're near the start or end
+    if (endPage - startPage < 6) {
+        if (startPage === 1) {
+            endPage = Math.min(7, totalPages);
+        } else if (endPage === totalPages) {
+            startPage = Math.max(1, totalPages - 6);
+        }
+    }
+    
+    // First page button (if not in range)
+    if (startPage > 1) {
+        const firstBtn = document.createElement('button');
+        firstBtn.className = 'pagination-btn pagination-btn-number';
+        firstBtn.textContent = '1';
+        firstBtn.onclick = () => {
+            currentPage = 1;
+            updatePagination();
+        };
+        pageNumbers.appendChild(firstBtn);
+        
+        if (startPage > 2) {
+            const ellipsis = document.createElement('span');
+            ellipsis.className = 'pagination-ellipsis';
+            ellipsis.textContent = '...';
+            pageNumbers.appendChild(ellipsis);
+        }
+    }
+    
+    // Page number buttons
+    for (let i = startPage; i <= endPage; i++) {
+        const pageBtn = document.createElement('button');
+        pageBtn.className = 'pagination-btn pagination-btn-number';
+        if (i === currentPage) {
+            pageBtn.classList.add('active');
+        }
+        pageBtn.textContent = i.toString();
+        pageBtn.onclick = () => {
+            currentPage = i;
+            updatePagination();
+        };
+        pageNumbers.appendChild(pageBtn);
+    }
+    
+    // Last page button (if not in range)
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            const ellipsis = document.createElement('span');
+            ellipsis.className = 'pagination-ellipsis';
+            ellipsis.textContent = '...';
+            pageNumbers.appendChild(ellipsis);
+        }
+        
+        const lastBtn = document.createElement('button');
+        lastBtn.className = 'pagination-btn pagination-btn-number';
+        lastBtn.textContent = totalPages.toString();
+        lastBtn.onclick = () => {
+            currentPage = totalPages;
+            updatePagination();
+        };
+        pageNumbers.appendChild(lastBtn);
+    }
+    
+    pagination.appendChild(pageNumbers);
     
     // Next button
     const nextBtn = document.createElement('button');
-    nextBtn.textContent = 'Next →';
+    nextBtn.className = 'pagination-btn pagination-btn-nav';
+    nextBtn.innerHTML = 'Next <span class="pagination-icon">→</span>';
     nextBtn.disabled = currentPage === totalPages;
     nextBtn.onclick = () => {
         if (currentPage < totalPages) {
@@ -738,6 +874,14 @@ function updatePagination() {
         }
     };
     pagination.appendChild(nextBtn);
+    
+    // Page info (below pagination)
+    const pageInfo = document.createElement('div');
+    pageInfo.className = 'pagination-info';
+    const startEmail = startIndex + 1;
+    const endEmail = Math.min(endIndex, totalEmails);
+    pageInfo.innerHTML = `<span class="pagination-text">Showing <strong>${startEmail}-${endEmail}</strong> of <strong>${totalEmails}</strong> emails</span>`;
+    pagination.appendChild(pageInfo);
     
     // Insert pagination after email list
     emailList.appendChild(pagination);
