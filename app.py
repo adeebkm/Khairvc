@@ -3080,6 +3080,13 @@ def pubsub_webhook():
     Pub/Sub webhook endpoint for Gmail push notifications (test environment).
     Receives notifications when new emails arrive, reducing API polling.
     """
+    print("=" * 60)
+    print("📬 Pub/Sub Webhook Called")
+    print(f"   Method: {request.method}")
+    print(f"   Headers: {dict(request.headers)}")
+    print(f"   Content-Type: {request.content_type}")
+    print("=" * 60)
+    
     try:
         # Verify the request is from Pub/Sub (optional but recommended)
         # In production, verify the JWT token from Pub/Sub
@@ -3148,14 +3155,16 @@ def pubsub_webhook():
             db.session.commit()
         
         # Trigger email sync in background (if Celery is available)
+        # Use incremental sync with the history_id from the notification
         if CELERY_AVAILABLE:
             try:
-                task = sync_user_emails.delay(user.id)
-                print(f"✅ Background sync task queued: {task.id}")
+                from tasks import sync_user_emails
+                task = sync_user_emails.delay(user.id, start_history_id=history_id)
+                print(f"✅ Background sync task queued: {task.id} (incremental sync from historyId: {history_id})")
             except Exception as e:
                 print(f"⚠️  Could not queue background task: {str(e)}")
-                # Fallback: sync synchronously (not recommended for production)
-                # This is just for testing
+                import traceback
+                traceback.print_exc()
         else:
             print("⚠️  Celery not available - sync not triggered automatically")
         
