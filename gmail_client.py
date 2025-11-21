@@ -380,6 +380,152 @@ class GmailClient:
                 print(f"Error fetching emails: {error_str}")
                 return [], None
     
+    def get_older_emails(self, max_results=200, start_page_token=None, progress_callback=None):
+        """
+        Fetch older emails using pagination (for emails before the initial 60).
+        Fetches slowly with delays to avoid rate limits.
+        
+        Args:
+            max_results: Maximum total emails to fetch (default 200)
+            start_page_token: Optional pageToken to start from (for resuming)
+            progress_callback: Optional callback function(emails_fetched, total_target) for progress updates
+        
+        Returns:
+            tuple: (emails_list, next_page_token, total_fetched)
+        """
+        if not self.service:
+            return [], None, 0
+        
+        try:
+            query = 'in:inbox'
+            emails = []
+            page_token = start_page_token
+            total_fetched = 0
+            
+            # Fetch in smaller pages to avoid rate limits
+            PAGE_SIZE = 20  # Fetch 20 emails per page
+            DELAY_BETWEEN_PAGES = 2.0  # 2 second delay between pages (conservative)
+            DELAY_BETWEEN_BATCHES = 0.5  # 500ms delay between batches within a page
+            
+            from googleapiclient.http import BatchHttpRequest
+            import time
+            
+            while total_fetched < max_results:
+                # Calculate how many to fetch in this page
+                remaining = max_results - total_fetched
+                page_max = min(PAGE_SIZE, remaining)
+                
+                print(f"📧 Fetching older emails: page {len(emails) // PAGE_SIZE + 1}, requesting {page_max} emails...")
+                
+                # Get list of message IDs for this page
+                request_params = {
+                    'userId': 'me',
+                    'q': query,
+                    'maxResults': page_max
+                }
+                
+                if page_token:
+                    request_params['pageToken'] = page_token
+                
+                try:
+                    results = self.service.users().messages().list(**request_params).execute()
+                except Exception as e:
+                    error_str = str(e)
+                    if '429' in error_str or 'rateLimitExceeded' in error_str:
+                        print(f"⚠️ Rate limit hit. Waiting 5 seconds before retry...")
+                        time.sleep(5)
+                        continue  # Retry this page
+                    else:
+                        raise
+                
+                messages = results.get('messages', [])
+                next_page_token = results.get('nextPageToken')
+                
+                if not messages:
+                    print(f"✅ No more emails to fetch")
+                    break
+                
+                # Batch fetch email details for this page
+                BATCH_SIZE = 10
+                page_emails = []
+                errors = []
+                
+                def callback(request_id, response, exception):
+                    if exception:
+                        error_str = str(exception)
+                        if '429' not in error_str and 'rateLimitExceeded' not in error_str:
+                            print(f"⚠️  Error in batch request: {exception}")
+                        errors.append(exception)
+                    else:
+                        email_data = self._extract_message_data(response)
+                        if email_data:
+                            page_emails.append(email_data)
+                
+                # Process messages in batches
+                for i in range(0, len(messages), BATCH_SIZE):
+                    batch_chunk = messages[i:i + BATCH_SIZE]
+                    
+                    batch = self.service.new_batch_http_request(callback=callback)
+                    for message in batch_chunk:
+                        batch.add(self.service.users().messages().get(
+                            userId='me',
+                            id=message['id'],
+                            format='full'
+                        ))
+                    
+                    try:
+                        batch.execute()
+                    except Exception as batch_error:
+                        error_str = str(batch_error)
+                        if '429' in error_str or 'rateLimitExceeded' in error_str:
+                            print(f"⚠️ Rate limit hit on batch. Waiting 3 seconds...")
+                            time.sleep(3)
+                            # Retry this batch once
+                            try:
+                                batch.execute()
+                            except Exception as retry_error:
+                                print(f"⚠️ Retry failed: {retry_error}")
+                        else:
+                            print(f"⚠️ Batch error: {batch_error}")
+                    
+                    # Delay between batches (except for the last batch of the page)
+                    if i + BATCH_SIZE < len(messages):
+                        time.sleep(DELAY_BETWEEN_BATCHES)
+                
+                emails.extend(page_emails)
+                total_fetched = len(emails)
+                
+                # Call progress callback if provided
+                if progress_callback:
+                    try:
+                        progress_callback(total_fetched, max_results)
+                    except Exception as e:
+                        print(f"⚠️ Progress callback error: {e}")
+                
+                print(f"✅ Fetched {len(page_emails)} emails in this page. Total: {total_fetched}/{max_results}")
+                
+                # Check if we've reached the target or there's no next page
+                if total_fetched >= max_results or not next_page_token:
+                    break
+                
+                # Delay before fetching next page (to avoid rate limits)
+                if next_page_token:
+                    print(f"⏳ Waiting {DELAY_BETWEEN_PAGES}s before fetching next page...")
+                    time.sleep(DELAY_BETWEEN_PAGES)
+                    page_token = next_page_token
+            
+            print(f"✅ Older emails fetch complete: {total_fetched} emails fetched")
+            return emails, page_token, total_fetched
+        
+        except Exception as e:
+            error_str = str(e)
+            if '429' in error_str or 'rateLimitExceeded' in error_str:
+                print(f"⚠️ Gmail API rate limit exceeded: {error_str}")
+                raise
+            else:
+                print(f"Error fetching older emails: {error_str}")
+                return emails, page_token, len(emails)
+    
     def _get_emails_incremental(self, start_history_id, unread_only=False):
         """
         Fetch only changes since start_history_id using Gmail History API.

@@ -218,6 +218,9 @@
                 <!-- Controls -->
                 <div class="controls-compact">
                     <div class="email-count-compact" id="emailCount"></div>
+                    <button class="btn btn-secondary" onclick="startFetchOlderEmails(200)" id="fetchOlderEmailsBtn" style="font-size: 12px; padding: 6px 12px; margin-left: 12px;" title="Fetch older emails (up to 200)">
+                        📥 Fetch Older Emails
+                    </button>
                 </div>
             </div>
 
@@ -225,6 +228,24 @@
             <div class="loading" id="loading" style="display: none;">
                 <div class="spinner"></div>
                 <p style="color: var(--text-secondary); font-weight: 500;">Loading emails...</p>
+            </div>
+            
+            <!-- Older Emails Fetch Progress Bar -->
+            <div class="older-emails-progress" id="olderEmailsProgress" style="display: none;">
+                <div class="progress-container">
+                    <div class="progress-header">
+                        <span class="progress-title">📧 Fetching older emails...</span>
+                        <button class="progress-close" onclick="stopOlderEmailsFetch()" title="Stop fetching">×</button>
+                    </div>
+                    <div class="progress-bar-wrapper">
+                        <div class="progress-bar-fill" id="olderEmailsProgressBar"></div>
+                    </div>
+                    <div class="progress-stats" id="olderEmailsStats">
+                        <span>Fetched: <strong id="olderEmailsFetched">0</strong></span>
+                        <span>Classified: <strong id="olderEmailsClassified">0</strong></span>
+                        <span>Total: <strong id="olderEmailsTotal">200</strong></span>
+                    </div>
+                </div>
             </div>
             {% endif %}
 

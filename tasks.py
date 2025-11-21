@@ -415,3 +415,197 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
             print(f"❌ {error_msg}")
             return {'status': 'error', 'error': error_msg}
 
+
+@celery.task(bind=True, name='tasks.fetch_older_emails')
+def fetch_older_emails(self, user_id, max_emails=200):
+    """
+    Background task to fetch older emails (before the initial 60) slowly to avoid rate limits.
+    
+    Args:
+        user_id: User ID to fetch emails for
+        max_emails: Maximum number of older emails to fetch (default 200)
+    
+    Returns:
+        dict: Status and results
+    """
+    import os
+    import time
+    
+    try:
+        from app import app, db
+    except ImportError:
+        import sys
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+        if '/app' not in sys.path:
+            sys.path.insert(0, '/app')
+        from app import app, db
+    
+    from models import User, GmailToken, EmailClassification
+    from gmail_client import GmailClient
+    from email_classifier import EmailClassifier
+    from openai_client import OpenAIClient
+    from lambda_client import LambdaClient
+    from auth import decrypt_token
+    from threading import Semaphore
+    
+    CLASSIFICATION_SEMAPHORE = Semaphore(10)
+    
+    with app.app_context():
+        try:
+            # Update task state
+            self.update_state(
+                state='PROGRESS',
+                meta={'status': 'initializing', 'progress': 0, 'total': max_emails, 'fetched': 0, 'classified': 0}
+            )
+            
+            # Get user
+            user = User.query.get(user_id)
+            if not user:
+                return {'status': 'error', 'error': 'User not found'}
+            
+            if not user.gmail_token:
+                return {'status': 'error', 'error': 'Gmail not connected'}
+            
+            # Get Gmail client
+            token_json = decrypt_token(user.gmail_token.encrypted_token)
+            gmail = GmailClient(token_json=token_json)
+            
+            if not gmail.service:
+                return {'status': 'error', 'error': 'Failed to connect to Gmail'}
+            
+            # Progress callback to update task state
+            def progress_callback(fetched, total):
+                self.update_state(
+                    state='PROGRESS',
+                    meta={
+                        'status': 'fetching',
+                        'progress': fetched,
+                        'total': total,
+                        'fetched': fetched,
+                        'classified': 0
+                    }
+                )
+            
+            # Fetch older emails slowly
+            print(f"📧 Starting to fetch older emails for user {user_id} (target: {max_emails})...")
+            emails, next_page_token, total_fetched = gmail.get_older_emails(
+                max_results=max_emails,
+                progress_callback=progress_callback
+            )
+            
+            if not emails:
+                return {
+                    'status': 'complete',
+                    'emails_fetched': 0,
+                    'emails_classified': 0,
+                    'message': 'No older emails found'
+                }
+            
+            print(f"✅ Fetched {len(emails)} older emails. Starting classification...")
+            
+            # Initialize classifier
+            openai_client = OpenAIClient()
+            lambda_client = LambdaClient() if os.getenv('USE_LAMBDA', 'false').lower() == 'true' else None
+            classifier = EmailClassifier(openai_client=openai_client, lambda_client=lambda_client)
+            
+            # Classify emails one by one (slowly to avoid rate limits)
+            emails_classified = 0
+            errors = []
+            
+            for idx, email in enumerate(emails):
+                try:
+                    # Update progress
+                    self.update_state(
+                        state='PROGRESS',
+                        meta={
+                            'status': 'classifying',
+                            'progress': total_fetched,
+                            'total': max_emails,
+                            'fetched': total_fetched,
+                            'classified': emails_classified,
+                            'current': idx + 1
+                        }
+                    )
+                    
+                    # Check if email already exists (prevent duplicates)
+                    existing_classification = EmailClassification.query.filter_by(
+                        user_id=user_id,
+                        message_id=email.get('id', '')
+                    ).first()
+                    
+                    if existing_classification:
+                        print(f"⏭️  Email {email.get('id', '')} already exists, skipping...")
+                        emails_classified += 1
+                        continue
+                    
+                    # Classify email
+                    with CLASSIFICATION_SEMAPHORE:
+                        classification_result = classifier.classify_email(
+                            subject=email.get('subject', ''),
+                            body=email.get('body', ''),
+                            headers=email.get('headers', {}),
+                            sender=email.get('from', ''),
+                            thread_id=email.get('thread_id', ''),
+                            user_id=str(user_id)
+                        )
+                    
+                    # Store classification
+                    new_classification = EmailClassification(
+                        user_id=user_id,
+                        thread_id=email.get('thread_id', ''),
+                        message_id=email.get('id', ''),
+                        sender=email.get('from', 'Unknown'),
+                        email_date=email.get('date'),
+                        category=classification_result['category'],
+                        tags=','.join(classification_result.get('tags', [])),
+                        confidence=classification_result.get('confidence', 0.0),
+                        extracted_links=json.dumps(classification_result.get('links', []))
+                    )
+                    new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+                    new_classification.set_snippet_encrypted(email.get('snippet', ''))
+                    db.session.add(new_classification)
+                    
+                    # Commit with retry
+                    max_commit_retries = 3
+                    for commit_attempt in range(max_commit_retries):
+                        try:
+                            db.session.commit()
+                            break
+                        except Exception as commit_error:
+                            if 'EOF' in str(commit_error) or 'SSL SYSCALL' in str(commit_error) or 'connection' in str(commit_error).lower():
+                                if commit_attempt < max_commit_retries - 1:
+                                    db.session.rollback()
+                                    time.sleep(0.5)
+                                    db.session.add(new_classification)
+                                    continue
+                                else:
+                                    raise
+                            else:
+                                raise
+                    
+                    emails_classified += 1
+                    
+                    # Add delay between classifications (1 second to avoid rate limits)
+                    if idx < len(emails) - 1:
+                        time.sleep(1.0)
+                    
+                except Exception as e:
+                    error_msg = f"Error processing email {idx}: {str(e)}"
+                    print(f"⚠️  {error_msg}")
+                    errors.append(error_msg)
+                    continue
+            
+            return {
+                'status': 'complete',
+                'emails_fetched': total_fetched,
+                'emails_classified': emails_classified,
+                'errors': errors[:10]
+            }
+            
+        except Exception as e:
+            error_msg = f"Task failed: {str(e)}"
+            print(f"❌ {error_msg}")
+            return {'status': 'error', 'error': error_msg}
+

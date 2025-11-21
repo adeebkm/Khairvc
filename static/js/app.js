@@ -3456,3 +3456,130 @@ async function deleteEmail(emailId, emailIndex) {
         showAlert('error', 'Failed to delete email');
     }
 }
+
+// Older Emails Fetch Functions
+let olderEmailsTaskId = null;
+let olderEmailsPollInterval = null;
+
+async function startFetchOlderEmails(maxEmails = 200) {
+    try {
+        const response = await fetch('/api/emails/fetch-older', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ max: maxEmails })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            olderEmailsTaskId = data.task_id;
+            showOlderEmailsProgress();
+            startOlderEmailsPolling();
+            showAlert('success', 'Started fetching older emails in the background');
+        } else {
+            showAlert('error', data.error || 'Failed to start older email fetch');
+        }
+    } catch (error) {
+        console.error('Error starting older email fetch:', error);
+        showAlert('error', 'Failed to start older email fetch');
+    }
+}
+
+function showOlderEmailsProgress() {
+    const progressDiv = document.getElementById('olderEmailsProgress');
+    if (progressDiv) {
+        progressDiv.style.display = 'block';
+    }
+}
+
+function hideOlderEmailsProgress() {
+    const progressDiv = document.getElementById('olderEmailsProgress');
+    if (progressDiv) {
+        progressDiv.style.display = 'none';
+    }
+}
+
+function startOlderEmailsPolling() {
+    if (olderEmailsPollInterval) {
+        clearInterval(olderEmailsPollInterval);
+    }
+    
+    olderEmailsPollInterval = setInterval(async () => {
+        if (!olderEmailsTaskId) {
+            clearInterval(olderEmailsPollInterval);
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/emails/sync/status/${olderEmailsTaskId}`);
+            const data = await response.json();
+            
+            if (data.success) {
+                updateOlderEmailsProgress(data);
+                
+                if (data.status === 'SUCCESS' || data.status === 'FAILURE') {
+                    clearInterval(olderEmailsPollInterval);
+                    olderEmailsTaskId = null;
+                    
+                    if (data.status === 'SUCCESS') {
+                        setTimeout(() => {
+                            hideOlderEmailsProgress();
+                            showAlert('success', `Successfully fetched and classified ${data.emails_classified || 0} older emails`);
+                            // Refresh email list
+                            loadEmailsFromDatabase();
+                        }, 2000);
+                    } else {
+                        hideOlderEmailsProgress();
+                        showAlert('error', data.error || 'Failed to fetch older emails');
+                    }
+                }
+            } else {
+                console.error('Error polling older emails status:', data.error);
+            }
+        } catch (error) {
+            console.error('Error polling older emails status:', error);
+        }
+    }, 2000); // Poll every 2 seconds
+}
+
+function updateOlderEmailsProgress(data) {
+    const progressBar = document.getElementById('olderEmailsProgressBar');
+    const fetchedSpan = document.getElementById('olderEmailsFetched');
+    const classifiedSpan = document.getElementById('olderEmailsClassified');
+    const totalSpan = document.getElementById('olderEmailsTotal');
+    
+    if (progressBar) {
+        const total = data.total || 200;
+        const progress = data.fetched || data.progress || 0;
+        const percentage = total > 0 ? (progress / total) * 100 : 0;
+        progressBar.style.width = `${percentage}%`;
+    }
+    
+    if (fetchedSpan) {
+        fetchedSpan.textContent = data.fetched || data.progress || 0;
+    }
+    
+    if (classifiedSpan) {
+        classifiedSpan.textContent = data.classified || 0;
+    }
+    
+    if (totalSpan) {
+        totalSpan.textContent = data.total || 200;
+    }
+}
+
+function stopOlderEmailsFetch() {
+    if (olderEmailsPollInterval) {
+        clearInterval(olderEmailsPollInterval);
+        olderEmailsPollInterval = null;
+    }
+    
+    olderEmailsTaskId = null;
+    hideOlderEmailsProgress();
+    showAlert('info', 'Stopped fetching older emails');
+}
+
+// Add button to trigger older email fetch (can be called from console or added to UI)
+// Example: startFetchOlderEmails(200)

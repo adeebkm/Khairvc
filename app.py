@@ -867,6 +867,63 @@ def check_workers_status():
             'message': 'Could not check worker status'
         }), 500
 
+@app.route('/api/emails/fetch-older', methods=['POST'])
+@login_required
+def trigger_fetch_older_emails():
+    """
+    Trigger background task to fetch older emails (before the initial 60).
+    Fetches slowly to avoid rate limits.
+    """
+    if not current_user.gmail_token:
+        return jsonify({
+            'success': False,
+            'error': 'Gmail not connected. Please connect your Gmail account.'
+        }), 400
+    
+    if not CELERY_AVAILABLE:
+        return jsonify({
+            'success': False,
+            'error': 'Background processing not available.'
+        }), 503
+    
+    try:
+        from celery_config import celery
+        from tasks import fetch_older_emails
+        
+        # Check if workers are running
+        try:
+            inspect = celery.control.inspect()
+            active_workers = inspect.active()
+            if not active_workers:
+                return jsonify({
+                    'success': False,
+                    'error': 'No Celery workers available.'
+                }), 503
+        except Exception as worker_check_error:
+            print(f"⚠️  Could not check worker status: {worker_check_error}")
+        
+        # Get max emails (default 200, cap at 200)
+        max_emails = min(request.json.get('max', 200), 200)
+        
+        # Trigger background task
+        task = fetch_older_emails.delay(
+            user_id=current_user.id,
+            max_emails=max_emails
+        )
+        
+        return jsonify({
+            'success': True,
+            'task_id': task.id,
+            'message': 'Older email fetch started in background',
+            'status': 'PENDING'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to start older email fetch: {str(e)}'
+        }), 500
+
 @app.route('/api/emails/sync/status/<task_id>')
 @login_required
 def get_sync_status(task_id):
@@ -894,6 +951,9 @@ def get_sync_status(task_id):
                 'message': task.info.get('status', 'Processing...'),
                 'progress': task.info.get('progress', 0),
                 'total': task.info.get('total', 0),
+                'fetched': task.info.get('fetched', 0),
+                'classified': task.info.get('classified', 0),
+                'current': task.info.get('current', 0),
                 'current_email': task.info.get('current_email', '')
             }
         elif task.state == 'SUCCESS':
