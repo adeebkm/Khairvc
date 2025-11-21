@@ -1379,6 +1379,13 @@ function applyFilters() {
     
     console.log(`🔍 applyFilters: allEmails=${allEmails.length}, filtered=${filtered.length}, sortedFiltered=${sortedFiltered.length}, currentTab=${currentTab}`);
     
+    // Check if emailList element exists before trying to display
+    const emailListEl = document.getElementById('emailList');
+    if (!emailListEl) {
+        console.log('ℹ️  applyFilters: emailList element not available yet, skipping display');
+        return; // Just filter the data, don't try to display yet
+    }
+    
     // Always display emails, regardless of count
     if (sortedFiltered.length === 0) {
         // No emails match the filter - show empty state
@@ -1993,16 +2000,26 @@ async function loadEmailsFromDatabase() {
             // Ensure we have emails before filtering
             if (allEmails.length === 0) {
                 console.warn('⚠️ No emails loaded, displaying empty state');
-                displayEmails([]);
+                // Only display if emailList element exists
+                const emailListCheck = document.getElementById('emailList');
+                if (emailListCheck) {
+                    displayEmails([]);
+                }
                 return;
+            }
+            
+            // Check if emailList element exists before trying to display
+            const emailListCheck = document.getElementById('emailList');
+            if (!emailListCheck) {
+                console.log('ℹ️  emailList element not available yet, skipping display (will be displayed after setup screen is hidden)');
+                return; // Just load the data, don't try to display yet
             }
             
             // applyFilters() will handle category filtering based on currentTab
             applyFilters();
             
             // Double-check that emails were displayed
-            const emailList = document.getElementById('emailList');
-            if (emailList && emailList.children.length === 0 && filteredEmails.length > 0) {
+            if (emailListCheck && emailListCheck.children.length === 0 && filteredEmails.length > 0) {
                 console.warn('⚠️ Emails loaded but not displayed, forcing display');
                 displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
             }
