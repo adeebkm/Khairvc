@@ -777,6 +777,43 @@ class GmailClient:
         
         return attachments
     
+    def _get_moonshot_api_key(self):
+        """Get Moonshot API key from AWS Secrets Manager (if available) or environment variables"""
+        # First try AWS Secrets Manager (like Lambda does)
+        try:
+            aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
+            aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+            aws_region = os.getenv('AWS_REGION', 'us-east-1')
+            
+            if aws_access_key and aws_secret_key:
+                import boto3
+                secrets_client = boto3.client(
+                    'secretsmanager',
+                    aws_access_key_id=aws_access_key,
+                    aws_secret_access_key=aws_secret_key,
+                    region_name=aws_region
+                )
+                
+                secret_name = os.getenv('OPENAI_SECRET_NAME', 'openai-api-key-test')
+                try:
+                    response = secrets_client.get_secret_value(SecretId=secret_name)
+                    secret = json.loads(response['SecretString'])
+                    api_key = secret.get('api_key') or secret.get('MOONSHOT_API_KEY') or secret.get('OPENAI_API_KEY')
+                    if api_key:
+                        print(f"   🔑 Retrieved Moonshot API key from AWS Secrets Manager")
+                        return api_key
+                except Exception as secrets_error:
+                    print(f"   ⚠️  Could not retrieve from Secrets Manager: {str(secrets_error)[:100]}")
+        except Exception as e:
+            # AWS not available or not configured, fall through to environment variables
+            pass
+        
+        # Fallback to environment variables (Railway)
+        moonshot_key = os.getenv('MOONSHOT_API_KEY') or os.getenv('OPENAI_API_KEY')
+        if moonshot_key:
+            print(f"   🔑 Using Moonshot API key from environment variables")
+        return moonshot_key
+    
     def _extract_pdf_text(self, file_data, filename):
         """Extract text from PDF file using Moonshot (if enabled) or PyPDF2 (fallback)"""
         use_moonshot = os.getenv('USE_MOONSHOT', 'false').lower() == 'true'
@@ -784,14 +821,24 @@ class GmailClient:
         # Try Moonshot first if enabled (better extraction with OCR)
         if use_moonshot and MOONSHOT_AVAILABLE:
             try:
-                moonshot_key = os.getenv('MOONSHOT_API_KEY') or os.getenv('OPENAI_API_KEY')
+                moonshot_key = self._get_moonshot_api_key()
                 if moonshot_key:
-                    print(f"📄 Using Moonshot to extract PDF content: {filename}")
-                    return self._extract_pdf_with_moonshot(file_data, filename, moonshot_key)
+                    # Check if key looks valid (starts with 'sk-')
+                    if moonshot_key.startswith('sk-'):
+                        print(f"📄 Using Moonshot to extract PDF content: {filename}")
+                        result = self._extract_pdf_with_moonshot(file_data, filename, moonshot_key)
+                        if result:
+                            return result
+                        # If Moonshot failed, fall through to PyPDF2
+                        print(f"⚠️  Moonshot extraction returned None, falling back to PyPDF2")
+                    else:
+                        print(f"⚠️  Moonshot API key format invalid (should start with 'sk-'), falling back to PyPDF2")
                 else:
-                    print(f"⚠️  Moonshot enabled but API key not found, falling back to PyPDF2")
+                    print(f"⚠️  Moonshot enabled but API key not found (checked Secrets Manager and environment), falling back to PyPDF2")
             except Exception as e:
                 print(f"⚠️  Moonshot PDF extraction failed: {str(e)}, falling back to PyPDF2")
+                import traceback
+                traceback.print_exc()
         
         # Fallback to PyPDF2 (production or if Moonshot fails)
         if not PDF_AVAILABLE:
@@ -819,6 +866,7 @@ class GmailClient:
     
     def _extract_pdf_with_moonshot(self, file_data, filename, api_key):
         """Extract text from PDF using Moonshot's file upload API (with OCR support)"""
+        tmp_path = None
         try:
             # Create Moonshot client
             client = MoonshotClient(
@@ -848,15 +896,28 @@ class GmailClient:
                 
             finally:
                 # Clean up temporary file
+                if tmp_path:
+                    try:
+                        os.unlink(tmp_path)
+                    except:
+                        pass
+                    
+        except Exception as e:
+            error_msg = str(e)
+            # Check if it's an authentication error
+            if '401' in error_msg or 'incorrect_api_key' in error_msg.lower() or 'unauthorized' in error_msg.lower():
+                print(f"❌ Moonshot API key authentication failed. Please check MOONSHOT_API_KEY in worker environment variables.")
+            else:
+                print(f"❌ Moonshot PDF extraction error: {error_msg}")
+            
+            # Clean up temp file if it exists
+            if tmp_path:
                 try:
                     os.unlink(tmp_path)
                 except:
                     pass
-                    
-        except Exception as e:
-            print(f"❌ Moonshot PDF extraction error: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            
+            # Return None to trigger PyPDF2 fallback
             return None
     
     def _extract_docx_text(self, file_data, filename):
