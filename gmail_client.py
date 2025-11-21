@@ -29,6 +29,16 @@ except ImportError:
     DOCX_AVAILABLE = False
     print("Note: python-docx not installed. Word documents won't be parsed.")
 
+# Moonshot API for better PDF extraction (with OCR support)
+try:
+    from openai import OpenAI as MoonshotClient
+    from pathlib import Path
+    import tempfile
+    MOONSHOT_AVAILABLE = True
+except ImportError:
+    MOONSHOT_AVAILABLE = False
+    print("Note: OpenAI SDK not available. Moonshot PDF extraction won't work.")
+
 
 # Gmail API scopes
 SCOPES = [
@@ -768,7 +778,22 @@ class GmailClient:
         return attachments
     
     def _extract_pdf_text(self, file_data, filename):
-        """Extract text from PDF file"""
+        """Extract text from PDF file using Moonshot (if enabled) or PyPDF2 (fallback)"""
+        use_moonshot = os.getenv('USE_MOONSHOT', 'false').lower() == 'true'
+        
+        # Try Moonshot first if enabled (better extraction with OCR)
+        if use_moonshot and MOONSHOT_AVAILABLE:
+            try:
+                moonshot_key = os.getenv('MOONSHOT_API_KEY') or os.getenv('OPENAI_API_KEY')
+                if moonshot_key:
+                    print(f"📄 Using Moonshot to extract PDF content: {filename}")
+                    return self._extract_pdf_with_moonshot(file_data, filename, moonshot_key)
+                else:
+                    print(f"⚠️  Moonshot enabled but API key not found, falling back to PyPDF2")
+            except Exception as e:
+                print(f"⚠️  Moonshot PDF extraction failed: {str(e)}, falling back to PyPDF2")
+        
+        # Fallback to PyPDF2 (production or if Moonshot fails)
         if not PDF_AVAILABLE:
             return None
         
@@ -791,6 +816,48 @@ class GmailClient:
             print(f"Note: Could not parse PDF {filename}: {str(e)}")
         
         return None
+    
+    def _extract_pdf_with_moonshot(self, file_data, filename, api_key):
+        """Extract text from PDF using Moonshot's file upload API (with OCR support)"""
+        try:
+            # Create Moonshot client
+            client = MoonshotClient(
+                api_key=api_key,
+                base_url="https://api.moonshot.ai/v1"
+            )
+            
+            # Save PDF to temporary file (Moonshot API requires a file path)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                tmp_file.write(file_data)
+                tmp_path = tmp_file.name
+            
+            try:
+                # Upload PDF to Moonshot
+                print(f"   📤 Uploading PDF to Moonshot...")
+                file_object = client.files.create(
+                    file=Path(tmp_path),
+                    purpose="file-extract"
+                )
+                
+                # Extract content from uploaded file
+                print(f"   📥 Extracting content from Moonshot...")
+                file_content = client.files.content(file_id=file_object.id).text
+                
+                print(f"   ✅ Successfully extracted {len(file_content)} characters from PDF using Moonshot")
+                return file_content
+                
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(tmp_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            print(f"❌ Moonshot PDF extraction error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def _extract_docx_text(self, file_data, filename):
         """Extract text from Word document"""
