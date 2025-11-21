@@ -132,14 +132,19 @@ body::before {
 }
 
 .user-info {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-secondary);
     white-space: nowrap;
     font-weight: 500;
-    padding: 6px 12px;
-    border-radius: 8px;
-    background: rgba(99, 102, 241, 0.04);
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: transparent;
     transition: all 0.2s ease;
+    order: 2;
+}
+
+.user-info:hover {
+    background: rgba(99, 102, 241, 0.05);
 }
 
 .nav-search {
@@ -235,25 +240,25 @@ body::before {
 }
 
 .btn-gmail {
-    background: linear-gradient(135deg, #4285f4 0%, #357ae8 100%);
-    color: white;
-    padding: 10px 18px;
-    border-radius: 10px;
+    background: rgba(66, 133, 244, 0.1);
+    color: #4285f4;
+    padding: 6px 12px;
+    border-radius: 6px;
     text-decoration: none;
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 500;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    border: none;
+    border: 1px solid rgba(66, 133, 244, 0.2);
     cursor: pointer;
     white-space: nowrap;
-    box-shadow: 0 2px 6px rgba(66, 133, 244, 0.25);
-    letter-spacing: 0.2px;
+    box-shadow: none;
+    letter-spacing: 0.1px;
 }
 
 .btn-gmail:hover {
-    background: linear-gradient(135deg, #357ae8 0%, #2b6dd8 100%);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(66, 133, 244, 0.35);
+    background: rgba(66, 133, 244, 0.15);
+    border-color: rgba(66, 133, 244, 0.3);
+    transform: translateY(-1px);
 }
 
 /* Gmail Dropdown */
@@ -593,21 +598,31 @@ body::before {
     align-items: center;
 }
 
-/* Cool Refresh Button */
+/* Icon-only Refresh Button */
 .refresh-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 10px 18px !important;
-    font-size: 14px;
-    font-weight: 600;
-    border-radius: 12px;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0 !important;
+    font-size: 16px;
+    border-radius: 8px;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
-    box-shadow: 
-        0 4px 6px -1px rgba(99, 102, 241, 0.3),
-        0 2px 4px -1px rgba(99, 102, 241, 0.2);
+    box-shadow: none;
+    background: transparent;
+    border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.refresh-btn:hover {
+    background: rgba(99, 102, 241, 0.1);
+    border-color: rgba(99, 102, 241, 0.3);
+}
+
+.refresh-btn .icon {
+    display: inline-block;
 }
 
 .refresh-btn::before {
@@ -1212,24 +1227,34 @@ body::before {
 
 .email-card {
     background: var(--bg-primary);
-    padding: 12px 16px;
+    padding: 10px 20px;
     margin-bottom: 0;
     border-radius: 0;
     cursor: pointer;
     transition: all 0.15s ease;
-    border-left: 3px solid transparent;
-    border-bottom: 1px solid var(--border-color);
+    border-left: 2px solid transparent;
+    border-bottom: 1px solid rgba(229, 231, 235, 0.3);
     position: relative;
     overflow: hidden;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 12px;
-    min-height: 56px;
+    min-height: 44px;
+}
+
+.email-card.unread {
+    border-left-color: #6366f1;
+    background: rgba(99, 102, 241, 0.02);
 }
 
 .email-card:hover {
-    background: var(--bg-secondary);
+    background: rgba(0, 0, 0, 0.02);
     border-left-color: var(--primary-color);
+}
+
+.email-card:hover .email-star,
+.email-card:hover .email-attachment {
+    opacity: 1;
 }
 
 .email-header {
@@ -1245,7 +1270,7 @@ body::before {
     font-weight: 500;
     color: var(--text-primary);
     margin: 0;
-    line-height: 1.5;
+    line-height: 1.4;
     display: flex;
     align-items: baseline;
     gap: 8px;
@@ -1254,6 +1279,10 @@ body::before {
     overflow: hidden;
     min-width: 0;
     flex: 1;
+}
+
+.email-card.unread .email-subject {
+    font-weight: 600;
 }
 
 .email-subject > span:first-child {
@@ -1275,7 +1304,7 @@ body::before {
 }
 
 .email-snippet {
-    color: var(--text-secondary);
+    color: #666666;
     font-size: 13px;
     line-height: 1.4;
     overflow: hidden;
@@ -1285,6 +1314,7 @@ body::before {
     flex: 1;
     min-width: 0;
     max-width: 100%;
+    margin-left: 8px;
 }
 
 .email-content {
@@ -1299,25 +1329,59 @@ body::before {
 }
 
 .email-row {
-    display: flex;
-    align-items: baseline;
+    display: grid;
+    grid-template-columns: 24px 200px 1fr auto auto 140px;
+    align-items: center;
     gap: 12px;
     width: 100%;
     padding-top: 0;
     min-width: 0;
 }
 
+.email-row .email-star {
+    grid-column: 1;
+}
+
+.email-row .email-sender-name {
+    grid-column: 2;
+}
+
+.email-row .email-content {
+    grid-column: 3;
+}
+
+.email-row .email-attachment {
+    grid-column: 4;
+}
+
+.email-row .email-hover-actions {
+    grid-column: 5;
+}
+
+.email-row .email-date {
+    grid-column: 6;
+}
+
 .email-star {
     flex-shrink: 0;
-    width: 32px;
+    width: 24px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    padding: 2px 4px;
+    padding: 4px;
     border-radius: 4px;
     transition: all 0.2s ease;
+    opacity: 0;
     margin-top: 0;
+}
+
+.email-card:hover .email-star {
+    opacity: 1;
+}
+
+.email-star.starred {
+    opacity: 1;
 }
 
 .email-star:hover {
@@ -1339,19 +1403,24 @@ body::before {
 
 .email-sender-name {
     color: var(--text-primary);
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
-    min-width: 180px;
-    max-width: 180px;
-    width: 180px;
+    min-width: 200px;
+    max-width: 200px;
+    width: 200px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    line-height: 1.5;
+    line-height: 1.4;
     padding-top: 0;
     display: flex;
     align-items: baseline;
     flex-shrink: 0;
+}
+
+.email-card.unread .email-sender-name {
+    font-weight: 600;
+    color: var(--text-primary);
 }
 
 .email-sender-name > span {
@@ -1375,66 +1444,56 @@ body::before {
 }
 
 .email-date {
-    color: var(--text-light);
+    color: #666666;
     font-size: 12px;
     font-weight: 400;
     white-space: nowrap;
-    min-width: 120px;
+    min-width: 140px;
     text-align: right;
     flex-shrink: 0;
     padding-top: 0;
-    line-height: 1.5;
-    align-self: baseline;
+    line-height: 1.4;
+    align-self: center;
 }
 
-/* Badges and Tags */
+/* Badges and Tags - Smaller, less saturated */
 .badge {
     display: inline-flex;
     align-items: center;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
     font-weight: 500;
     margin: 0;
     transition: all 0.2s ease;
-    border: 1px solid transparent;
+    border: none;
     box-shadow: none;
     white-space: nowrap;
 }
 
-.badge:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
 .badge-deal-flow {
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.15) 100%);
-    color: var(--primary-dark);
-    border-color: rgba(99, 102, 241, 0.2);
+    background: rgba(124, 58, 237, 0.1);
+    color: #7c3aed;
 }
 
 .badge-networking {
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%);
-    color: #1e40af;
-    border-color: rgba(59, 130, 246, 0.2);
+    background: rgba(59, 130, 246, 0.1);
+    color: #3b82f6;
 }
 
 .badge-hiring {
-    background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(5, 150, 105, 0.15) 100%);
-    color: #065f46;
-    border-color: rgba(16, 185, 129, 0.2);
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
 }
 
 .badge-general {
-    background: linear-gradient(135deg, rgba(156, 163, 175, 0.15) 0%, rgba(107, 114, 128, 0.15) 100%);
-    color: #374151;
-    border-color: rgba(156, 163, 175, 0.2);
+    background: rgba(156, 163, 175, 0.1);
+    color: #6b7280;
 }
 
 .badge-spam {
-    background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.15) 100%);
-    color: #991b1b;
-    border-color: rgba(239, 68, 68, 0.2);
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
 }
 
 .badge-sent {
@@ -2291,4 +2350,132 @@ body::before {
         flex-direction: column;
         align-items: flex-end;
     }
+}
+
+/* Floating Compose Button */
+.floating-compose {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    color: white;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    z-index: 1000;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.floating-compose:hover {
+    transform: translateY(-2px) scale(1.05);
+    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+}
+
+.floating-compose:active {
+    transform: translateY(0) scale(0.95);
+}
+
+/* Email Hover Actions */
+.email-hover-actions {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.email-card:hover .email-hover-actions {
+    display: flex;
+}
+
+.email-action-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: none;
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.email-action-btn:hover {
+    background: rgba(99, 102, 241, 0.1);
+    color: #6366f1;
+}
+
+/* Right-click Context Menu */
+.context-menu {
+    position: fixed;
+    background: white;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    padding: 4px;
+    z-index: 10000;
+    min-width: 160px;
+    display: none;
+}
+
+.context-menu-item {
+    padding: 10px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-primary);
+    border-radius: 4px;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.context-menu-item:hover {
+    background: rgba(99, 102, 241, 0.1);
+    color: #6366f1;
+}
+
+.context-menu-item.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.context-menu-item.disabled:hover {
+    background: transparent;
+    color: var(--text-primary);
+}
+
+/* Email Attachment Icon (hidden by default, shown on hover) */
+.email-attachment {
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    color: var(--text-secondary);
+    font-size: 14px;
+    flex-shrink: 0;
+    width: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.email-card:hover .email-attachment {
+    opacity: 1;
+}
+
+.email-card.has-attachment .email-attachment {
+    opacity: 0.4;
+}
+
+.email-card.has-attachment:hover .email-attachment {
+    opacity: 1;
 }

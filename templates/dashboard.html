@@ -32,21 +32,16 @@
                     </div>
                     {% endif %}
                     <div class="nav-actions">
-                        <span class="user-info">Welcome, {{ current_user.username }}</span>
                         {% if has_gmail %}
-                        <button class="btn btn-primary" onclick="openComposeModal()" title="Compose new email" style="display: inline-flex; align-items: center; gap: 6px;">
-                            <span style="font-size: 18px;">✉️</span>
-                            <span>Compose</span>
-                        </button>
-                        <button class="btn btn-secondary" onclick="openSignatureSelector()" title="Select email signature">
+                        <button class="btn btn-secondary" onclick="openSignatureSelector()" title="Select email signature" style="font-size: 12px; padding: 6px 12px;">
                             ✏️ Signature
                         </button>
-                        {% endif %}
-                        <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>
-                        {% if has_gmail %}
+                        <button class="refresh-btn" id="refreshEmailsBtn" onclick="refreshEmails()" title="Refresh emails">
+                            <span class="icon">🔄</span>
+                        </button>
                         <div class="gmail-dropdown">
                             <button class="btn btn-gmail" onclick="toggleGmailDropdown(event)" id="gmailDropdownBtn">
-                                📧 Gmail: Connected
+                                📧 Connected
                             </button>
                             <div class="gmail-dropdown-menu" id="gmailDropdownMenu" style="display: none;">
                                 <div class="gmail-dropdown-header">
@@ -65,6 +60,8 @@
                             📧 Login
                         </a>
                         {% endif %}
+                        <span class="user-info">{{ current_user.username }}</span>
+                        <a href="{{ url_for('logout') }}" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">Logout</a>
                     </div>
                 </div>
             </div>
@@ -122,8 +119,8 @@
             
             <div class="sidebar-divider"></div>
             
-            <div class="sidebar-section">
-                <div class="sidebar-section-title">CATEGORIES</div>
+            <div class="sidebar-section collapsed" id="categoriesSection">
+                <div class="sidebar-section-title" onclick="toggleCategoriesSection()">CATEGORIES</div>
                 <button class="sidebar-item" onclick="switchTab('deal-flow')" data-tab="deal-flow" data-label="Deal Flow">
                     <span class="sidebar-icon icon-deal-flow">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -220,10 +217,6 @@
                 
                 <!-- Controls -->
                 <div class="controls-compact">
-                    <button class="btn btn-small btn-primary refresh-btn" id="refreshEmailsBtn" onclick="refreshEmails()">
-                        <span class="refresh-icon">🔄</span>
-                        <span class="refresh-text">Refresh</span>
-                    </button>
                     <div class="email-count-compact" id="emailCount"></div>
                 </div>
             </div>
@@ -385,6 +378,34 @@
         </div>
     </div>
 
+    {% if has_gmail %}
+    <!-- Floating Compose Button -->
+    <button class="floating-compose" onclick="openComposeModal()" title="Compose new email">
+        ✉️
+    </button>
+    {% endif %}
+
+    <!-- Right-click Context Menu -->
+    <div class="context-menu" id="contextMenu">
+        <div class="context-menu-item" onclick="contextMenuReply()">
+            <span>↩️</span>
+            <span>Reply</span>
+        </div>
+        <div class="context-menu-item" onclick="contextMenuForward()">
+            <span>↪️</span>
+            <span>Forward</span>
+        </div>
+        <div class="context-menu-item" onclick="contextMenuArchive()">
+            <span>📦</span>
+            <span>Archive</span>
+        </div>
+        <div class="context-menu-item" onclick="contextMenuDelete()">
+            <span>🗑️</span>
+            <span>Delete</span>
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>
+

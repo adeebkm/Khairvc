@@ -2155,15 +2155,21 @@ function displayEmails(emails) {
         const senderLabel = isSent ? 'To:' : 'From:';
         const isStarred = email.is_starred || email.label_ids?.includes('STARRED') || false;
         const starClass = isStarred ? 'starred' : '';
+        const hasAttachments = email.has_attachments || false;
+        const isUnread = !email.is_read || false;
+        const unreadClass = isUnread ? 'unread' : '';
+        const attachmentClass = hasAttachments ? 'has-attachment' : '';
         
         return `
-            <div class="email-card" onclick="openEmail(${index})">
+            <div class="email-card ${unreadClass} ${attachmentClass}" 
+                 onclick="openEmail(${index})" 
+                 oncontextmenu="event.preventDefault(); showContextMenu(event, ${index});"
+                 data-email-index="${index}">
                 <div class="email-row">
                     <div class="email-star" onclick="event.stopPropagation(); toggleStar('${email.id}', ${isStarred}, ${index})" title="${isStarred ? 'Unstar' : 'Star'}">
                         <span class="star-icon ${starClass}">★</span>
                     </div>
                     <div class="email-sender-name">
-                        <span style="color: var(--text-secondary); font-size: 0.85em; margin-right: 4px; flex-shrink: 0;">${senderLabel}</span>
                         <span>${escapeHtml(decodeHtmlEntities(displayName))}</span>
                     </div>
                     <div class="email-content">
@@ -2173,7 +2179,11 @@ function displayEmails(emails) {
                         </div>
                         <div class="email-snippet">${escapeHtml(decodedSnippet)}</div>
                     </div>
-                    ${tagsHtml ? `<div class="email-tags">${tagsHtml}</div>` : ''}
+                    ${hasAttachments ? '<div class="email-attachment" title="Has attachments">📎</div>' : ''}
+                    <div class="email-hover-actions">
+                        <button class="email-action-btn" onclick="event.stopPropagation(); archiveEmail('${email.id}', ${index})" title="Archive">📦</button>
+                        <button class="email-action-btn" onclick="event.stopPropagation(); deleteEmail('${email.id}', ${index})" title="Delete">🗑️</button>
+                    </div>
                     ${dateText ? `<div class="email-date">${dateText}</div>` : ''}
                 </div>
             </div>
@@ -3330,5 +3340,119 @@ document.addEventListener('keydown', function(event) {
         closeModal();
         closeSignatureModal();
         closeComposeModal();
+        hideContextMenu();
     }
 });
+
+// Toggle Categories Section
+function toggleCategoriesSection() {
+    const section = document.getElementById('categoriesSection');
+    if (section) {
+        section.classList.toggle('collapsed');
+    }
+}
+
+// Context Menu Functions
+let currentContextEmailIndex = null;
+
+function showContextMenu(event, emailIndex) {
+    event.preventDefault();
+    currentContextEmailIndex = emailIndex;
+    const contextMenu = document.getElementById('contextMenu');
+    if (!contextMenu) return;
+    
+    contextMenu.style.display = 'block';
+    contextMenu.style.left = event.pageX + 'px';
+    contextMenu.style.top = event.pageY + 'px';
+    
+    // Close on click outside
+    setTimeout(() => {
+        document.addEventListener('click', hideContextMenu, { once: true });
+    }, 0);
+}
+
+function hideContextMenu() {
+    const contextMenu = document.getElementById('contextMenu');
+    if (contextMenu) {
+        contextMenu.style.display = 'none';
+    }
+    currentContextEmailIndex = null;
+}
+
+function contextMenuReply() {
+    hideContextMenu();
+    if (currentContextEmailIndex !== null) {
+        openEmail(currentContextEmailIndex);
+        setTimeout(() => {
+            const replyBtn = document.querySelector('.reply-btn');
+            if (replyBtn) replyBtn.click();
+        }, 300);
+    }
+}
+
+function contextMenuForward() {
+    hideContextMenu();
+    if (currentContextEmailIndex !== null) {
+        openEmail(currentContextEmailIndex);
+        setTimeout(() => {
+            const forwardBtn = document.querySelector('.forward-btn');
+            if (forwardBtn) forwardBtn.click();
+        }, 300);
+    }
+}
+
+function contextMenuArchive() {
+    hideContextMenu();
+    if (currentContextEmailIndex !== null) {
+        const email = allEmails[currentContextEmailIndex];
+        if (email) {
+            archiveEmail(email.id, currentContextEmailIndex);
+        }
+    }
+}
+
+function contextMenuDelete() {
+    hideContextMenu();
+    if (currentContextEmailIndex !== null) {
+        const email = allEmails[currentContextEmailIndex];
+        if (email) {
+            deleteEmail(email.id, currentContextEmailIndex);
+        }
+    }
+}
+
+// Email Actions
+async function archiveEmail(emailId, emailIndex) {
+    // TODO: Implement archive functionality
+    showAlert('info', 'Archive functionality coming soon');
+}
+
+async function deleteEmail(emailId, emailIndex) {
+    if (!confirm('Are you sure you want to delete this email?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/emails/${emailId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Remove email from list
+            allEmails = allEmails.filter(e => e.id !== emailId);
+            filteredEmails = filteredEmails.filter(e => e.id !== emailId);
+            displayEmails(filteredEmails);
+            showAlert('success', 'Email deleted');
+        } else {
+            showAlert('error', data.error || 'Failed to delete email');
+        }
+    } catch (error) {
+        console.error('Error deleting email:', error);
+        showAlert('error', 'Failed to delete email');
+    }
+}
