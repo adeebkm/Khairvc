@@ -1640,6 +1640,12 @@ async function loadConfig() {
 
 // Fetch emails from Gmail
 async function refreshEmails() {
+    // Add spinning animation to refresh button
+    const refreshBtn = document.getElementById('refreshEmailsBtn');
+    if (refreshBtn) {
+        refreshBtn.classList.add('refreshing');
+        refreshBtn.disabled = true;
+    }
     // Refresh emails by reloading from database
     console.log('🔄 Refreshing emails from database...');
     await loadEmailsFromDatabase();
@@ -1876,6 +1882,13 @@ async function fetchEmails() {
         loading.style.display = 'none';
         fetchBtn.disabled = false;
         isFetching = false; // Reset fetching flag
+        
+        // Remove spinning animation from refresh button
+        const refreshBtn = document.getElementById('refreshEmailsBtn');
+        if (refreshBtn) {
+            refreshBtn.classList.remove('refreshing');
+            refreshBtn.disabled = false;
+        }
     }
 }
 
