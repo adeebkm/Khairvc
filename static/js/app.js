@@ -1890,7 +1890,7 @@ async function fetchEmails() {
     
     try {
         const forceFullSync = false; // Removed force full sync option
-        const maxEmails = 100; // Fixed to 100 emails
+        const maxEmails = 200; // Fixed to 200 emails
         
         // PHASE 1: Try background task first (if available)
         try {

@@ -784,7 +784,7 @@ def trigger_email_sync():
             print(f"⚠️  Could not check worker status: {worker_check_error}")
         
         # Get parameters
-        max_emails = min(request.json.get('max', 50), 100)  # Cap at 100
+        max_emails = min(request.json.get('max', 50), 200)  # Cap at 200
         force_full_sync = request.json.get('force_full_sync', False)
         
         # Trigger background task
@@ -821,8 +821,8 @@ def check_workers_status():
     try:
         from celery_config import celery
         
-        # Check active workers
-        inspect = celery.control.inspect()
+        # Check active workers (with timeout to prevent hanging)
+        inspect = celery.control.inspect(timeout=2.0)
         
         active_workers = inspect.active()
         registered_workers = inspect.registered()
@@ -1039,7 +1039,7 @@ def get_emails():
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
         # Get max_emails from query param - dynamically fetch based on filter selection
-        max_emails = min(request.args.get('max', default=20, type=int), 100)  # Cap at 100 emails max (user can select 20, 50, or 100)
+        max_emails = min(request.args.get('max', default=20, type=int), 200)  # Cap at 200 emails max (user can select 20, 50, 100, or 200)
         category_filter = request.args.get('category')  # Optional category filter
         show_spam = request.args.get('show_spam', 'false').lower() == 'true'
         unread_only = False  # Always fetch all emails (unread only filter removed)
@@ -1114,7 +1114,7 @@ def get_emails():
             if category_filter:
                 query = query.filter_by(category=category_filter)
             
-            # Limit to max_emails (user can request 20, 50, or 100)
+            # Limit to max_emails (user can request 20, 50, 100, or 200)
             # When category filter is applied, we still limit to max_emails since filter is in SQL
             print(f"   Loading latest {max_emails} emails from database" + (f" (category: {category_filter})" if category_filter else ""))
             db_classifications = query.order_by(EmailClassification.classified_at.desc()).limit(max_emails).all()
@@ -1142,7 +1142,7 @@ def get_emails():
                             }
                     
                     batch = gmail.service.new_batch_http_request(callback=star_callback)
-                    for idx, msg_id in enumerate(message_ids[:100]):  # Limit to 100 to avoid rate limits
+                    for idx, msg_id in enumerate(message_ids[:200]):  # Limit to 200 to avoid rate limits
                         # Use index as request_id to avoid duplicates
                         batch.add(gmail.service.users().messages().get(
                             userId='me',
@@ -1665,7 +1665,7 @@ def stream_emails():
                 yield f"data: {json.dumps({'error': 'Failed to connect to Gmail'})}\n\n"
                 return
             
-            max_emails = min(request.args.get('max', default=20, type=int), 100)
+            max_emails = min(request.args.get('max', default=20, type=int), 200)
             force_full_sync = request.args.get('force_full_sync', 'false').lower() == 'true'
             
             # Get history_id for incremental sync
@@ -1828,7 +1828,7 @@ def get_starred_emails():
             }), 500
         
         # Get max emails from query parameter
-        max_emails = min(request.args.get('max', default=20, type=int), 100)  # Cap at 100 emails max (user can select 20, 50, or 100)
+        max_emails = min(request.args.get('max', default=20, type=int), 200)  # Cap at 200 emails max (user can select 20, 50, 100, or 200)
         
         # Fetch starred emails
         starred_emails = gmail.get_starred_emails(max_results=max_emails)
@@ -1894,7 +1894,7 @@ def get_sent_emails():
             }), 500
         
         # Get max emails from query parameter
-        max_emails = min(request.args.get('max', default=20, type=int), 100)  # Cap at 100 emails max (user can select 20, 50, or 100)
+        max_emails = min(request.args.get('max', default=20, type=int), 200)  # Cap at 200 emails max (user can select 20, 50, 100, or 200)
         
         # Fetch sent emails
         sent_emails = gmail.get_sent_emails(max_results=max_emails)
@@ -1953,7 +1953,7 @@ def get_drafts():
             }), 500
         
         # Get max emails from query parameter
-        max_emails = min(request.args.get('max', default=20, type=int), 100)  # Cap at 100 emails max (user can select 20, 50, or 100)
+        max_emails = min(request.args.get('max', default=20, type=int), 200)  # Cap at 200 emails max (user can select 20, 50, 100, or 200)
         
         # Fetch drafts
         drafts = gmail.get_drafts(max_results=max_emails)
@@ -3152,7 +3152,7 @@ def fetch_initial_emails():
         if CELERY_AVAILABLE:
             try:
                 from celery_config import celery
-                inspect = celery.control.inspect()
+                inspect = celery.control.inspect(timeout=2.0)
                 active_workers = inspect.active()
                 
                 # Check if we have active workers (active_workers is a dict with worker names as keys)
@@ -3231,7 +3231,7 @@ def background_fetch_emails():
         if CELERY_AVAILABLE:
             try:
                 from celery_config import celery
-                inspect = celery.control.inspect()
+                inspect = celery.control.inspect(timeout=2.0)
                 active_workers = inspect.active()
                 
                 if active_workers:
