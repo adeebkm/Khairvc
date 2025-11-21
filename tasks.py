@@ -231,6 +231,17 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                             if att.get('mimeType', '').startswith('application/pdf'):
                                 pdf_attachments.append(att)
                     
+                    # Check if email already exists FIRST (before classification to save API calls)
+                    existing_classification = EmailClassification.query.filter_by(
+                        user_id=user_id,
+                        message_id=email.get('id', '')
+                    ).first()
+                    
+                    if existing_classification:
+                        print(f"⏭️  Email {email.get('id', '')} already exists, skipping...")
+                        emails_processed += 1
+                        continue  # Skip this email entirely
+                    
                     # Classify email (with rate limiting)
                     with CLASSIFICATION_SEMAPHORE:
                         classification_result = classifier.classify_email(
@@ -247,60 +258,63 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                     if idx < len(emails) - 1:  # Don't delay after last email
                         time.sleep(1.0)  # 1 second delay between emails
                     
-                    # Check if email already exists (prevent duplicates)
-                    existing_classification = EmailClassification.query.filter_by(
+                    # Create new classification
+                    new_classification = EmailClassification(
                         user_id=user_id,
-                        message_id=email.get('id', '')
-                    ).first()
+                        thread_id=email.get('thread_id', ''),
+                        message_id=email.get('id', ''),
+                        sender=email.get('from', 'Unknown'),
+                        email_date=email.get('date'),
+                        category=classification_result['category'],
+                        tags=','.join(classification_result.get('tags', [])),
+                        confidence=classification_result.get('confidence', 0.0),
+                        extracted_links=json.dumps(classification_result.get('links', []))
+                    )
+                    # Use encrypted field setters
+                    new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+                    new_classification.set_snippet_encrypted(email.get('snippet', ''))
+                    db.session.add(new_classification)
                     
-                    if existing_classification:
-                        # Update existing classification instead of creating duplicate
-                        new_classification = existing_classification
-                        new_classification.category = classification_result['category']
-                        new_classification.tags = ','.join(classification_result.get('tags', []))
-                        new_classification.confidence = classification_result.get('confidence', 0.0)
-                        new_classification.extracted_links = json.dumps(classification_result.get('links', []))
-                        new_classification.sender = email.get('from', 'Unknown')
-                        new_classification.email_date = email.get('date')
-                        # Update encrypted fields
-                        new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
-                        new_classification.set_snippet_encrypted(email.get('snippet', ''))
-                    else:
-                        # Create new classification
-                        new_classification = EmailClassification(
-                            user_id=user_id,
-                            thread_id=email.get('thread_id', ''),
-                            message_id=email.get('id', ''),
-                            sender=email.get('from', 'Unknown'),
-                            email_date=email.get('date'),
-                            category=classification_result['category'],
-                            tags=','.join(classification_result.get('tags', [])),
-                            confidence=classification_result.get('confidence', 0.0),
-                            extracted_links=json.dumps(classification_result.get('links', []))
-                        )
-                        # Use encrypted field setters
-                        new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
-                        new_classification.set_snippet_encrypted(email.get('snippet', ''))
-                        db.session.add(new_classification)
-                    # Commit with retry on connection errors
+                    # Commit with retry on connection errors and handle duplicate key errors
                     max_commit_retries = 3
+                    commit_success = False
+                    duplicate_detected = False
+                    
                     for commit_attempt in range(max_commit_retries):
                         try:
                             db.session.commit()
+                            commit_success = True
                             break
                         except Exception as commit_error:
-                            if 'EOF' in str(commit_error) or 'SSL SYSCALL' in str(commit_error) or 'connection' in str(commit_error).lower():
+                            error_str = str(commit_error)
+                            # Handle connection errors
+                            if 'EOF' in error_str or 'SSL SYSCALL' in error_str or 'connection' in error_str.lower():
                                 if commit_attempt < max_commit_retries - 1:
                                     db.session.rollback()
-                                    import time
                                     time.sleep(0.5)
                                     # Re-add the classification
                                     db.session.add(new_classification)
                                     continue
                                 else:
                                     raise
+                            # Handle duplicate key errors (unique constraint violation)
+                            elif 'UniqueViolation' in error_str or 'duplicate key' in error_str.lower() or 'uq_user_message' in error_str:
+                                db.session.rollback()
+                                print(f"⏭️  Email {email.get('id', '')} was inserted by another process, skipping...")
+                                duplicate_detected = True
+                                break  # Skip this email, continue to next
                             else:
+                                db.session.rollback()
                                 raise
+                    
+                    if duplicate_detected:
+                        emails_processed += 1
+                        continue  # Skip to next email
+                    
+                    if not commit_success:
+                        # Commit failed for other reasons, skip this email
+                        emails_processed += 1
+                        continue
                     
                     emails_processed += 1
                     emails_classified += 1
@@ -567,14 +581,20 @@ def fetch_older_emails(self, user_id, max_emails=200):
                     new_classification.set_snippet_encrypted(email.get('snippet', ''))
                     db.session.add(new_classification)
                     
-                    # Commit with retry
+                    # Commit with retry and handle duplicate key errors
                     max_commit_retries = 3
+                    commit_success = False
+                    duplicate_detected = False
+                    
                     for commit_attempt in range(max_commit_retries):
                         try:
                             db.session.commit()
+                            commit_success = True
                             break
                         except Exception as commit_error:
-                            if 'EOF' in str(commit_error) or 'SSL SYSCALL' in str(commit_error) or 'connection' in str(commit_error).lower():
+                            error_str = str(commit_error)
+                            # Handle connection errors
+                            if 'EOF' in error_str or 'SSL SYSCALL' in error_str or 'connection' in error_str.lower():
                                 if commit_attempt < max_commit_retries - 1:
                                     db.session.rollback()
                                     time.sleep(0.5)
@@ -582,8 +602,23 @@ def fetch_older_emails(self, user_id, max_emails=200):
                                     continue
                                 else:
                                     raise
+                            # Handle duplicate key errors (unique constraint violation)
+                            elif 'UniqueViolation' in error_str or 'duplicate key' in error_str.lower() or 'uq_user_message' in error_str:
+                                db.session.rollback()
+                                print(f"⏭️  Email {email.get('id', '')} was inserted by another process, skipping...")
+                                duplicate_detected = True
+                                break  # Skip this email, continue to next
                             else:
+                                db.session.rollback()
                                 raise
+                    
+                    if duplicate_detected:
+                        emails_classified += 1  # Count as processed but not newly classified
+                        continue  # Skip to next email
+                    
+                    if not commit_success:
+                        # Commit failed for other reasons, skip this email
+                        continue
                     
                     emails_classified += 1
                     
