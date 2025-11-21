@@ -461,6 +461,11 @@ async function startSetup() {
         console.log('🔄 Starting silent background fetch to reach 150 emails...');
         startBackgroundFetching();
         
+        // Automatically start fetching older emails (up to 200) in the background
+        // This runs super slowly to avoid rate limits - no UI, completely silent
+        console.log('🔄 Starting automatic older email fetch in background (up to 200 emails)...');
+        startFetchOlderEmailsSilently(200);
+        
         // Refresh page after a short delay to ensure everything is saved
         setTimeout(() => {
             console.log('🔄 Refreshing page after setup completion...');
@@ -808,6 +813,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         const setupData = await setupResponse.json();
         if (setupData.success && setupData.setup_completed) {
             startBackgroundFetching();
+            // Also start older email fetch silently in background
+            startFetchOlderEmailsSilently(200);
         }
     } catch (error) {
         console.error('Error checking setup status:', error);
@@ -3460,7 +3467,54 @@ async function deleteEmail(emailId, emailIndex) {
 // Older Emails Fetch Functions
 let olderEmailsTaskId = null;
 let olderEmailsPollInterval = null;
+let olderEmailsSilentMode = false;
 
+// Silent mode: automatically fetch older emails without showing progress bar
+async function startFetchOlderEmailsSilently(maxEmails = 200) {
+    // Check if we already have a task running
+    if (olderEmailsTaskId) {
+        console.log('📧 Older email fetch already in progress, skipping...');
+        return;
+    }
+    
+    // Check if we already have enough emails (200+)
+    try {
+        const response = await fetch('/api/emails?db_only=true&max=1');
+        const data = await response.json();
+        if (data.success && data.emails && data.emails.length >= 200) {
+            console.log('✅ Already have 200+ emails, skipping older email fetch');
+            return;
+        }
+    } catch (error) {
+        console.warn('Could not check email count:', error);
+    }
+    
+    try {
+        olderEmailsSilentMode = true; // Enable silent mode
+        const response = await fetch('/api/emails/fetch-older', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ max: maxEmails })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            olderEmailsTaskId = data.task_id;
+            console.log('📧 Started silent older email fetch (up to 200 emails)');
+            // Don't show progress bar in silent mode, just poll quietly
+            startOlderEmailsPollingSilent();
+        } else {
+            console.warn('⚠️ Failed to start older email fetch:', data.error);
+        }
+    } catch (error) {
+        console.error('Error starting older email fetch:', error);
+    }
+}
+
+// Manual trigger (with progress bar) - kept for potential future use
 async function startFetchOlderEmails(maxEmails = 200) {
     try {
         const response = await fetch('/api/emails/fetch-older', {
@@ -3475,6 +3529,7 @@ async function startFetchOlderEmails(maxEmails = 200) {
         
         if (data.success) {
             olderEmailsTaskId = data.task_id;
+            olderEmailsSilentMode = false; // Show progress bar
             showOlderEmailsProgress();
             startOlderEmailsPolling();
             showAlert('success', 'Started fetching older emails in the background');
@@ -3501,6 +3556,56 @@ function hideOlderEmailsProgress() {
     }
 }
 
+// Silent polling (no UI updates, just logs)
+function startOlderEmailsPollingSilent() {
+    if (olderEmailsPollInterval) {
+        clearInterval(olderEmailsPollInterval);
+    }
+    
+    olderEmailsPollInterval = setInterval(async () => {
+        if (!olderEmailsTaskId) {
+            clearInterval(olderEmailsPollInterval);
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/emails/sync/status/${olderEmailsTaskId}`);
+            const data = await response.json();
+            
+            if (data.success) {
+                // Log progress silently (only in console)
+                if (data.status === 'PROGRESS') {
+                    const fetched = data.fetched || data.progress || 0;
+                    const classified = data.classified || 0;
+                    const total = data.total || 200;
+                    console.log(`📧 Older emails: ${fetched} fetched, ${classified} classified / ${total}`);
+                }
+                
+                if (data.status === 'SUCCESS' || data.status === 'FAILURE') {
+                    clearInterval(olderEmailsPollInterval);
+                    olderEmailsTaskId = null;
+                    olderEmailsSilentMode = false;
+                    
+                    if (data.status === 'SUCCESS') {
+                        console.log(`✅ Older email fetch complete: ${data.emails_classified || 0} emails classified`);
+                        // Silently refresh email list in background
+                        setTimeout(() => {
+                            loadEmailsFromDatabase();
+                        }, 1000);
+                    } else {
+                        console.warn('⚠️ Older email fetch failed:', data.error);
+                    }
+                }
+            } else {
+                console.error('Error polling older emails status:', data.error);
+            }
+        } catch (error) {
+            console.error('Error polling older emails status:', error);
+        }
+    }, 5000); // Poll every 5 seconds in silent mode (less frequent)
+}
+
+// Manual polling (with UI updates)
 function startOlderEmailsPolling() {
     if (olderEmailsPollInterval) {
         clearInterval(olderEmailsPollInterval);
@@ -3522,6 +3627,7 @@ function startOlderEmailsPolling() {
                 if (data.status === 'SUCCESS' || data.status === 'FAILURE') {
                     clearInterval(olderEmailsPollInterval);
                     olderEmailsTaskId = null;
+                    olderEmailsSilentMode = false;
                     
                     if (data.status === 'SUCCESS') {
                         setTimeout(() => {

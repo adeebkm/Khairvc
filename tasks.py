@@ -587,9 +587,9 @@ def fetch_older_emails(self, user_id, max_emails=200):
                     
                     emails_classified += 1
                     
-                    # Add delay between classifications (1 second to avoid rate limits)
+                    # Add delay between classifications (2 seconds for super slow background fetching)
                     if idx < len(emails) - 1:
-                        time.sleep(1.0)
+                        time.sleep(2.0)
                     
                 except Exception as e:
                     error_msg = f"Error processing email {idx}: {str(e)}"

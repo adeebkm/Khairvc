@@ -402,10 +402,10 @@ class GmailClient:
             page_token = start_page_token
             total_fetched = 0
             
-            # Fetch in smaller pages to avoid rate limits
+            # Fetch in smaller pages to avoid rate limits (super slow for background fetching)
             PAGE_SIZE = 20  # Fetch 20 emails per page
-            DELAY_BETWEEN_PAGES = 2.0  # 2 second delay between pages (conservative)
-            DELAY_BETWEEN_BATCHES = 0.5  # 500ms delay between batches within a page
+            DELAY_BETWEEN_PAGES = 5.0  # 5 second delay between pages (very conservative for background)
+            DELAY_BETWEEN_BATCHES = 1.0  # 1 second delay between batches within a page
             
             from googleapiclient.http import BatchHttpRequest
             import time
