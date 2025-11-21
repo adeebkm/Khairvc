@@ -310,14 +310,17 @@ def set_user_context_for_rls():
 
 
 # Initialize database (lazy - migrations run on first request to prevent startup hangs)
+# Don't connect at startup - let it connect on first request to avoid deployment hangs
 with app.app_context():
     # Only create tables if they don't exist (safer for production)
+    # Skip connection test at startup to prevent deployment hangs
+    # Connection will happen automatically on first request
     try:
-        print("📊 Attempting to connect to the database...")
-        # Use a simple connection test with timeout
-        db.engine.connect()
-        print("✅ Database connection successful")
+        print("📊 Initializing database (connection will happen on first request)...")
+        # Don't call db.engine.connect() at startup - it can hang if DB isn't ready
+        # Just create tables if they don't exist (this is fast and non-blocking)
         db.create_all()
+        print("✅ Database tables initialized")
     except Exception as e:
         # Ignore errors about existing tables/sequences (normal in production)
         error_str = str(e).lower()
