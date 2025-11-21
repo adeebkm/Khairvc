@@ -773,37 +773,54 @@ function updatePagination() {
     // Only show pagination controls if more than 1 page
     if (totalPages <= 1) return;
     
-    // Create pagination controls
+    // Create pagination container
     const pagination = document.createElement('div');
     pagination.className = 'pagination';
+    
+    // Create main controls wrapper (horizontal)
+    const paginationControls = document.createElement('div');
+    paginationControls.className = 'pagination-controls';
+    
+    // Page info (left side)
+    const pageInfo = document.createElement('div');
+    pageInfo.className = 'pagination-info';
+    const startEmail = startIndex + 1;
+    const endEmail = Math.min(endIndex, totalEmails);
+    pageInfo.innerHTML = `<span class="pagination-text">Showing <strong>${startEmail}-${endEmail}</strong> of <strong>${totalEmails}</strong></span>`;
+    paginationControls.appendChild(pageInfo);
+    
+    // Navigation buttons container
+    const navContainer = document.createElement('div');
+    navContainer.className = 'pagination-nav';
     
     // Previous button
     const prevBtn = document.createElement('button');
     prevBtn.className = 'pagination-btn pagination-btn-nav';
-    prevBtn.innerHTML = '<span class="pagination-icon">←</span> Previous';
+    prevBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 12L6 8L10 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     prevBtn.disabled = currentPage === 1;
+    prevBtn.setAttribute('aria-label', 'Previous page');
     prevBtn.onclick = () => {
         if (currentPage > 1) {
             currentPage--;
             updatePagination();
         }
     };
-    pagination.appendChild(prevBtn);
+    navContainer.appendChild(prevBtn);
     
     // Page number buttons
     const pageNumbers = document.createElement('div');
     pageNumbers.className = 'pagination-numbers';
     
-    // Calculate which page numbers to show (max 7 pages visible)
-    let startPage = Math.max(1, currentPage - 3);
-    let endPage = Math.min(totalPages, currentPage + 3);
+    // Calculate which page numbers to show (max 5 pages visible for cleaner look)
+    let startPage = Math.max(1, currentPage - 2);
+    let endPage = Math.min(totalPages, currentPage + 2);
     
     // Adjust if we're near the start or end
-    if (endPage - startPage < 6) {
+    if (endPage - startPage < 4) {
         if (startPage === 1) {
-            endPage = Math.min(7, totalPages);
+            endPage = Math.min(5, totalPages);
         } else if (endPage === totalPages) {
-            startPage = Math.max(1, totalPages - 6);
+            startPage = Math.max(1, totalPages - 4);
         }
     }
     
@@ -821,7 +838,8 @@ function updatePagination() {
         if (startPage > 2) {
             const ellipsis = document.createElement('span');
             ellipsis.className = 'pagination-ellipsis';
-            ellipsis.textContent = '...';
+            ellipsis.textContent = '⋯';
+            ellipsis.setAttribute('aria-hidden', 'true');
             pageNumbers.appendChild(ellipsis);
         }
     }
@@ -832,8 +850,10 @@ function updatePagination() {
         pageBtn.className = 'pagination-btn pagination-btn-number';
         if (i === currentPage) {
             pageBtn.classList.add('active');
+            pageBtn.setAttribute('aria-current', 'page');
         }
         pageBtn.textContent = i.toString();
+        pageBtn.setAttribute('aria-label', `Go to page ${i}`);
         pageBtn.onclick = () => {
             currentPage = i;
             updatePagination();
@@ -846,13 +866,15 @@ function updatePagination() {
         if (endPage < totalPages - 1) {
             const ellipsis = document.createElement('span');
             ellipsis.className = 'pagination-ellipsis';
-            ellipsis.textContent = '...';
+            ellipsis.textContent = '⋯';
+            ellipsis.setAttribute('aria-hidden', 'true');
             pageNumbers.appendChild(ellipsis);
         }
         
         const lastBtn = document.createElement('button');
         lastBtn.className = 'pagination-btn pagination-btn-number';
         lastBtn.textContent = totalPages.toString();
+        lastBtn.setAttribute('aria-label', `Go to page ${totalPages}`);
         lastBtn.onclick = () => {
             currentPage = totalPages;
             updatePagination();
@@ -860,28 +882,24 @@ function updatePagination() {
         pageNumbers.appendChild(lastBtn);
     }
     
-    pagination.appendChild(pageNumbers);
+    navContainer.appendChild(pageNumbers);
     
     // Next button
     const nextBtn = document.createElement('button');
     nextBtn.className = 'pagination-btn pagination-btn-nav';
-    nextBtn.innerHTML = 'Next <span class="pagination-icon">→</span>';
+    nextBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     nextBtn.disabled = currentPage === totalPages;
+    nextBtn.setAttribute('aria-label', 'Next page');
     nextBtn.onclick = () => {
         if (currentPage < totalPages) {
             currentPage++;
             updatePagination();
         }
     };
-    pagination.appendChild(nextBtn);
+    navContainer.appendChild(nextBtn);
     
-    // Page info (below pagination)
-    const pageInfo = document.createElement('div');
-    pageInfo.className = 'pagination-info';
-    const startEmail = startIndex + 1;
-    const endEmail = Math.min(endIndex, totalEmails);
-    pageInfo.innerHTML = `<span class="pagination-text">Showing <strong>${startEmail}-${endEmail}</strong> of <strong>${totalEmails}</strong> emails</span>`;
-    pagination.appendChild(pageInfo);
+    paginationControls.appendChild(navContainer);
+    pagination.appendChild(paginationControls);
     
     // Insert pagination after email list
     emailList.appendChild(pagination);
