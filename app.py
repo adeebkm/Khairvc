@@ -768,9 +768,9 @@ def trigger_email_sync():
     try:
         from celery_config import celery
         
-        # Check if workers are actually running by inspecting active workers
+        # Check if workers are actually running by inspecting active workers (with timeout)
         try:
-            inspect = celery.control.inspect()
+            inspect = celery.control.inspect(timeout=2.0)  # 2 second timeout to prevent hanging
             active_workers = inspect.active()
             if not active_workers:
                 # No workers available - return 503 to trigger fallback
@@ -909,9 +909,9 @@ def trigger_fetch_older_emails():
                 'count': email_count
             }), 200  # Return 200 to indicate success but no action needed
         
-        # Check if workers are running
+        # Check if workers are running (with timeout to prevent hanging)
         try:
-            inspect = celery.control.inspect()
+            inspect = celery.control.inspect(timeout=2.0)  # 2 second timeout
             active_workers = inspect.active()
             if not active_workers:
                 return jsonify({
@@ -920,11 +920,12 @@ def trigger_fetch_older_emails():
                 }), 503
         except Exception as worker_check_error:
             print(f"⚠️  Could not check worker status: {worker_check_error}")
+            # Don't block - just continue and let the task fail if workers aren't available
         
-        # Check if there's already a running task for this user
+        # Check if there's already a running task for this user (with timeout)
         try:
-            # Get all active tasks
-            inspect = celery.control.inspect()
+            # Get all active tasks (with timeout)
+            inspect = celery.control.inspect(timeout=2.0)  # 2 second timeout
             active_tasks = inspect.active()
             if active_tasks:
                 for worker, tasks in active_tasks.items():
@@ -940,6 +941,7 @@ def trigger_fetch_older_emails():
                                 }), 409  # Conflict
         except Exception as task_check_error:
             print(f"⚠️  Could not check for existing tasks: {task_check_error}")
+            # Don't block - just continue (worst case: duplicate task, but duplicate prevention in DB will catch it)
         
         # Get max emails (default 200, cap at 200)
         max_emails = min(request.json.get('max', 200), 200)
