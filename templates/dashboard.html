@@ -231,8 +231,9 @@
             <div id="contentArea">
             <!-- Email List (for all tabs except Deal Flow) -->
             <div class="email-list" id="emailList">
-                <div class="empty-state">
-                    <p>👋 Click "Fetch Emails" to get started</p>
+                <div class="empty-state" id="emptyStateInitial" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Loading emails...</p>
                 </div>
             </div>
 

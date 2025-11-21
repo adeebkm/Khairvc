@@ -447,11 +447,17 @@ async function startSetup() {
         }, 500);
         
         // Show success message
-        showAlert('success', `Setup complete! Loaded ${allEmails.length} emails.`);
+        showAlert('success', `Setup complete! Loaded ${allEmails.length} emails. Refreshing page...`);
         
         // Start background fetching immediately (silently continue to 150 emails)
         console.log('🔄 Starting silent background fetch to reach 150 emails...');
         startBackgroundFetching();
+        
+        // Refresh page after a short delay to ensure everything is saved
+        setTimeout(() => {
+            console.log('🔄 Refreshing page after setup completion...');
+            window.location.reload();
+        }, 2000);
         
     } catch (error) {
         console.error('Setup error:', error);
@@ -818,9 +824,19 @@ document.addEventListener('DOMContentLoaded', async function() {
                 allEmails = verifyData.emails;
                 applyFilters();
                 
+                // Hide loading indicator since emails are loaded
+                const loadingEl = document.getElementById('loading');
+                if (loadingEl) {
+                    loadingEl.style.display = 'none';
+                }
+                const emptyStateInitial = document.getElementById('emptyStateInitial');
+                if (emptyStateInitial) {
+                    emptyStateInitial.style.display = 'none';
+                }
+                
                 const emailCountEl = document.getElementById('emailCount');
                 if (emailCountEl) {
-                    emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''} (loaded from database)`;
+                    emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''}`;
                 }
                 console.log(`✅ Loaded ${verifyData.emails.length} emails from database`);
             } else {
@@ -830,9 +846,14 @@ document.addEventListener('DOMContentLoaded', async function() {
                 allEmails = [];
                 applyFilters();
                 
+                // Show loading indicator instead of "Click Fetch" message
+                const loadingEl = document.getElementById('loading');
+                if (loadingEl) {
+                    loadingEl.style.display = 'flex';
+                }
                 const emailCountEl = document.getElementById('emailCount');
                 if (emailCountEl) {
-                    emailCountEl.textContent = 'No emails found. Click "Fetch" to load from Gmail.';
+                    emailCountEl.textContent = 'Loading emails...';
                 }
             }
         } else {
@@ -846,7 +867,12 @@ document.addEventListener('DOMContentLoaded', async function() {
                 applyFilters();
                 const emailCountEl = document.getElementById('emailCount');
                 if (emailCountEl) {
-                    emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''} (${isFresh ? 'cached' : 'stale - click Fetch to refresh'})`;
+                    // Hide loading indicator if emails are loaded
+                    const loadingEl = document.getElementById('loading');
+                    if (loadingEl) {
+                        loadingEl.style.display = 'none';
+                    }
+                    emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''}${isFresh ? '' : ' (cached)'}`;
                 }
             }
         }
@@ -862,19 +888,29 @@ document.addEventListener('DOMContentLoaded', async function() {
             applyFilters();
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''} (${isFresh ? 'cached' : 'stale - click Fetch to refresh'})`;
+                    // Hide loading indicator if emails are loaded
+                    const loadingEl2 = document.getElementById('loading');
+                    if (loadingEl2) {
+                        loadingEl2.style.display = 'none';
+                    }
+                    emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''}${isFresh ? '' : ' (cached)'}`;
             }
         } else {
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                emailCountEl.textContent = 'Click "Fetch" to load emails';
+                // Show loading indicator
+                const loadingEl3 = document.getElementById('loading');
+                if (loadingEl3) {
+                    loadingEl3.style.display = 'flex';
+                }
+                emailCountEl.textContent = 'Loading emails...';
             }
         }
     }
     
     // Skip auto-load if just connected
     if (justConnected) {
-        console.log('Gmail just connected. Click "Fetch" button to load emails.');
+        console.log('Gmail just connected. Loading emails...');
         const emailCountEl = document.getElementById('emailCount');
         if (emailCountEl) {
             emailCountEl.textContent = 'Click "Fetch" to load emails';
@@ -1989,7 +2025,7 @@ function displayEmails(emails) {
             if (!isConnected) {
                 message += '<br><small style="color: var(--text-secondary);">⚠️ Gmail not connected. <a href="/connect-gmail" style="color: var(--primary-color);">Connect Gmail</a> first</small>';
             } else {
-                message += '<br><small style="color: var(--text-secondary);">Click "Fetch Emails" button above to load emails from Gmail</small>';
+                message += '<br><small style="color: var(--text-secondary);">Emails are loading in the background...</small>';
             }
         }
         
