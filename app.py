@@ -144,6 +144,15 @@ def run_lazy_migrations():
         from sqlalchemy import text, inspect
         from sqlalchemy.exc import OperationalError, ProgrammingError
         
+        # Create tables if they don't exist (this happens on first request)
+        try:
+            db.create_all()
+        except Exception as create_error:
+            # Ignore errors about existing tables/sequences (normal in production)
+            error_str = str(create_error).lower()
+            if 'already exists' not in error_str and 'duplicate key' not in error_str:
+                print(f"⚠️  Table creation warning: {create_error}")
+        
         # Check database type
         try:
             inspector = inspect(db.engine)
@@ -309,28 +318,10 @@ def set_user_context_for_rls():
                 print(f"⚠️  Warning: Could not set RLS context: {e}")
 
 
-# Initialize database (lazy - migrations run on first request to prevent startup hangs)
-# Don't connect at startup - let it connect on first request to avoid deployment hangs
-with app.app_context():
-    # Only create tables if they don't exist (safer for production)
-    # Skip connection test at startup to prevent deployment hangs
-    # Connection will happen automatically on first request
-    try:
-        print("📊 Initializing database (connection will happen on first request)...")
-        # Don't call db.engine.connect() at startup - it can hang if DB isn't ready
-        # Just create tables if they don't exist (this is fast and non-blocking)
-        db.create_all()
-        print("✅ Database tables initialized")
-    except Exception as e:
-        # Ignore errors about existing tables/sequences (normal in production)
-        error_str = str(e).lower()
-        if 'already exists' not in error_str and 'duplicate key' not in error_str:
-            print(f"⚠️  Database initialization warning: {e}")
-        # Tables likely already exist, which is fine
-    
-    # Migrations are now LAZY - they run on first request instead of at startup
-    # This prevents the app from hanging during deployment
-    print("✅ Database initialized (migrations will run on first request)")
+# Initialize database (lazy - everything happens on first request to prevent startup hangs)
+# Skip ALL database operations at startup - they happen automatically on first request
+# This ensures fast startup and prevents deployment hangs
+print("✅ App initialized (database connection and migrations will happen on first request)")
 
 
 # Global OpenAI client (shared API key from .env)
