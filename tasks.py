@@ -247,23 +247,41 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                     if idx < len(emails) - 1:  # Don't delay after last email
                         time.sleep(1.0)  # 1 second delay between emails
                     
-                    # Store classification
-                    new_classification = EmailClassification(
+                    # Check if email already exists (prevent duplicates)
+                    existing_classification = EmailClassification.query.filter_by(
                         user_id=user_id,
-                        thread_id=email.get('thread_id', ''),
-                        message_id=email.get('id', ''),
-                        sender=email.get('from', 'Unknown'),
-                        email_date=email.get('date'),
-                        category=classification_result['category'],
-                        tags=','.join(classification_result.get('tags', [])),
-                        confidence=classification_result.get('confidence', 0.0),
-                        extracted_links=json.dumps(classification_result.get('links', []))
-                    )
-                    # Use encrypted field setters
-                    new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
-                    new_classification.set_snippet_encrypted(email.get('snippet', ''))
+                        message_id=email.get('id', '')
+                    ).first()
                     
-                    db.session.add(new_classification)
+                    if existing_classification:
+                        # Update existing classification instead of creating duplicate
+                        new_classification = existing_classification
+                        new_classification.category = classification_result['category']
+                        new_classification.tags = ','.join(classification_result.get('tags', []))
+                        new_classification.confidence = classification_result.get('confidence', 0.0)
+                        new_classification.extracted_links = json.dumps(classification_result.get('links', []))
+                        new_classification.sender = email.get('from', 'Unknown')
+                        new_classification.email_date = email.get('date')
+                        # Update encrypted fields
+                        new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+                        new_classification.set_snippet_encrypted(email.get('snippet', ''))
+                    else:
+                        # Create new classification
+                        new_classification = EmailClassification(
+                            user_id=user_id,
+                            thread_id=email.get('thread_id', ''),
+                            message_id=email.get('id', ''),
+                            sender=email.get('from', 'Unknown'),
+                            email_date=email.get('date'),
+                            category=classification_result['category'],
+                            tags=','.join(classification_result.get('tags', [])),
+                            confidence=classification_result.get('confidence', 0.0),
+                            extracted_links=json.dumps(classification_result.get('links', []))
+                        )
+                        # Use encrypted field setters
+                        new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+                        new_classification.set_snippet_encrypted(email.get('snippet', ''))
+                        db.session.add(new_classification)
                     # Commit with retry on connection errors
                     max_commit_retries = 3
                     for commit_attempt in range(max_commit_retries):

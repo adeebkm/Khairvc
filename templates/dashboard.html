@@ -9,8 +9,6 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.css">
 </head>
 <body>
     <!-- Navigation -->
@@ -27,8 +25,8 @@
                     {% if has_gmail %}
                     <div class="nav-search">
                         <div class="search-container">
-                            <span class="search-icon">✨</span>
-                            <input type="text" id="emailSearch" class="search-input" placeholder="Ask anything about your inbox…" onkeyup="handleSearch(event)" oninput="handleSearchInput(this.value)">
+                            <span class="search-icon">🔍</span>
+                            <input type="text" id="emailSearch" class="search-input" placeholder="Search emails..." onkeyup="handleSearch(event)" oninput="handleSearchInput(this.value)">
                             <button class="search-clear" id="searchClear" onclick="clearSearch()" style="display: none;">×</button>
                         </div>
                     </div>

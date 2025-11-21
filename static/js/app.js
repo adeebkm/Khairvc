@@ -2165,27 +2165,26 @@ function displayEmails(emails) {
                  onclick="openEmail(${index})" 
                  oncontextmenu="event.preventDefault(); showContextMenu(event, ${index});"
                  data-email-index="${index}">
-                <div class="email-row-top">
+                <div class="email-row">
                     <div class="email-star" onclick="event.stopPropagation(); toggleStar('${email.id}', ${isStarred}, ${index})" title="${isStarred ? 'Unstar' : 'Star'}">
                         <span class="star-icon ${starClass}">★</span>
                     </div>
                     <div class="email-sender-name">
-                        ${escapeHtml(decodeHtmlEntities(displayName))}
+                        <span>${escapeHtml(decodeHtmlEntities(displayName))}</span>
                     </div>
-                    <div class="email-subject">
-                        ${escapeHtml(decodedSubject)}
+                    <div class="email-content">
+                        <div class="email-subject">
+                            <span>${escapeHtml(decodedSubject)}</span>
+                            ${categoryBadge}
+                        </div>
+                        <div class="email-snippet">${escapeHtml(decodedSnippet)}</div>
                     </div>
-                    <div style="flex: 1;"></div>
-                    ${categoryBadge ? `<div style="margin-left: auto;">${categoryBadge}</div>` : ''}
-                    ${dateText ? `<div class="email-date">${dateText}</div>` : ''}
-                </div>
-                <div class="email-row-bottom">
-                    <div class="email-snippet">${escapeHtml(decodedSnippet)}</div>
                     ${hasAttachments ? '<div class="email-attachment" title="Has attachments">📎</div>' : ''}
                     <div class="email-hover-actions">
                         <button class="email-action-btn" onclick="event.stopPropagation(); archiveEmail('${email.id}', ${index})" title="Archive">📦</button>
                         <button class="email-action-btn" onclick="event.stopPropagation(); deleteEmail('${email.id}', ${index})" title="Delete">🗑️</button>
                     </div>
+                    ${dateText ? `<div class="email-date">${dateText}</div>` : ''}
                 </div>
             </div>
         `;

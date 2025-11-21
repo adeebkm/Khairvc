@@ -246,6 +246,40 @@ def run_lazy_migrations():
         except Exception:
             db.session.rollback()
         
+        # Unique constraint migration (prevents duplicate emails)
+        try:
+            # Check if unique constraint already exists
+            result = db.session.execute(text("""
+                SELECT constraint_name 
+                FROM information_schema.table_constraints 
+                WHERE table_name = 'email_classifications' 
+                AND constraint_name = 'uq_user_message'
+                LIMIT 1
+            """))
+            constraint_exists = result.fetchone() is not None
+            
+            if not constraint_exists:
+                print("🔄 Running lazy migration: Adding unique constraint on (user_id, message_id)...")
+                try:
+                    # First, ensure no duplicates exist (should be handled by cleanup script)
+                    db.session.execute(text("""
+                        ALTER TABLE email_classifications 
+                        ADD CONSTRAINT uq_user_message 
+                        UNIQUE (user_id, message_id);
+                    """))
+                    db.session.commit()
+                    print("✅ Unique constraint migration completed")
+                except Exception as e:
+                    db.session.rollback()
+                    # If constraint fails due to existing duplicates, warn but continue
+                    if 'duplicate key' in str(e).lower() or 'unique constraint' in str(e).lower():
+                        print(f"⚠️  Unique constraint migration skipped: Duplicates exist. Run cleanup_duplicates.py first.")
+                    else:
+                        print(f"⚠️  Unique constraint migration error: {e}")
+        except Exception as e:
+            db.session.rollback()
+            print(f"⚠️  Unique constraint migration check error: {e}")
+        
         _migrations_run = True
         print("✅ Lazy migrations completed")
     except Exception as e:
@@ -1245,21 +1279,40 @@ def get_emails():
                                     # Re-raise other errors
                                     raise
                     
-                    # Store classification
-                    classification = EmailClassification(
+                    # Check if email already exists (prevent duplicates)
+                    existing_classification = EmailClassification.query.filter_by(
                         user_id=current_user.id,
-                        thread_id=email['thread_id'],
-                        message_id=email['id'],
-                        sender=email.get('from', 'Unknown'),
-                        email_date=email.get('date'),
-                        category=classification_result['category'],
-                        tags=','.join(classification_result['tags']),
-                        confidence=classification_result['confidence'],
-                        extracted_links=json.dumps(classification_result['links'])
-                    )
-                    # PRIORITY 2: Use encrypted field setters
-                    classification.set_subject_encrypted(email.get('subject', 'No Subject'))
-                    classification.set_snippet_encrypted(email.get('snippet', ''))
+                        message_id=email['id']
+                    ).first()
+                    
+                    if existing_classification:
+                        # Update existing classification instead of creating duplicate
+                        classification = existing_classification
+                        classification.category = classification_result['category']
+                        classification.tags = ','.join(classification_result['tags'])
+                        classification.confidence = classification_result['confidence']
+                        classification.extracted_links = json.dumps(classification_result['links'])
+                        classification.sender = email.get('from', 'Unknown')
+                        classification.email_date = email.get('date')
+                        # Update encrypted fields
+                        classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+                        classification.set_snippet_encrypted(email.get('snippet', ''))
+                    else:
+                        # Create new classification
+                        classification = EmailClassification(
+                            user_id=current_user.id,
+                            thread_id=email['thread_id'],
+                            message_id=email['id'],
+                            sender=email.get('from', 'Unknown'),
+                            email_date=email.get('date'),
+                            category=classification_result['category'],
+                            tags=','.join(classification_result['tags']),
+                            confidence=classification_result['confidence'],
+                            extracted_links=json.dumps(classification_result['links'])
+                        )
+                        # PRIORITY 2: Use encrypted field setters
+                        classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+                        classification.set_snippet_encrypted(email.get('snippet', ''))
                     
                     # Deal Flow specific processing
                     if classification_result['category'] == CATEGORY_DEAL_FLOW:
@@ -1584,22 +1637,41 @@ def stream_emails():
                                 user_id=user_id
                             )
                         
-                        # Store classification
-                        new_classification = EmailClassification(
+                        # Check if email already exists (prevent duplicates)
+                        existing_classification = EmailClassification.query.filter_by(
                             user_id=user_id,
-                            thread_id=email['thread_id'],
-                            message_id=email['id'],
-                            sender=email.get('from', 'Unknown'),
-                            email_date=email.get('date'),
-                            category=classification_result['category'],
-                            tags=','.join(classification_result['tags']),
-                            confidence=classification_result['confidence'],
-                            extracted_links=json.dumps(classification_result['links'])
-                        )
-                        # PRIORITY 2: Use encrypted field setters
-                        new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
-                        new_classification.set_snippet_encrypted(email.get('snippet', ''))
-                        db.session.add(new_classification)
+                            message_id=email['id']
+                        ).first()
+                        
+                        if existing_classification:
+                            # Update existing classification instead of creating duplicate
+                            new_classification = existing_classification
+                            new_classification.category = classification_result['category']
+                            new_classification.tags = ','.join(classification_result['tags'])
+                            new_classification.confidence = classification_result['confidence']
+                            new_classification.extracted_links = json.dumps(classification_result['links'])
+                            new_classification.sender = email.get('from', 'Unknown')
+                            new_classification.email_date = email.get('date')
+                            # Update encrypted fields
+                            new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+                            new_classification.set_snippet_encrypted(email.get('snippet', ''))
+                        else:
+                            # Create new classification
+                            new_classification = EmailClassification(
+                                user_id=user_id,
+                                thread_id=email['thread_id'],
+                                message_id=email['id'],
+                                sender=email.get('from', 'Unknown'),
+                                email_date=email.get('date'),
+                                category=classification_result['category'],
+                                tags=','.join(classification_result['tags']),
+                                confidence=classification_result['confidence'],
+                                extracted_links=json.dumps(classification_result['links'])
+                            )
+                            # PRIORITY 2: Use encrypted field setters
+                            new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+                            new_classification.set_snippet_encrypted(email.get('snippet', ''))
+                            db.session.add(new_classification)
                         db.session.commit()
                         
                         email_data = {
@@ -1912,21 +1984,40 @@ def reclassify_email():
                     user_id=str(current_user.id)
                 )
         
-        # Store new classification
-        new_classification = EmailClassification(
+        # Check if email already exists (prevent duplicates)
+        existing_classification = EmailClassification.query.filter_by(
             user_id=current_user.id,
-            thread_id=thread_id,
-            message_id=email['id'],
-            sender=email.get('from', 'Unknown'),
-            email_date=email.get('date'),
-            category=classification_result['category'],
-            tags=','.join(classification_result['tags']),
-            confidence=classification_result['confidence'],
-            extracted_links=json.dumps(classification_result['links'])
-        )
-        # PRIORITY 2: Use encrypted field setters
-        new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
-        new_classification.set_snippet_encrypted(email.get('snippet', ''))
+            message_id=email['id']
+        ).first()
+        
+        if existing_classification:
+            # Update existing classification instead of creating duplicate
+            new_classification = existing_classification
+            new_classification.category = classification_result['category']
+            new_classification.tags = ','.join(classification_result['tags'])
+            new_classification.confidence = classification_result['confidence']
+            new_classification.extracted_links = json.dumps(classification_result['links'])
+            new_classification.sender = email.get('from', 'Unknown')
+            new_classification.email_date = email.get('date')
+            # Update encrypted fields
+            new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+            new_classification.set_snippet_encrypted(email.get('snippet', ''))
+        else:
+            # Create new classification
+            new_classification = EmailClassification(
+                user_id=current_user.id,
+                thread_id=thread_id,
+                message_id=email['id'],
+                sender=email.get('from', 'Unknown'),
+                email_date=email.get('date'),
+                category=classification_result['category'],
+                tags=','.join(classification_result['tags']),
+                confidence=classification_result['confidence'],
+                extracted_links=json.dumps(classification_result['links'])
+            )
+            # PRIORITY 2: Use encrypted field setters
+            new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+            new_classification.set_snippet_encrypted(email.get('snippet', ''))
         
         # Process Deal Flow if needed
         if classification_result['category'] == CATEGORY_DEAL_FLOW:

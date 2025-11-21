@@ -101,9 +101,10 @@ class EmailClassification(db.Model):
     deck_link = db.Column(db.Text)  # Detected deck/dataroom link
     extracted_links = db.Column(db.Text)  # JSON array of all links
     
-    # Index for quick lookups
+    # Index for quick lookups and unique constraint to prevent duplicates
     __table_args__ = (
         db.Index('idx_user_thread', 'user_id', 'thread_id'),
+        db.UniqueConstraint('user_id', 'message_id', name='uq_user_message'),  # Prevent duplicate emails per user
     )
     
     # PRIORITY 2: Helper methods for encrypted fields
