@@ -1646,12 +1646,21 @@ async function refreshEmails() {
         refreshBtn.classList.add('refreshing');
         refreshBtn.disabled = true;
     }
-    // Refresh emails by reloading from database
-    console.log('🔄 Refreshing emails from database...');
-    await loadEmailsFromDatabase();
-    applyFilters();
-    updatePagination();
-    showAlert('success', 'Emails refreshed');
+    
+    try {
+        // Refresh emails by reloading from database
+        console.log('🔄 Refreshing emails from database...');
+        await loadEmailsFromDatabase();
+        applyFilters();
+        updatePagination();
+        showAlert('success', 'Emails refreshed');
+    } finally {
+        // Remove spinning animation from refresh button
+        if (refreshBtn) {
+            refreshBtn.classList.remove('refreshing');
+            refreshBtn.disabled = false;
+        }
+    }
 }
 
 async function fetchEmails() {
