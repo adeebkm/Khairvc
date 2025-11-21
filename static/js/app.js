@@ -844,8 +844,33 @@ document.addEventListener('DOMContentLoaded', async function() {
         const setupResponse = await fetch('/api/setup/status');
         const setupData = await setupResponse.json();
         if (setupData.success && setupData.setup_completed) {
+            // Load emails first and wait for classification to complete
+            console.log('📧 Setup complete, loading emails...');
+            await loadEmailsFromDatabase();
+            
+            // Wait a bit for any background classification to complete
+            if (allEmails.length > 0 && allEmails.length < 60) {
+                console.log(`⏳ Found ${allEmails.length} emails, waiting for more to classify...`);
+                let retryCount = 0;
+                const maxRetries = 10;
+                while (retryCount < maxRetries && allEmails.length < 60) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    await loadEmailsFromDatabase();
+                    if (allEmails.length >= 60) break;
+                    retryCount++;
+                }
+                console.log(`✅ Loaded ${allEmails.length} emails after waiting`);
+            }
+            
+            // Display emails if we have any
+            if (allEmails.length > 0) {
+                applyFilters();
+                updatePagination();
+            }
+            
             startBackgroundFetching();
             // Also start older email fetch silently in background
+            console.log('🔄 Starting older email fetch...');
             startFetchOlderEmailsSilently(200);
         }
     } catch (error) {
@@ -858,69 +883,72 @@ document.addEventListener('DOMContentLoaded', async function() {
     // ALWAYS verify database first before using cache
     // This ensures cache is cleared if database was reset
     try {
-        const verifyResponse = await fetch(`/api/emails?max=100&db_only=true`);
-        const verifyData = await verifyResponse.json();
+        // Load emails and wait for classification to complete
+        await loadEmailsFromDatabase();
         
-        if (verifyData.success) {
-            if (verifyData.emails && verifyData.emails.length > 0) {
-                // Database has emails - use them (they're fresh from database)
-                emailCache.data = verifyData.emails;
-                emailCache.timestamp = Date.now();
-                saveEmailCacheToStorage();
+        // If we have some emails but not many, wait a bit for classification to complete
+        if (allEmails.length > 0 && allEmails.length < 60) {
+            console.log(`⏳ Found ${allEmails.length} emails, waiting for more to classify...`);
+            let retryCount = 0;
+            const maxRetries = 10;
+            const initialCount = allEmails.length;
+            
+            while (retryCount < maxRetries && allEmails.length < 60) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                await loadEmailsFromDatabase();
                 
-                allEmails = verifyData.emails;
-                applyFilters();
-                
-                // Hide loading indicator since emails are loaded
-                const loadingEl = document.getElementById('loading');
-                if (loadingEl) {
-                    loadingEl.style.display = 'none';
-                }
-                const emptyStateInitial = document.getElementById('emptyStateInitial');
-                if (emptyStateInitial) {
-                    emptyStateInitial.style.display = 'none';
+                // If we got more emails, continue waiting
+                if (allEmails.length > initialCount) {
+                    console.log(`📧 Now have ${allEmails.length} emails...`);
+                    retryCount = 0; // Reset retry count if we're making progress
+                } else {
+                    retryCount++;
                 }
                 
-                const emailCountEl = document.getElementById('emailCount');
-                if (emailCountEl) {
-                    emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''}`;
-                }
-                console.log(`✅ Loaded ${verifyData.emails.length} emails from database`);
-            } else {
-                // Database is empty - clear any stale cache
-                console.log('⚠️  Database is empty. Clearing any stale cache...');
-                clearEmailCache();
-                allEmails = [];
-                applyFilters();
-                
-                // Show loading indicator instead of "Click Fetch" message
-                const loadingEl = document.getElementById('loading');
-                if (loadingEl) {
-                    loadingEl.style.display = 'flex';
-                }
-                const emailCountEl = document.getElementById('emailCount');
-                if (emailCountEl) {
-                    emailCountEl.textContent = 'Loading emails...';
-                }
+                // If we have 60+ emails, we're done
+                if (allEmails.length >= 60) break;
             }
+            console.log(`✅ Loaded ${allEmails.length} emails after waiting`);
+        }
+        
+        if (allEmails.length > 0) {
+            // Database has emails - use them (they're fresh from database)
+            emailCache.data = allEmails;
+            emailCache.timestamp = Date.now();
+            saveEmailCacheToStorage();
+            
+            applyFilters();
+            
+            // Hide loading indicator since emails are loaded
+            const loadingEl = document.getElementById('loading');
+            if (loadingEl) {
+                loadingEl.style.display = 'none';
+            }
+            const emptyStateInitial = document.getElementById('emptyStateInitial');
+            if (emptyStateInitial) {
+                emptyStateInitial.style.display = 'none';
+            }
+            
+            const emailCountEl = document.getElementById('emailCount');
+            if (emailCountEl) {
+                emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''}`;
+            }
+            console.log(`✅ Loaded ${allEmails.length} emails from database`);
         } else {
-            // Error fetching from database - try loading cache as fallback
-            loadEmailCacheFromStorage();
-            if (emailCache.data.length > 0 && emailCache.timestamp) {
-                const cacheAge = Date.now() - emailCache.timestamp;
-                const isFresh = cacheAge < emailCache.maxAge;
-                console.log(`Using cached emails (${emailCache.data.length} emails, cached ${Math.round(cacheAge / 1000)}s ago, ${isFresh ? 'fresh' : 'stale'})`);
-                allEmails = emailCache.data;
-                applyFilters();
-                const emailCountEl = document.getElementById('emailCount');
-                if (emailCountEl) {
-                    // Hide loading indicator if emails are loaded
-                    const loadingEl = document.getElementById('loading');
-                    if (loadingEl) {
-                        loadingEl.style.display = 'none';
-                    }
-                    emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''}${isFresh ? '' : ' (cached)'}`;
-                }
+            // Database is empty - clear any stale cache
+            console.log('⚠️  Database is empty. Clearing any stale cache...');
+            clearEmailCache();
+            allEmails = [];
+            applyFilters();
+            
+            // Show loading indicator instead of "Click Fetch" message
+            const loadingEl = document.getElementById('loading');
+            if (loadingEl) {
+                loadingEl.style.display = 'flex';
+            }
+            const emailCountEl = document.getElementById('emailCount');
+            if (emailCountEl) {
+                emailCountEl.textContent = 'Loading emails...';
             }
         }
     } catch (error) {
@@ -935,12 +963,12 @@ document.addEventListener('DOMContentLoaded', async function() {
             applyFilters();
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                    // Hide loading indicator if emails are loaded
-                    const loadingEl2 = document.getElementById('loading');
-                    if (loadingEl2) {
-                        loadingEl2.style.display = 'none';
-                    }
-                    emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''}${isFresh ? '' : ' (cached)'}`;
+                // Hide loading indicator if emails are loaded
+                const loadingEl2 = document.getElementById('loading');
+                if (loadingEl2) {
+                    loadingEl2.style.display = 'none';
+                }
+                emailCountEl.textContent = `${allEmails.length} email${allEmails.length !== 1 ? 's' : ''}${isFresh ? '' : ' (cached)'}`;
             }
         } else {
             const emailCountEl = document.getElementById('emailCount');
@@ -3513,12 +3541,15 @@ async function startFetchOlderEmailsSilently(maxEmails = 200) {
     try {
         const countResponse = await fetch('/api/emails/count');
         const countData = await countResponse.json();
+        console.log(`📊 Current email count: ${countData.count || 'unknown'}`);
         if (countData.success && countData.count >= 200) {
             console.log(`✅ Already have ${countData.count} emails (200+), skipping older email fetch`);
             return;
         }
+        console.log(`📧 Need more emails (have ${countData.count || 0}, target: 200), starting fetch...`);
     } catch (error) {
-        console.warn('Could not check email count:', error);
+        console.warn('⚠️ Could not check email count:', error);
+        // Continue anyway - might be a temporary error
     }
     
     try {
