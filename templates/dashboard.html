@@ -196,7 +196,9 @@
                     </div>
                 </div>
             </div>
-            {% elif not has_gmail %}
+            {% endif %}
+            
+            {% if not has_gmail and not needs_setup %}
             <!-- Gmail Connection Required -->
             <div class="gmail-connection-prompt">
                 <div class="gmail-connection-content">
@@ -209,9 +211,11 @@
                     </a>
                 </div>
             </div>
-            {% else %}
+            {% endif %}
+            
+            {% if has_gmail %}
             <!-- Compact Header Section -->
-            <div class="compact-header">
+            <div class="compact-header" {% if needs_setup %}style="display: none;"{% endif %}>
                 <!-- Gmail Status (Compact) - Removed, now in navbar -->
                 
                 <!-- Controls -->
@@ -226,9 +230,10 @@
                 <div class="spinner"></div>
                 <p style="color: var(--text-secondary); font-weight: 500;">Loading emails...</p>
             </div>
+            {% endif %}
 
-            <!-- Email List / Deal Flow List -->
-            <div id="contentArea">
+            <!-- Email List / Deal Flow List - Always render, but hide during setup -->
+            <div id="contentArea" {% if needs_setup %}style="display: none;"{% endif %}>
             <!-- Email List (for all tabs except Deal Flow) -->
             <div class="email-list" id="emailList">
                 <div class="empty-state" id="emptyStateInitial" style="display: none;">
@@ -265,7 +270,6 @@
                 </table>
             </div>
             </div>
-            {% endif %}
         </main>
     </div>
 
