@@ -214,11 +214,10 @@ async function startSetup() {
         // If setup is already complete (user has emails), skip to completion
         if (data.success && data.already_complete) {
             console.log(`✅ Setup already complete: ${data.email_count} emails found`);
-            if (progressBar) progressBar.style.width = '100%';
-            if (progressText) progressText.textContent = `Found ${data.email_count} existing emails!`;
-            // Wait a moment then proceed
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            // Mark as complete and load emails
+            if (progressBar) progressBar.style.width = '90%';
+            if (progressText) progressText.textContent = `Loading ${data.email_count} emails...`;
+            
+            // Mark as complete first
             await fetch('/api/setup/complete', { method: 'POST' });
             
             // Auto-setup Pub/Sub if enabled (test environment)
@@ -236,15 +235,48 @@ async function startSetup() {
                 console.warn('⚠️  Pub/Sub setup error (non-critical):', error);
             }
             
-            // Load emails and display
-            await loadEmailsFromDatabase();
+            // Wait a bit for any background classification to complete
+            await new Promise(resolve => setTimeout(resolve, 2000));
             
-            // Ensure emails are actually loaded before proceeding
-            if (allEmails.length === 0) {
-                console.warn('⚠️ No emails found even though setup says complete - retrying...');
-                await new Promise(resolve => setTimeout(resolve, 1000));
+            // Load emails and wait until we get the expected count (or timeout)
+            let retryCount = 0;
+            const maxRetries = 15; // 15 attempts = ~15 seconds max wait
+            const expectedCount = data.email_count || 60;
+            
+            while (retryCount < maxRetries) {
                 await loadEmailsFromDatabase();
+                
+                // If we have emails and they match expected count (or close), we're done
+                if (allEmails.length > 0 && allEmails.length >= Math.min(expectedCount, 60)) {
+                    console.log(`✅ Loaded ${allEmails.length} emails (expected ~${expectedCount})`);
+                    break;
+                }
+                
+                // If we have some emails but not enough, wait a bit more for classification
+                if (allEmails.length > 0 && allEmails.length < expectedCount) {
+                    console.log(`⏳ Loaded ${allEmails.length} emails, waiting for more to classify... (${retryCount + 1}/${maxRetries})`);
+                    if (progressText) progressText.textContent = `Loading ${allEmails.length} of ${expectedCount} emails...`;
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    retryCount++;
+                } else if (allEmails.length === 0) {
+                    // No emails yet, wait and retry
+                    console.log(`⏳ No emails yet, waiting... (${retryCount + 1}/${maxRetries})`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    retryCount++;
+                } else {
+                    // We have enough emails
+                    break;
+                }
             }
+            
+            if (allEmails.length === 0) {
+                console.warn('⚠️ No emails found even after waiting - showing empty state');
+            }
+            
+            // Show completion
+            if (progressBar) progressBar.style.width = '100%';
+            if (progressText) progressText.textContent = `Loaded ${allEmails.length} emails!`;
+            await new Promise(resolve => setTimeout(resolve, 500));
             
             // Hide setup screen FIRST
             if (setupScreen) setupScreen.style.display = 'none';
