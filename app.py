@@ -867,6 +867,22 @@ def check_workers_status():
             'message': 'Could not check worker status'
         }), 500
 
+@app.route('/api/emails/count')
+@login_required
+def get_email_count():
+    """Get total count of emails for the current user"""
+    try:
+        count = EmailClassification.query.filter_by(user_id=current_user.id).count()
+        return jsonify({
+            'success': True,
+            'count': count
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/emails/fetch-older', methods=['POST'])
 @login_required
 def trigger_fetch_older_emails():
@@ -890,6 +906,15 @@ def trigger_fetch_older_emails():
         from celery_config import celery
         from tasks import fetch_older_emails
         
+        # Check if we already have 200+ emails
+        email_count = EmailClassification.query.filter_by(user_id=current_user.id).count()
+        if email_count >= 200:
+            return jsonify({
+                'success': False,
+                'error': 'Already have 200+ emails',
+                'count': email_count
+            }), 200  # Return 200 to indicate success but no action needed
+        
         # Check if workers are running
         try:
             inspect = celery.control.inspect()
@@ -901,6 +926,26 @@ def trigger_fetch_older_emails():
                 }), 503
         except Exception as worker_check_error:
             print(f"⚠️  Could not check worker status: {worker_check_error}")
+        
+        # Check if there's already a running task for this user
+        try:
+            # Get all active tasks
+            inspect = celery.control.inspect()
+            active_tasks = inspect.active()
+            if active_tasks:
+                for worker, tasks in active_tasks.items():
+                    for task in tasks:
+                        # Check if it's a fetch_older_emails task for this user
+                        if task.get('name') == 'tasks.fetch_older_emails':
+                            task_args = task.get('args', [])
+                            if len(task_args) >= 1 and task_args[0] == current_user.id:
+                                return jsonify({
+                                    'success': False,
+                                    'error': 'Older email fetch already in progress',
+                                    'task_id': task.get('id')
+                                }), 409  # Conflict
+        except Exception as task_check_error:
+            print(f"⚠️  Could not check for existing tasks: {task_check_error}")
         
         # Get max emails (default 200, cap at 200)
         max_emails = min(request.json.get('max', 200), 200)

@@ -3471,18 +3471,18 @@ let olderEmailsSilentMode = false;
 
 // Silent mode: automatically fetch older emails without showing progress bar
 async function startFetchOlderEmailsSilently(maxEmails = 200) {
-    // Check if we already have a task running
+    // Check if we already have a task running (client-side check)
     if (olderEmailsTaskId) {
-        console.log('📧 Older email fetch already in progress, skipping...');
+        console.log('📧 Older email fetch already in progress (client-side), skipping...');
         return;
     }
     
     // Check if we already have enough emails (200+)
     try {
-        const response = await fetch('/api/emails?db_only=true&max=1');
-        const data = await response.json();
-        if (data.success && data.emails && data.emails.length >= 200) {
-            console.log('✅ Already have 200+ emails, skipping older email fetch');
+        const countResponse = await fetch('/api/emails/count');
+        const countData = await countResponse.json();
+        if (countData.success && countData.count >= 200) {
+            console.log(`✅ Already have ${countData.count} emails (200+), skipping older email fetch`);
             return;
         }
     } catch (error) {
@@ -3505,6 +3505,14 @@ async function startFetchOlderEmailsSilently(maxEmails = 200) {
             olderEmailsTaskId = data.task_id;
             console.log('📧 Started silent older email fetch (up to 200 emails)');
             // Don't show progress bar in silent mode, just poll quietly
+            startOlderEmailsPollingSilent();
+        } else if (response.status === 200 && data.error === 'Already have 200+ emails') {
+            // Already have enough emails - this is fine, just log it
+            console.log(`✅ Already have ${data.count || 200}+ emails, no fetch needed`);
+        } else if (response.status === 409 && data.error === 'Older email fetch already in progress') {
+            // Task already running on server - use that task ID
+            console.log('📧 Older email fetch already in progress on server, using existing task');
+            olderEmailsTaskId = data.task_id;
             startOlderEmailsPollingSilent();
         } else {
             console.warn('⚠️ Failed to start older email fetch:', data.error);
