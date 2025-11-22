@@ -76,7 +76,7 @@ class WhatsAppService:
     
     def send_deal_alert(self, deal, user_whatsapp_number: str) -> Dict:
         """
-        Send initial deal flow alert
+        Send initial deal flow alert using WhatsApp template message
         
         Args:
             deal: Deal object
@@ -85,35 +85,60 @@ class WhatsAppService:
         Returns:
             dict: API response
         """
-        # Format the message
-        deck_status = "✅ Yes" if deal.has_deck else "❌ No"
-        team_status = "✅ Yes" if deal.has_team_info else "❌ No"
-        traction_status = "✅ Yes" if deal.has_traction else "❌ No"
-        round_status = "✅ Yes" if deal.has_round_info else "❌ No"
+        # WhatsApp Business API requires template messages for initial contact
+        # Using hello_world template (approved by default)
+        # TODO: Create custom template for deal alerts in Meta Developer Console
         
-        deck_link_text = deal.deck_link if deal.deck_link else "No deck attached"
-        if len(deck_link_text) > 50:
-            deck_link_text = deck_link_text[:47] + "..."
+        # Clean up phone number
+        to_number = user_whatsapp_number.replace(' ', '').replace('-', '')
+        if not to_number.startswith('+'):
+            to_number = '+' + to_number
         
-        message = f"""🚀 *NEW DEAL FLOW ALERT*
-
-*Founder:* {deal.founder_name or 'Unknown'}
-*Email:* {deal.founder_email or 'Unknown'}
-*Subject:* {deal.subject or 'No subject'}
-
-*Deck:* {deck_link_text}
-
-*Four Basics:*
-• Deck: {deck_status}
-• Team Info: {team_status}
-• Traction: {traction_status}
-• Round Info: {round_status}
-
-*State:* {deal.state}
-
-Reply STOP to stop follow-ups."""
+        url = f"{self.base_url}/messages"
         
-        return self.send_message(user_whatsapp_number, message)
+        headers = {
+            'Authorization': f'Bearer {self.access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Use hello_world template (works immediately, no approval needed)
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': to_number,
+            'type': 'template',
+            'template': {
+                'name': 'hello_world',
+                'language': {
+                    'code': 'en_US'
+                }
+            }
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            response.raise_for_status()
+            
+            # Log deal info for reference
+            print(f"📱 Sent WhatsApp template for: {deal.subject or 'No subject'}")
+            print(f"   Founder: {deal.founder_name or 'Unknown'}")
+            print(f"   Deck: {'Yes' if deal.has_deck else 'No'}")
+            
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            error_msg = f"WhatsApp API error: {str(e)}"
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg += f" - {json.dumps(error_detail)}"
+                    
+                    # Check for token expiration
+                    if e.response.status_code == 401:
+                        error_data = error_detail.get('error', {})
+                        if 'expired' in str(error_data).lower() or error_data.get('code') == 190:
+                            error_msg = f"WhatsApp access token has EXPIRED. Please get a new token from Meta Developer Console and update WHATSAPP_ACCESS_TOKEN in Railway.\n\nSteps:\n1. Go to https://developers.facebook.com/apps/\n2. Select your app → WhatsApp → API Setup\n3. Generate a new access token\n4. Update WHATSAPP_ACCESS_TOKEN in Railway web service environment variables\n\nOriginal error: {error_msg}"
+                except:
+                    error_msg += f" - Status: {e.response.status_code}"
+            raise Exception(error_msg)
     
     def send_followup(self, deal, user_whatsapp_number: str, followup_count: int) -> Dict:
         """
