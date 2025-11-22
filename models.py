@@ -33,6 +33,10 @@ class User(UserMixin, db.Model):
     setup_completed = db.Column(db.Boolean, default=False)  # Track if first-time setup is complete
     initial_emails_fetched = db.Column(db.Integer, default=0)  # Track how many emails fetched during setup
     
+    # WhatsApp integration
+    whatsapp_number = db.Column(db.String(20))  # User's WhatsApp number (format: +1234567890)
+    whatsapp_enabled = db.Column(db.Boolean, default=False)  # Opt-in flag for WhatsApp alerts
+    
     # Relationship to user settings
     gmail_token = db.relationship('GmailToken', backref='user', uselist=False, cascade='all, delete-orphan')
     
@@ -180,6 +184,13 @@ class Deal(db.Model):
     state = db.Column(db.String(50), default='New')  # New, Ask-More, Routed
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # WhatsApp integration
+    whatsapp_alert_sent = db.Column(db.Boolean, default=False)  # Whether initial alert was sent
+    whatsapp_alert_sent_at = db.Column(db.DateTime)  # When alert was sent
+    whatsapp_followup_count = db.Column(db.Integer, default=0)  # Number of follow-ups sent
+    whatsapp_last_followup_at = db.Column(db.DateTime)  # Last follow-up timestamp
+    whatsapp_stopped = db.Column(db.Boolean, default=False)  # User can stop follow-ups
     
     # Portfolio matching and scoring
     founder_linkedin = db.Column(db.Text)  # LinkedIn URL

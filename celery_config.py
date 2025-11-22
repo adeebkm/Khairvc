@@ -34,7 +34,18 @@ celery.conf.worker_concurrency = 10
 celery.conf.task_routes = {
     'tasks.sync_user_emails': {'queue': 'email_sync'},
     'tasks.classify_email_task': {'queue': 'email_sync'},
+    'tasks.send_whatsapp_followups': {'queue': 'email_sync'},
 }
+
+# Periodic tasks (Celery Beat schedule)
+from celery.schedules import crontab
+celery.conf.beat_schedule = {
+    'send-whatsapp-followups': {
+        'task': 'tasks.send_whatsapp_followups',
+        'schedule': crontab(minute='*/30'),  # Every 30 minutes (checks if 6 hours passed)
+    },
+}
+celery.conf.timezone = 'UTC'
 
 # Task time limits
 celery.conf.task_time_limit = 600  # 10 minutes max per task

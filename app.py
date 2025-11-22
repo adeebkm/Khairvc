@@ -224,6 +224,80 @@ def run_lazy_migrations():
         except Exception:
             db.session.rollback()
         
+        # WhatsApp fields migration
+        try:
+            # User WhatsApp fields
+            whatsapp_user_result = db.session.execute(text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'users' 
+                AND column_name IN ('whatsapp_number', 'whatsapp_enabled')
+            """))
+            whatsapp_user_columns = [row[0] for row in whatsapp_user_result]
+            
+            if 'whatsapp_number' not in whatsapp_user_columns:
+                db.session.execute(text("""
+                    ALTER TABLE users 
+                    ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(20)
+                """))
+            if 'whatsapp_enabled' not in whatsapp_user_columns:
+                db.session.execute(text("""
+                    ALTER TABLE users 
+                    ADD COLUMN IF NOT EXISTS whatsapp_enabled BOOLEAN DEFAULT FALSE
+                """))
+            if 'whatsapp_number' not in whatsapp_user_columns or 'whatsapp_enabled' not in whatsapp_user_columns:
+                db.session.commit()
+                print("✅ WhatsApp user fields migration completed")
+            
+            # Deal WhatsApp fields
+            whatsapp_deal_result = db.session.execute(text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'deals' 
+                AND column_name IN ('whatsapp_alert_sent', 'whatsapp_alert_sent_at', 
+                                   'whatsapp_followup_count', 'whatsapp_last_followup_at', 'whatsapp_stopped')
+            """))
+            whatsapp_deal_columns = [row[0] for row in whatsapp_deal_result]
+            
+            needs_commit = False
+            if 'whatsapp_alert_sent' not in whatsapp_deal_columns:
+                db.session.execute(text("""
+                    ALTER TABLE deals 
+                    ADD COLUMN IF NOT EXISTS whatsapp_alert_sent BOOLEAN DEFAULT FALSE
+                """))
+                needs_commit = True
+            if 'whatsapp_alert_sent_at' not in whatsapp_deal_columns:
+                db.session.execute(text("""
+                    ALTER TABLE deals 
+                    ADD COLUMN IF NOT EXISTS whatsapp_alert_sent_at TIMESTAMP
+                """))
+                needs_commit = True
+            if 'whatsapp_followup_count' not in whatsapp_deal_columns:
+                db.session.execute(text("""
+                    ALTER TABLE deals 
+                    ADD COLUMN IF NOT EXISTS whatsapp_followup_count INTEGER DEFAULT 0
+                """))
+                needs_commit = True
+            if 'whatsapp_last_followup_at' not in whatsapp_deal_columns:
+                db.session.execute(text("""
+                    ALTER TABLE deals 
+                    ADD COLUMN IF NOT EXISTS whatsapp_last_followup_at TIMESTAMP
+                """))
+                needs_commit = True
+            if 'whatsapp_stopped' not in whatsapp_deal_columns:
+                db.session.execute(text("""
+                    ALTER TABLE deals 
+                    ADD COLUMN IF NOT EXISTS whatsapp_stopped BOOLEAN DEFAULT FALSE
+                """))
+                needs_commit = True
+            
+            if needs_commit:
+                db.session.commit()
+                print("✅ WhatsApp deal fields migration completed")
+        except Exception as e:
+            db.session.rollback()
+            print(f"⚠️  WhatsApp migration error: {e}")
+        
         # Pub/Sub migrations
         try:
             result = db.session.execute(text("""
@@ -3537,6 +3611,76 @@ def setup_pubsub():
             'error': str(e)
         }), 500
 
+
+# ==================== WHATSAPP WEBHOOK ====================
+
+@app.route('/webhook/whatsapp', methods=['GET', 'POST'])
+def whatsapp_webhook():
+    """
+    WhatsApp webhook endpoint for Meta Business Cloud API
+    Handles verification and incoming messages
+    """
+    if request.method == 'GET':
+        # Webhook verification (Meta requires this)
+        mode = request.args.get('hub.mode')
+        token = request.args.get('hub.verify_token')
+        challenge = request.args.get('hub.challenge')
+        
+        try:
+            from whatsapp_service import WhatsAppService
+            whatsapp = WhatsAppService()
+            verified = whatsapp.verify_webhook(mode, token, challenge)
+            
+            if verified:
+                print("✅ WhatsApp webhook verified")
+                return challenge, 200
+            else:
+                print("❌ WhatsApp webhook verification failed")
+                return 'Forbidden', 403
+        except Exception as e:
+            print(f"❌ WhatsApp webhook verification error: {str(e)}")
+            return 'Error', 500
+    
+    elif request.method == 'POST':
+        # Handle incoming messages
+        try:
+            from whatsapp_service import WhatsAppService
+            whatsapp = WhatsAppService()
+            result = whatsapp.handle_incoming_message(request.json)
+            print(f"📱 WhatsApp message processed: {result}")
+            return jsonify({'status': 'ok'}), 200
+        except Exception as e:
+            print(f"❌ Error processing WhatsApp message: {str(e)}")
+            return jsonify({'status': 'error', 'error': str(e)}), 500
+
+@app.route('/api/whatsapp/settings', methods=['GET', 'POST'])
+@login_required
+def whatsapp_settings():
+    """Get or update user WhatsApp settings"""
+    if request.method == 'GET':
+        return jsonify({
+            'success': True,
+            'whatsapp_enabled': current_user.whatsapp_enabled or False,
+            'whatsapp_number': current_user.whatsapp_number or ''
+        })
+    
+    elif request.method == 'POST':
+        data = request.json
+        current_user.whatsapp_enabled = data.get('enabled', False)
+        current_user.whatsapp_number = data.get('number', '').strip()
+        
+        # Validate phone number format (basic check)
+        if current_user.whatsapp_number and not current_user.whatsapp_number.startswith('+'):
+            return jsonify({
+                'success': False,
+                'error': 'Phone number must start with + (e.g., +1234567890)'
+            }), 400
+        
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'message': 'WhatsApp settings updated'
+        })
 
 if __name__ == '__main__':
     print("=" * 60)

@@ -4,6 +4,7 @@ Background tasks for email processing
 import os
 import sys
 import json
+from datetime import datetime, timedelta
 from celery import current_task
 from celery_config import celery
 
@@ -438,7 +439,34 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                         for commit_attempt in range(max_commit_retries):
                             try:
                                 db.session.commit()
+                                # Send WhatsApp alert if enabled
+                                try:
+                                    from whatsapp_service import WhatsAppService
+                                    user = User.query.get(user_id)
+                                    
+                                    if user and user.whatsapp_enabled and user.whatsapp_number:
+                                        whatsapp = WhatsAppService()
+                                        whatsapp.send_deal_alert(deal, user.whatsapp_number)
+                                        deal.whatsapp_alert_sent = True
+                                        deal.whatsapp_alert_sent_at = datetime.utcnow()
+                                        db.session.commit()
+                                        print(f"✅ [TASK] WhatsApp alert sent for deal {deal.id}")
+                                except Exception as whatsapp_error:
+                                    print(f"⚠️  [TASK] WhatsApp alert failed for deal {deal.id}: {str(whatsapp_error)}")
+                                    # Don't fail the whole task if WhatsApp fails
                                 break
+                            except Exception as commit_error:
+                                if 'EOF' in str(commit_error) or 'SSL SYSCALL' in str(commit_error) or 'connection' in str(commit_error).lower():
+                                    if commit_attempt < max_commit_retries - 1:
+                                        db.session.rollback()
+                                        import time
+                                        time.sleep(0.5)
+                                        db.session.add(deal)
+                                        continue
+                                    else:
+                                        raise
+                                else:
+                                    raise
                             except Exception as commit_error:
                                 if 'EOF' in str(commit_error) or 'SSL SYSCALL' in str(commit_error) or 'connection' in str(commit_error).lower():
                                     if commit_attempt < max_commit_retries - 1:
@@ -786,3 +814,75 @@ def fetch_older_emails(self, user_id, max_emails=200):
         traceback.print_exc()
         return {'status': 'error', 'error': error_msg}
 
+
+
+@celery.task(name='tasks.send_whatsapp_followups')
+def send_whatsapp_followups():
+    """
+    Send follow-up WhatsApp messages for deals every 6 hours
+    Runs periodically via Celery Beat
+    """
+    try:
+        from app import app
+        from models import db, Deal, User
+        from whatsapp_service import WhatsAppService
+        
+        with app.app_context():
+            whatsapp = WhatsAppService()
+            six_hours_ago = datetime.utcnow() - timedelta(hours=6)
+            
+            # Find deals that need follow-ups:
+            # 1. Alert was sent
+            # 2. Last follow-up was >6 hours ago (or never)
+            # 3. Deal state is still "New" or "Ask-More"
+            # 4. User hasn't stopped follow-ups
+            deals = Deal.query.filter(
+                Deal.whatsapp_alert_sent == True,
+                Deal.whatsapp_stopped == False,
+                Deal.state.in_(['New', 'Ask-More']),
+                (
+                    (Deal.whatsapp_last_followup_at == None) |
+                    (Deal.whatsapp_last_followup_at < six_hours_ago)
+                )
+            ).all()
+            
+            print(f"📱 [WHATSAPP] Checking {len(deals)} deals for follow-ups...")
+            
+            followups_sent = 0
+            errors = []
+            
+            for deal in deals:
+                try:
+                    user = User.query.get(deal.user_id)
+                    if not user or not user.whatsapp_enabled or not user.whatsapp_number:
+                        continue
+                    
+                    deal.whatsapp_followup_count += 1
+                    deal.whatsapp_last_followup_at = datetime.utcnow()
+                    
+                    whatsapp.send_followup(deal, user.whatsapp_number, deal.whatsapp_followup_count)
+                    
+                    db.session.commit()
+                    followups_sent += 1
+                    print(f"✅ [WHATSAPP] Follow-up #{deal.whatsapp_followup_count} sent for deal {deal.id}")
+                    
+                except Exception as e:
+                    error_msg = f"Error sending follow-up for deal {deal.id}: {str(e)}"
+                    errors.append(error_msg)
+                    print(f"⚠️  [WHATSAPP] {error_msg}")
+                    db.session.rollback()
+                    continue
+            
+            print(f"📱 [WHATSAPP] Follow-up task complete: {followups_sent} sent, {len(errors)} errors")
+            return {
+                'status': 'complete',
+                'followups_sent': followups_sent,
+                'errors': errors[:10]
+            }
+            
+    except Exception as e:
+        error_msg = f"WhatsApp follow-up task failed: {str(e)}"
+        print(f"❌ [WHATSAPP] {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return {'status': 'error', 'error': error_msg}
