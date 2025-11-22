@@ -3436,10 +3436,12 @@ def pubsub_webhook():
     Receives notifications when new emails arrive, reducing API polling.
     """
     print("=" * 60)
-    print("📬 Pub/Sub Webhook Called")
+    print("📬 [PUB/SUB] Webhook Called")
     print(f"   Method: {request.method}")
+    print(f"   URL: {request.url}")
     print(f"   Headers: {dict(request.headers)}")
     print(f"   Content-Type: {request.content_type}")
+    print(f"   Remote Addr: {request.remote_addr}")
     print("=" * 60)
     
     try:
@@ -3492,10 +3494,35 @@ def pubsub_webhook():
         
         print(f"📬 Pub/Sub notification received for {email_address}, historyId: {history_id}")
         
-        # Find user by email address
+        # Find user by Gmail email address
+        # Pub/Sub sends the Gmail email, which might be different from User.email
+        # We need to find the user by checking their Gmail profile
+        user = None
+        
+        # First, try to find by User.email (in case they match)
         user = User.query.filter_by(email=email_address).first()
+        
+        # If not found, search all users with Gmail tokens and check their Gmail profile
         if not user:
-            print(f"⚠️  User not found for email: {email_address}")
+            print(f"🔍 User.email doesn't match {email_address}, searching by Gmail profile...")
+            users_with_gmail = User.query.join(GmailToken).all()
+            
+            for u in users_with_gmail:
+                try:
+                    gmail = get_user_gmail_client(u)
+                    if gmail:
+                        profile = gmail.get_profile()
+                        if profile and profile.get('emailAddress') == email_address:
+                            user = u
+                            print(f"✅ Found user {u.id} by Gmail profile: {email_address}")
+                            break
+                except Exception as e:
+                    print(f"⚠️  Error checking Gmail profile for user {u.id}: {str(e)}")
+                    continue
+        
+        if not user:
+            print(f"⚠️  User not found for Gmail email: {email_address}")
+            print(f"   Searched {len(users_with_gmail) if 'users_with_gmail' in locals() else 0} users with Gmail tokens")
             return jsonify({'status': 'user_not_found'}), 200
         
         # Get Gmail client for this user
@@ -3511,22 +3538,26 @@ def pubsub_webhook():
         
         # Trigger email sync in background (if Celery is available)
         # Use incremental sync - the task will use the updated history_id from database
+        # NO email count restrictions - Pub/Sub works for all users regardless of email count
         if CELERY_AVAILABLE:
             try:
                 from tasks import sync_user_emails
                 # Use incremental sync (force_full_sync=False) - it will use history_id from database
+                # This will fetch ALL new emails since last history_id (no 200 limit)
                 task = sync_user_emails.delay(
                     user_id=user.id,
                     max_emails=200,  # This will be ignored for incremental sync
                     force_full_sync=False  # Use incremental sync with history_id from database
                 )
-                print(f"✅ Background sync task queued: {task.id} (incremental sync from historyId: {history_id})")
+                print(f"✅ [PUB/SUB] Background sync task queued: {task.id}")
+                print(f"   User: {user.id}, Gmail: {email_address}, HistoryId: {history_id}")
+                print(f"   Using incremental sync (no email count restrictions)")
             except Exception as e:
-                print(f"⚠️  Could not queue background task: {str(e)}")
+                print(f"❌ [PUB/SUB] Could not queue background task: {str(e)}")
                 import traceback
                 traceback.print_exc()
         else:
-            print("⚠️  Celery not available - sync not triggered automatically")
+            print("⚠️  [PUB/SUB] Celery not available - sync not triggered automatically")
         
         return jsonify({
             'status': 'success',
