@@ -278,15 +278,42 @@ class GmailClient:
             
             print(f"📧 Full sync: Fetching up to {max_results} emails...")
             
-            # First API call: Get list of message IDs
-            results = self.service.users().messages().list(
-                userId='me',
-                q=query,
-                maxResults=max_results
-            ).execute()
+            # Gmail API pagination: messages().list() may return fewer than maxResults
+            # We need to paginate to get all requested emails
+            all_message_ids = []
+            page_token = None
+            history_id = None
             
-            messages = results.get('messages', [])
-            history_id = results.get('historyId')  # Store this for next incremental sync!
+            while len(all_message_ids) < max_results:
+                # Build request parameters
+                request_params = {
+                    'userId': 'me',
+                    'q': query,
+                    'maxResults': min(max_results - len(all_message_ids), 500)  # Gmail max is 500 per page
+                }
+                if page_token:
+                    request_params['pageToken'] = page_token
+                
+                # Get list of message IDs (with pagination)
+                results = self.service.users().messages().list(**request_params).execute()
+                
+                page_messages = results.get('messages', [])
+                if not history_id:
+                    history_id = results.get('historyId')  # Store this for next incremental sync!
+                
+                if not page_messages:
+                    break  # No more messages
+                
+                all_message_ids.extend([msg['id'] for msg in page_messages])
+                
+                # Check if there are more pages
+                page_token = results.get('nextPageToken')
+                if not page_token:
+                    break  # No more pages
+                
+                print(f"📄 Fetched {len(page_messages)} message IDs (total: {len(all_message_ids)}/{max_results})")
+            
+            messages = [{'id': msg_id} for msg_id in all_message_ids[:max_results]]  # Limit to max_results
             
             if not messages:
                 return [], history_id

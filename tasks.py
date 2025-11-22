@@ -108,11 +108,34 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
             )
             
             # Fetch emails from Gmail
+            print(f"📧 [TASK] Fetching emails: max_emails={max_emails}, force_full_sync={force_full_sync}, start_history_id={start_history_id}")
             emails, new_history_id = gmail.get_emails(
                 max_results=max_emails,
                 unread_only=False,
                 start_history_id=start_history_id
             )
+            print(f"📧 [TASK] Fetched {len(emails)} emails from Gmail (target: {max_emails})")
+            
+            # Deduplicate emails by message_id to prevent processing the same email multiple times
+            original_count = len(emails) if emails else 0
+            if emails:
+                seen_message_ids = set()
+                deduplicated_emails = []
+                duplicates_in_batch = 0
+                for email in emails:
+                    message_id = email.get('id', '')
+                    if message_id and message_id not in seen_message_ids:
+                        seen_message_ids.add(message_id)
+                        deduplicated_emails.append(email)
+                    else:
+                        duplicates_in_batch += 1
+                        if duplicates_in_batch <= 5:  # Log first 5 duplicates
+                            print(f"⏭️  Skipping duplicate email in batch: {message_id[:16]}...")
+                emails = deduplicated_emails
+                if duplicates_in_batch > 0:
+                    print(f"📊 [TASK] Deduplicated emails: {len(emails)} unique out of {original_count} total (removed {duplicates_in_batch} duplicates)")
+            
+            print(f"📦 [TASK] Emails ready for processing: {len(emails)} emails (stored in memory, not yet in database)")
             
             if not emails:
                 # Update history_id even if no new emails
@@ -176,48 +199,32 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
             # Process emails
             emails_processed = 0
             emails_classified = 0
+            emails_skipped_duplicate = 0
+            emails_failed_classification = 0
+            emails_failed_commit = 0
             errors = []
             
             import time  # For rate limiting delays
             
+            print(f"📧 [TASK] Starting classification loop: {len(emails)} emails to process")
+            print(f"📊 [TASK] Initial state: emails_fetched={len(emails)}, target={max_emails}")
+            
             for idx, email in enumerate(emails):
                 try:
-                    # Update progress
-                    self.update_state(
-                        state='PROGRESS',
-                        meta={
-                            'status': 'classifying',
-                            'progress': idx + 1,
-                            'total': len(emails),
-                            'current_email': email.get('subject', 'No Subject')[:50]
-                        }
-                    )
-                    
-                    # Check if already classified (with retry on connection errors)
-                    max_retries = 3
-                    existing = None
-                    for attempt in range(max_retries):
-                        try:
-                            existing = EmailClassification.query.filter_by(
-                                user_id=user_id,
-                                thread_id=email.get('thread_id', '')
-                            ).first()
-                            break
-                        except Exception as db_error:
-                            if 'EOF' in str(db_error) or 'SSL SYSCALL' in str(db_error) or 'connection' in str(db_error).lower():
-                                if attempt < max_retries - 1:
-                                    db.session.rollback()
-                                    import time
-                                    time.sleep(0.5)
-                                    continue
-                                else:
-                                    raise
-                            else:
-                                raise
-                    
-                    if existing:
-                        emails_processed += 1
-                        continue
+                    # Update progress every 10 emails
+                    if (idx + 1) % 10 == 0 or idx == 0:
+                        self.update_state(
+                            state='PROGRESS',
+                            meta={
+                                'status': 'classifying',
+                                'progress': idx + 1,
+                                'total': len(emails),
+                                'fetched': len(emails),
+                                'classified': emails_classified,
+                                'current_email': email.get('subject', 'No Subject')[:50]
+                            }
+                        )
+                        print(f"📧 [TASK] Progress: {idx + 1}/{len(emails)} emails processed, {emails_classified} classified, {emails_skipped_duplicate} skipped (duplicate)")
                     
                     # Extract email data
                     headers = email.get('headers', {})
@@ -238,20 +245,31 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                     ).first()
                     
                     if existing_classification:
-                        print(f"⏭️  Email {email.get('id', '')} already exists, skipping...")
                         emails_processed += 1
+                        emails_skipped_duplicate += 1
+                        if (idx + 1) % 10 == 0 or emails_skipped_duplicate <= 5:  # Log first 5 and every 10th
+                            print(f"⏭️  [TASK] Email {idx + 1}/{len(emails)}: Skipped (duplicate by message_id: {email.get('id', 'unknown')[:16]}...) - Total skipped: {emails_skipped_duplicate}")
                         continue  # Skip this email entirely
                     
                     # Classify email (with rate limiting)
-                    with CLASSIFICATION_SEMAPHORE:
-                        classification_result = classifier.classify_email(
-                            subject=email.get('subject', ''),
-                            body=email_body,
-                            headers=headers,
-                            sender=email.get('from', ''),
-                            thread_id=email.get('thread_id', ''),
-                            user_id=str(user_id)
-                        )
+                    try:
+                        with CLASSIFICATION_SEMAPHORE:
+                            print(f"🤖 [TASK] Email {idx + 1}/{len(emails)}: Classifying (message_id: {email.get('id', 'unknown')[:16]}...)")
+                            classification_result = classifier.classify_email(
+                                subject=email.get('subject', ''),
+                                body=email_body,
+                                headers=headers,
+                                sender=email.get('from', ''),
+                                thread_id=email.get('thread_id', ''),
+                                user_id=str(user_id)
+                            )
+                            print(f"✅ [TASK] Email {idx + 1}/{len(emails)}: Classified as {classification_result.get('category', 'UNKNOWN')}")
+                    except Exception as classify_error:
+                        emails_failed_classification += 1
+                        error_msg = f"Error classifying email {idx + 1}: {str(classify_error)}"
+                        errors.append(error_msg)
+                        print(f"❌ [TASK] {error_msg}")
+                        continue  # Skip this email if classification fails
                     
                     # Add delay between classifications to avoid rate limits
                     # 1 second delay for background fetches (silent, can take time)
@@ -300,24 +318,40 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                             # Handle duplicate key errors (unique constraint violation)
                             elif 'UniqueViolation' in error_str or 'duplicate key' in error_str.lower() or 'uq_user_message' in error_str:
                                 db.session.rollback()
+                                # Expire the object to clear it from session
+                                try:
+                                    db.session.expunge(new_classification)
+                                except:
+                                    pass
                                 print(f"⏭️  Email {email.get('id', '')} was inserted by another process, skipping...")
                                 duplicate_detected = True
                                 break  # Skip this email, continue to next
                             else:
                                 db.session.rollback()
+                                # Expire the object to clear it from session
+                                try:
+                                    db.session.expunge(new_classification)
+                                except:
+                                    pass
                                 raise
                     
                     if duplicate_detected:
                         emails_processed += 1
+                        emails_skipped_duplicate += 1
+                        print(f"⏭️  [TASK] Email {idx + 1}/{len(emails)}: Duplicate detected during commit, skipped")
                         continue  # Skip to next email
                     
                     if not commit_success:
                         # Commit failed for other reasons, skip this email
                         emails_processed += 1
+                        emails_failed_commit += 1
+                        print(f"❌ [TASK] Email {idx + 1}/{len(emails)}: Commit failed, skipped")
                         continue
                     
                     emails_processed += 1
                     emails_classified += 1
+                    if (idx + 1) % 10 == 0 or emails_classified <= 5:  # Log first 5 and every 10th
+                        print(f"✅ [TASK] Email {idx + 1}/{len(emails)}: Successfully classified and saved - Total classified: {emails_classified}")
                     
                     # Deal Flow specific processing
                     if classification_result['category'] == CATEGORY_DEAL_FLOW:
@@ -383,7 +417,10 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                 except Exception as e:
                     error_msg = f"Error processing email {idx + 1}: {str(e)}"
                     errors.append(error_msg)
-                    print(f"⚠️  {error_msg}")
+                    emails_processed += 1
+                    print(f"❌ [TASK] {error_msg}")
+                    import traceback
+                    traceback.print_exc()
                     continue
             
             # Update history_id
@@ -413,11 +450,23 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                         else:
                             raise
             
-            # Return results
+            # Return results with detailed breakdown
+            print(f"📊 [TASK] Classification complete:")
+            print(f"   - Emails fetched from Gmail: {len(emails)}")
+            print(f"   - Emails processed: {emails_processed}")
+            print(f"   - Emails classified: {emails_classified}")
+            print(f"   - Emails skipped (duplicate by message_id): {emails_skipped_duplicate}")
+            print(f"   - Emails failed classification: {emails_failed_classification}")
+            print(f"   - Emails failed commit: {emails_failed_commit}")
+            print(f"   - Total errors: {len(errors)}")
+            
             result = {
                 'status': 'complete',
                 'emails_processed': emails_processed,
                 'emails_classified': emails_classified,
+                'emails_skipped_duplicate': emails_skipped_duplicate,
+                'emails_failed_classification': emails_failed_classification,
+                'emails_failed_commit': emails_failed_commit,
                 'total_fetched': len(emails),
                 'errors': errors[:10]  # Limit error list
             }
@@ -639,11 +688,21 @@ def fetch_older_emails(self, user_id, max_emails=200):
                             # Handle duplicate key errors (unique constraint violation)
                             elif 'UniqueViolation' in error_str or 'duplicate key' in error_str.lower() or 'uq_user_message' in error_str:
                                 db.session.rollback()
+                                # Expire the object to clear it from session
+                                try:
+                                    db.session.expunge(new_classification)
+                                except:
+                                    pass
                                 print(f"⏭️  Email {email.get('id', '')} was inserted by another process, skipping...")
                                 duplicate_detected = True
                                 break  # Skip this email, continue to next
                             else:
                                 db.session.rollback()
+                                # Expire the object to clear it from session
+                                try:
+                                    db.session.expunge(new_classification)
+                                except:
+                                    pass
                                 raise
                     
                     if duplicate_detected:
