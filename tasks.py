@@ -520,12 +520,25 @@ def fetch_older_emails(self, user_id, max_emails=200):
             # Get existing message IDs to skip duplicates
             existing_classifications = EmailClassification.query.filter_by(user_id=user_id).all()
             existing_message_ids = {c.message_id for c in existing_classifications}
-            print(f"📊 Found {len(existing_message_ids)} existing emails in database, will skip duplicates")
+            existing_count = len(existing_message_ids)
+            print(f"📊 Found {existing_count} existing emails in database, will skip duplicates")
             
-            # Fetch older emails slowly (skip existing ones)
-            print(f"📧 Starting to fetch older emails for user {user_id} (target: {max_emails})...")
+            # Calculate how many more emails we need to reach max_emails total
+            # If we already have 60 and want 200 total, we need 140 more
+            needed_count = max(0, max_emails - existing_count)
+            
+            if needed_count == 0:
+                print(f"✅ Already have {existing_count} emails (>= {max_emails}), no need to fetch more")
+                return {
+                    'status': 'complete',
+                    'emails_fetched': 0,
+                    'emails_classified': 0,
+                    'message': f'Already have {existing_count} emails (target: {max_emails})'
+                }
+            
+            print(f"📧 Starting to fetch older emails for user {user_id}: have {existing_count}, need {needed_count} more to reach {max_emails} total...")
             emails, next_page_token, total_fetched = gmail.get_older_emails(
-                max_results=max_emails,
+                max_results=needed_count,  # Fetch only the needed amount
                 progress_callback=progress_callback,
                 skip_existing_ids=existing_message_ids
             )
