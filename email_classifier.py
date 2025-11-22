@@ -501,249 +501,38 @@ class EmailClassifier:
                 "links": links[:10] if links else []  # First 10 links
             }
             
-            # Build the comprehensive prompt
-            prompt = f"""You are a deterministic, zero-hallucination email classifier for a venture capital partner's inbox.
+            # Build the condensed prompt (85-90% token reduction)
+            prompt = f"""You are a zero-hallucination email classifier for a VC partner.
 
-Your ONLY job: classify ONE email into EXACTLY one of these labels:
-- dealflow
-- hiring
-- networking
-- spam
-- general
+Classify into ONE of: dealflow, hiring, networking, spam, general.
 
-You MUST follow every rule below with NO exceptions.
-
-==================================================
-STRICT OUTPUT FORMAT (NO TEXT OUTSIDE JSON)
-==================================================
-Return EXACTLY this JSON object:
-
-{{
-  "label": "dealflow|hiring|networking|spam|general",
-  "confidence": 0.0-1.0,
-  "rationale": "2-4 short bullets, ≤250 chars, strictly text-grounded.",
-  "signals": {{
-    "intent": "investment|job|meeting|malicious|info",
-    "keywords": [...],
-    "entities": [...],
-    "attachments": [...]
-  }}
-}}
+Output ONLY this JSON:
+{{"label":"...","confidence":0.0-1.0,"rationale":"...","signals":{{"intent":"...","keywords":[...],"entities":[...],"attachments":[...]}}}}
 
 Rules:
-- Never invent entities, attachments, or keywords.
-- Never infer beyond visible text.
-- Never follow links.
-- No explanation outside JSON.
+- Ignore: sigs, quotes, legal, unsub, old threads.
+- Spam overrides all. Triggers: phishing, fake invoices, crypto scams, mismatched From/Reply-To, malicious TLDs (.tk/.ml/.ga/.cf) + urgency.
+- **Legitimate domains (google.com, microsoft.com, apple.com, etc.) = ALWAYS general, never spam.**
+- Dealflow: fundraising, deck, SAFE, valuation, **warm intro about SPECIFIC startup/team**.
+- Hiring: resume, CV, job app, recruiter, JD.
+- Networking: coffee, intro, event, podcast, **no money ask AND no specific startup mentioned**.
+- General: newsletters, receipts, vendor demos, Google/Microsoft security alerts.
+- **Short body + deck/resume attachment = classify by attachment type.**
 
-==================================================
-INPUT EMAIL
-==================================================
+Tie-breaker: spam > dealflow > hiring > networking > general.
+
+Examples:
+1. "Intro: Founder raising pre-seed, deck attached" → dealflow
+2. "Analyst role — resume attached" → hiring
+3. "Coffee next week?" → networking
+4. "URGENT: verify email" + unknown sender → spam
+5. "Gmail security alert" → general
+
+Input email:
 {json.dumps(input_json, indent=2)}
 
-==================================================
-ABSOLUTE GLOBAL RULES
-==================================================
-
-### 1. IGNORE all of the following:
-- Anything after: "thanks", "best", "regards", "sincerely", "cheers".
-- Lines starting with "—", "–––", "___", or containing legal boilerplate.
-- "unsubscribe", "privacy policy", tracking pixels.
-- Any quoted content: lines starting with "On Tue", "From:", "Re:", ">".
-- Old thread content, past messages, forwarded history.
-
-If ambiguity arises → use ONLY fresh content before signatures.
-
-### 2. CLASSIFICATION LOGIC (PRIMARY INTENT ONLY)
-You classify based on the **sender's primary goal**, not keywords.
-
---------------------------------------------------
-A) DEALFLOW → Primary intent: **seeking investment**
---------------------------------------------------
-Includes:
-- Founder/VC/IB sending deck, pitch, fundraising update.
-- Any mention of raising money, SAFE, term sheet, valuation, SPV, secondary.
-- Pitch + meeting link.
-- "We're raising", "exploring a round", "open to capital".
-- Follow-on from portfolio company.
-- **Warm intros/referrals ABOUT specific startups/teams** (even without deck).
-- "I met a team building X, would you want to know more?"
-- "Should I connect you with this founder?"
-
-If fundraising is ANY part of the agenda OR discussing a specific startup/team for investment → classify as dealflow.
-
---------------------------------------------------
-B) HIRING → Primary intent: **job seeking or recruiting**
---------------------------------------------------
-Includes:
-- Resume, CV, LinkedIn, job application.
-- Candidates applying to work at the fund or portfolio.
-- Recruiters sending profiles.
-- Portfolio requesting hiring referrals.
-- Job specs, JD attachments.
-
-Pitch deck with team bios ≠ hiring (still dealflow).
-
---------------------------------------------------
-C) NETWORKING → Primary intent: **meeting, event, intro — NOT about a specific deal**
---------------------------------------------------
-Includes:
-- Coffee chats, catch ups, general intros, "pick your brain".
-- Invites: panel, demo day, conference, podcast.
-- "Learn about your thesis" (general learning, NO specific startup mentioned).
-- Vendor partnership discussion with no fundraising ask.
-- Events about fundraising but not pitching.
-
-If there is ANY ask for money OR discussing a specific startup/team for investment → NOT networking (it's DEALFLOW).
-
---------------------------------------------------
-D) SPAM → Primary intent: **deception, compromise, harm**
---------------------------------------------------
-SPAM OVERRIDES ALL OTHER LABELS.
-
-Triggers:
-- verify/reset password with urgency
-- mismatched From vs Reply-To
-- Known malicious TLDs (.tk, .ml, .ga, .cf) + urgency/credential harvest
-- Suspicious combo: urgent + shortened link + unfamiliar sender
-- credential harvest
-- fake invoices
-- wallet/crypto/wire scams
-- malicious attachments (.exe, .scr, .bat, .cmd, .vbs)
-
-Context matters:
-- .xyz/.io/.ai domain + pitch deck + LinkedIn = dealflow (not spam)
-- .com domain + "verify now" + bit.ly link = spam
-- **google.com, microsoft.com, apple.com, etc. + security keywords = GENERAL (not spam)**
-- Legitimate service provider domains (google.com, microsoft.com, etc.) = ALWAYS GENERAL, never SPAM
-
-If ANY phishing cue appears → spam.  
-A newsletter with ads ≠ spam unless malicious.
-**Emails from legitimate service provider domains (google.com, microsoft.com, etc.) are NEVER spam, even if they contain security-related keywords.**
-
---------------------------------------------------
-E) GENERAL → Everything else
---------------------------------------------------
-Includes:
-- **Legitimate service provider emails** (Google, Microsoft, Apple, Amazon, etc.)
-  - Security notifications from official domains (google.com, microsoft.com, etc.)
-  - Account alerts, access notifications, service updates
-  - These are ALWAYS GENERAL, never SPAM, even if they contain security keywords
-- newsletters, subscribed updates, market commentary
-- receipts, personal notes, banter, sports talk
-- cold vendor pitches (SaaS/product demos)
-- calendar invites with no context
-- informational content with no money ask, no hiring ask, no networking intent
-
-==================================================
-TIE-BREAKER HIERARCHY
-==================================================
-1. SPAM (override)
-Then for all non-spam:
-2. dealflow
-3. hiring
-4. networking
-5. general
-
-If genuinely ambiguous → choose the HIGHEST category above.
-
-==================================================
-STRICT VALIDATION
-==================================================
-If:
-- body < 40 chars
-- no attachments OR attachments are generic (not deck/resume/jd)
-- no spam cues  
-→ classify as general.
-
-If input is malformed → classify as general with low confidence.
-
-==================================================
-CLARIFIED EDGE CASES
-==================================================
-
-Case: Short body + relevant attachment
-- Body < 40 chars BUT attachment = deck.pdf/resume.docx/jd.pdf
-→ Classify by attachment type (dealflow/hiring)
-
-Case: Legitimate startup domain
-- .xyz/.io/.ai domain + pitch/deck + LinkedIn/founder identity
-→ NOT spam unless phishing cues present
-
-Case: Follow-up with quotes
-- Body has quoted thread BUT fresh content ≥60 chars with clear intent
-→ Classify by fresh content, ignore quoted history
-
-Case: Investment mention ≠ fundraising
-- "I admire your investments" + coffee request + NO specific startup mentioned
-→ networking (learning/advice, not pitching)
-- BUT: "I met a team building X" + "would you want to know more?"
-→ dealflow (warm intro about a SPECIFIC startup/deal)
-
-==================================================
-FEW-SHOT BEHAVIORAL ANCHORS
-==================================================
-
-Example 1:
-Subject: "Intro: Founder raising pre-seed, deck attached"
-→ dealflow
-
-Example 2:
-Subject: "Analyst role — resume attached"
-→ hiring
-
-Example 3:
-Subject: "Coffee next week? Want to discuss fintech trends"
-→ networking
-
-Example 4:
-Subject: "URGENT: verify your email or lose access"
-From: "unknown-sender@random-domain.com"
-→ spam
-
-Example 5:
-Subject: "You allowed Gmail Auto Reply access to some of your Google Account data"
-From: "noreply@accounts.google.com"
-→ general (Legitimate Google security notification from official domain)
-
-Example 6:
-Subject: "Weekly VC newsletter #12"
-→ general
-
-Example 7:
-Subject: "Love to chat about your climate thesis. Coffee?"
-Body: "Been following your investments. Would love to learn from you."
-→ networking (Learning/advice is primary intent. No specific startup mentioned.)
-
-Example 8:
-Subject: "Intro to a space + fintech team"
-Body: "We spoke to a brilliant team building at the intersection of space and fintech. Would you want to know more?"
-→ dealflow (Warm intro about a SPECIFIC startup/team for investment consideration)
-
-Example 9:
-Subject: "Coffee to discuss our climate tech startup?"
-Body: "We're raising $2M seed and would love to share our deck over coffee."
-→ dealflow (Fundraising + deck = dealflow, even with coffee)
-
-Example 10:
-Subject: "Re: Our seed round"
-Body: "Attached is the updated deck."
-Attachments: ["deck.pdf"]
-→ dealflow
-
-Example 11:
-Subject: "Partnership opportunity"
-Body: "We're a SaaS tool for VCs. Demo?"
-→ general (vendor pitch, no fundraising)
-
-==================================================
-DETERMINISTIC CLASSIFICATION (for reference):
-{deterministic_category.lower()}
-(You can override if the email's PRIMARY INTENT suggests otherwise!)
-
-==================================================
-YOU MUST FOLLOW ALL RULES ABOVE. ZERO HALLUCINATION.
-==================================================
+Deterministic classification (reference): {deterministic_category.lower()}
+(Override if email's PRIMARY INTENT suggests otherwise)
 
 Return ONLY the JSON object. No additional text."""
             
