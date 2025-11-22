@@ -334,12 +334,32 @@ async function startSetup() {
             }, 500);
             
             // Start fetching older emails if we have 60 emails but less than 200
-            if (allEmails.length >= 60 && allEmails.length < 200) {
-                console.log('🔄 Setup complete with 60 emails, starting older email fetch...');
-                // Wait a moment before starting to ensure setup is fully complete
-                setTimeout(() => {
-                    startFetchOlderEmailsSilently(200);
-                }, 2000);
+            // Check database count, not just frontend array
+            try {
+                const countResponse = await fetch('/api/emails/count');
+                const countData = await countResponse.json();
+                const dbCount = countData.count || allEmails.length;
+                
+                if (dbCount >= 60 && dbCount < 200) {
+                    console.log(`🔄 Setup complete with ${dbCount} emails, starting older email fetch to reach 200...`);
+                    // Wait a moment before starting to ensure setup is fully complete
+                    setTimeout(() => {
+                        startFetchOlderEmailsSilently(200);
+                    }, 2000);
+                } else if (dbCount < 60) {
+                    console.log(`ℹ️  Only ${dbCount} emails in database (less than 60), skipping older email fetch`);
+                } else {
+                    console.log(`✅ Already have ${dbCount} emails (200+), skipping older email fetch`);
+                }
+            } catch (error) {
+                console.warn('⚠️ Could not check database count, using frontend count:', error);
+                // Fallback to frontend count
+                if (allEmails.length >= 60 && allEmails.length < 200) {
+                    console.log('🔄 Setup complete, starting older email fetch...');
+                    setTimeout(() => {
+                        startFetchOlderEmailsSilently(200);
+                    }, 2000);
+                }
             }
             
             showAlert('success', `Setup complete! Found ${data.email_count} existing emails.`);
@@ -562,16 +582,32 @@ async function startSetup() {
         showAlert('success', `Setup complete! Loaded ${allEmails.length} emails.`);
         
         // Start fetching older emails if we have 60 emails but less than 200
-        if (allEmails.length >= 60 && allEmails.length < 200) {
-            console.log('🔄 Setup complete with 60 emails, starting older email fetch...');
-            // Wait a moment before starting to ensure setup is fully complete
-            setTimeout(() => {
-                startFetchOlderEmailsSilently(200);
-            }, 2000);
-        } else if (allEmails.length < 60) {
-            console.log(`ℹ️  Only ${allEmails.length} emails loaded (less than 60), skipping older email fetch`);
-        } else {
-            console.log(`✅ Already have ${allEmails.length} emails (200+), skipping older email fetch`);
+        // Check database count, not just frontend array
+        try {
+            const countResponse = await fetch('/api/emails/count');
+            const countData = await countResponse.json();
+            const dbCount = countData.count || allEmails.length;
+            
+            if (dbCount >= 60 && dbCount < 200) {
+                console.log(`🔄 Setup complete with ${dbCount} emails, starting older email fetch to reach 200...`);
+                // Wait a moment before starting to ensure setup is fully complete
+                setTimeout(() => {
+                    startFetchOlderEmailsSilently(200);
+                }, 2000);
+            } else if (dbCount < 60) {
+                console.log(`ℹ️  Only ${dbCount} emails in database (less than 60), skipping older email fetch`);
+            } else {
+                console.log(`✅ Already have ${dbCount} emails (200+), skipping older email fetch`);
+            }
+        } catch (error) {
+            console.warn('⚠️ Could not check database count, using frontend count:', error);
+            // Fallback to frontend count
+            if (allEmails.length >= 60 && allEmails.length < 200) {
+                console.log('🔄 Setup complete, starting older email fetch...');
+                setTimeout(() => {
+                    startFetchOlderEmailsSilently(200);
+                }, 2000);
+            }
         }
         
     } catch (error) {
@@ -3703,14 +3739,19 @@ async function startFetchOlderEmailsSilently(maxEmails = 200) {
     try {
         const countResponse = await fetch('/api/emails/count');
         const countData = await countResponse.json();
-        console.log(`📊 Current email count: ${countData.count || 'unknown'}`);
-        if (countData.success && countData.count >= 200) {
-            console.log(`✅ Already have ${countData.count} emails (200+), skipping older email fetch`);
+        const currentCount = countData.count || 0;
+        console.log(`📊 Current email count: ${currentCount}`);
+        
+        if (countData.success && currentCount >= 200) {
+            console.log(`✅ Already have ${currentCount} emails (200+), skipping older email fetch`);
             return;
         }
-        console.log(`📧 Need more emails (have ${countData.count || 0}, target: 200), starting fetch...`);
+        
+        const needed = 200 - currentCount;
+        console.log(`📧 Need ${needed} more emails (have ${currentCount}, target: 200), starting fetch...`);
     } catch (error) {
         console.warn('⚠️ Could not check email count:', error);
+        console.log('📧 Proceeding with older email fetch anyway...');
         // Continue anyway - might be a temporary error
     }
     
