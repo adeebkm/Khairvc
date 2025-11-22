@@ -484,16 +484,66 @@ async function pollSetupProgress(taskId, progressBar, progressText) {
 /**
  * Hardcoded timer approach: Random 7-10 minutes, then show inbox with whatever emails are available
  * Shows approximate time remaining in minutes, then seconds (with random intervals) when < 1 minute
+ * Timer persists across page refreshes using localStorage
  */
 async function startHardcodedTimer(progressBar, progressText, setupScreen) {
-    // Generate random time between 7-10 minutes (420-600 seconds)
-    const minMinutes = 7;
-    const maxMinutes = 10;
-    const totalSeconds = Math.floor(Math.random() * (maxMinutes - minMinutes + 1) * 60) + (minMinutes * 60);
+    const TIMER_STORAGE_KEY = 'setup_timer_state';
     
-    console.log(`⏱️ Starting hardcoded timer: ${Math.floor(totalSeconds / 60)} minutes (${totalSeconds} seconds)`);
+    // Check if there's an existing timer in localStorage
+    let timerState = null;
+    let remaining = null;
+    try {
+        const stored = localStorage.getItem(TIMER_STORAGE_KEY);
+        if (stored) {
+            timerState = JSON.parse(stored);
+            const now = Date.now();
+            const elapsed = Math.floor((now - timerState.startTime) / 1000);
+            remaining = timerState.totalSeconds - elapsed;
+            
+            if (remaining > 0) {
+                // Timer still active, resume from where we left off
+                console.log(`⏱️ Resuming timer: ${Math.floor(remaining / 60)} minutes remaining (was ${Math.floor(timerState.totalSeconds / 60)} minutes total)`);
+            } else {
+                // Timer has expired, complete setup immediately
+                console.log(`⏱️ Timer expired while page was closed, completing setup...`);
+                localStorage.removeItem(TIMER_STORAGE_KEY);
+                // Complete setup immediately
+                completeSetupAfterTimer(progressBar, progressText, setupScreen);
+                return;
+            }
+        }
+    } catch (error) {
+        console.warn('Error reading timer state from localStorage:', error);
+        localStorage.removeItem(TIMER_STORAGE_KEY);
+    }
     
-    let remainingSeconds = totalSeconds;
+    // Generate new timer if none exists, or use existing
+    let totalSeconds, remainingSeconds, startTime;
+    if (timerState && remaining !== null && remaining > 0) {
+        // Resume existing timer
+        totalSeconds = timerState.totalSeconds;
+        remainingSeconds = remaining;
+        startTime = timerState.startTime;
+    } else {
+        // Generate random time between 7-10 minutes (420-600 seconds)
+        const minMinutes = 7;
+        const maxMinutes = 10;
+        totalSeconds = Math.floor(Math.random() * (maxMinutes - minMinutes + 1) * 60) + (minMinutes * 60);
+        remainingSeconds = totalSeconds;
+        startTime = Date.now();
+        
+        // Save timer state to localStorage
+        try {
+            localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify({
+                startTime: startTime,
+                totalSeconds: totalSeconds
+            }));
+        } catch (error) {
+            console.warn('Error saving timer state to localStorage:', error);
+        }
+        
+        console.log(`⏱️ Starting new hardcoded timer: ${Math.floor(totalSeconds / 60)} minutes (${totalSeconds} seconds)`);
+    }
     let lastUpdateTime = Date.now();
     let secondsUpdateTimeout = null;
     let isInSecondsMode = false;
@@ -574,6 +624,18 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
         }
         // Note: seconds mode updates are handled by scheduleNextSecondsUpdate()
         
+        // Save timer state to localStorage every 5 seconds (for persistence across refreshes)
+        if (remainingSeconds % 5 === 0) {
+            try {
+                localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify({
+                    startTime: startTime,
+                    totalSeconds: totalSeconds
+                }));
+            } catch (error) {
+                // Ignore localStorage errors (might be full or disabled)
+            }
+        }
+        
         // Timer complete
         if (remainingSeconds <= 0) {
             clearInterval(timerInterval);
@@ -581,16 +643,61 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
                 clearTimeout(secondsUpdateTimeout);
             }
             
-            // Load emails and show inbox
-            console.log('⏱️ Timer complete, loading emails and showing inbox...');
-            if (progressText) progressText.textContent = 'Setup complete! Loading your inbox...';
-            if (progressBar) progressBar.style.width = '100%';
+            // Clear timer state from localStorage
+            localStorage.removeItem(TIMER_STORAGE_KEY);
             
-            // Load emails from database
-            loadEmailsFromDatabase().then(() => {
-                console.log(`📧 Loaded ${allEmails.length} emails after timer`);
-                
-                // Ensure all emails have category
+            // Complete setup (don't await - let it run asynchronously)
+            completeSetupAfterTimer(progressBar, progressText, setupScreen);
+        }
+    }, 1000); // Update every second
+}
+
+/**
+ * Complete setup after timer expires - loads emails and shows inbox
+ */
+async function completeSetupAfterTimer(progressBar, progressText, setupScreen) {
+    // Load emails and show inbox
+    console.log('⏱️ Timer complete, loading emails and showing inbox...');
+    if (progressText) progressText.textContent = 'Setup complete! Loading your inbox...';
+    if (progressBar) progressBar.style.width = '100%';
+    
+    // Hide setup screen and show inbox FIRST (before loading emails)
+    // This ensures emailList element exists when loadEmailsFromDatabase() runs
+    if (setupScreen) setupScreen.style.display = 'none';
+    const compactHeader = document.querySelector('.main-content > .compact-header');
+    if (compactHeader) compactHeader.style.display = 'block';
+    const emailListEl = document.getElementById('emailList');
+    if (emailListEl) emailListEl.style.display = 'block';
+    
+    // Wait for DOM to update before loading emails
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Load emails from database
+    try {
+        await loadEmailsFromDatabase();
+        console.log(`📧 Loaded ${allEmails.length} emails after timer`);
+        
+        // Ensure all emails have category
+        allEmails.forEach(email => {
+            if (!email.category && email.classification?.category) {
+                email.category = email.classification.category.toLowerCase();
+            } else if (!email.category) {
+                email.category = 'general';
+            }
+        });
+        
+        // Force apply filters and display emails
+        applyFilters();
+        updatePagination();
+        
+        // Double-check emails are displayed
+        setTimeout(() => {
+            const visibleCount = emailListEl ? emailListEl.querySelectorAll('.email-item').length : 0;
+            console.log(`📊 After timer: ${visibleCount} emails visible, ${allEmails.length} total, ${filteredEmails.length} filtered`);
+            
+            if (visibleCount === 0 && allEmails.length > 0) {
+                console.warn('⚠️ Emails not visible after timer, forcing display...');
+                // Ensure categories are set
                 allEmails.forEach(email => {
                     if (!email.category && email.classification?.category) {
                         email.category = email.classification.category.toLowerCase();
@@ -598,39 +705,28 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
                         email.category = 'general';
                     }
                 });
-                
-                // Hide setup screen and show inbox
-                if (setupScreen) setupScreen.style.display = 'none';
-                const compactHeader = document.querySelector('.main-content > .compact-header');
-                if (compactHeader) compactHeader.style.display = 'block';
-                const emailListEl = document.getElementById('emailList');
-                if (emailListEl) emailListEl.style.display = 'block';
-                
-                // Wait for DOM to update
-                setTimeout(() => {
-                    // Apply filters and display emails
-                    applyFilters();
+                applyFilters();
+                if (filteredEmails.length > 0) {
+                    displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
                     updatePagination();
-                    
-                    // Show success message
-                    if (allEmails.length > 0) {
-                        showAlert('success', `Setup complete! Loaded ${allEmails.length} emails.`);
-                    } else {
-                        showAlert('info', 'Setup complete! Emails are still being classified in the background. They will appear as they\'re ready.');
-                    }
-                }, 200);
-            }).catch(error => {
-                console.error('Error loading emails after timer:', error);
-                // Still show inbox even if loading fails
-                if (setupScreen) setupScreen.style.display = 'none';
-                const compactHeader = document.querySelector('.main-content > .compact-header');
-                if (compactHeader) compactHeader.style.display = 'block';
-                const emailListEl = document.getElementById('emailList');
-                if (emailListEl) emailListEl.style.display = 'block';
-                showAlert('info', 'Setup complete! Emails are being classified in the background.');
-            });
-        }
-    }, 1000); // Update every second
+                } else {
+                    // Last resort - display all emails directly
+                    displayEmails(allEmails.slice(0, EMAILS_PER_PAGE));
+                    updatePagination();
+                }
+            }
+            
+            // Show success message
+            if (allEmails.length > 0) {
+                showAlert('success', `Setup complete! Loaded ${allEmails.length} emails.`);
+            } else {
+                showAlert('info', 'Setup complete! Emails are still being classified in the background. They will appear as they\'re ready.');
+            }
+        }, 300);
+    } catch (error) {
+        console.error('Error loading emails after timer:', error);
+        showAlert('info', 'Setup complete! Emails are being classified in the background.');
+    }
 }
 
 async function fetchInitialEmailsStreaming(progressBar, progressText) {
@@ -2202,16 +2298,47 @@ async function loadEmailsFromDatabase() {
             const emailListCheck = document.getElementById('emailList');
             if (!emailListCheck) {
                 console.log('ℹ️  emailList element not available yet, skipping display (will be displayed after setup screen is hidden)');
+                // Still set allEmails so it's available when emailList appears
                 return; // Just load the data, don't try to display yet
             }
             
+            // Ensure all emails have category before filtering
+            allEmails.forEach(email => {
+                if (!email.category && email.classification?.category) {
+                    email.category = email.classification.category.toLowerCase();
+                } else if (!email.category) {
+                    email.category = 'general';
+                }
+            });
+            
             // applyFilters() will handle category filtering based on currentTab
             applyFilters();
+            
+            // Force display if filteredEmails is empty but allEmails has data
+            if (filteredEmails.length === 0 && allEmails.length > 0) {
+                console.warn('⚠️ filteredEmails is empty but allEmails has data, forcing filter application');
+                // Reset currentTab to 'all' to show all emails
+                const originalTab = currentTab;
+                currentTab = 'all';
+                applyFilters();
+                if (filteredEmails.length === 0) {
+                    // Still empty - use allEmails directly
+                    console.warn('⚠️ filteredEmails still empty after reset, using allEmails directly');
+                    filteredEmails = allEmails;
+                } else {
+                    currentTab = originalTab; // Restore original tab
+                }
+            }
             
             // Double-check that emails were displayed
             if (emailListCheck && emailListCheck.children.length === 0 && filteredEmails.length > 0) {
                 console.warn('⚠️ Emails loaded but not displayed, forcing display');
                 displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
+                updatePagination();
+            } else if (emailListCheck && emailListCheck.children.length === 0 && allEmails.length > 0) {
+                console.warn('⚠️ No emails displayed but allEmails has data, forcing display of allEmails');
+                displayEmails(allEmails.slice(0, EMAILS_PER_PAGE));
+                updatePagination();
             }
         } else {
             throw new Error(data.error || 'Failed to load emails');
@@ -3889,3 +4016,130 @@ function stopOlderEmailsFetch() {
 
 // Add button to trigger older email fetch (can be called from console or added to UI)
 // Example: startFetchOlderEmails(200)
+
+// ==================== WHATSAPP SETTINGS ====================
+
+async function openSettingsModal() {
+    const modal = document.getElementById('settingsModal');
+    if (!modal) return;
+    
+    modal.style.display = 'flex';
+    
+    // Load current WhatsApp settings
+    try {
+        const response = await fetch('/api/whatsapp/settings');
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('whatsappEnabled').checked = data.whatsapp_enabled || false;
+            document.getElementById('whatsappNumber').value = data.whatsapp_number || '';
+        }
+    } catch (error) {
+        console.error('Error loading WhatsApp settings:', error);
+        showAlert('error', 'Failed to load settings');
+    }
+}
+
+function closeSettingsModal() {
+    const modal = document.getElementById('settingsModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+async function saveWhatsAppSettings() {
+    const enabled = document.getElementById('whatsappEnabled').checked;
+    const number = document.getElementById('whatsappNumber').value.trim();
+    const statusDiv = document.getElementById('whatsappStatus');
+    
+    // Validate phone number if enabled
+    if (enabled && number) {
+        if (!number.startsWith('+')) {
+            statusDiv.style.display = 'block';
+            statusDiv.style.background = '#fee';
+            statusDiv.style.color = '#c33';
+            statusDiv.style.border = '1px solid #fcc';
+            statusDiv.textContent = '❌ Phone number must start with + (e.g., +1234567890)';
+            return;
+        }
+        
+        // Basic validation: + followed by 10-15 digits
+        if (!/^\+[1-9]\d{9,14}$/.test(number)) {
+            statusDiv.style.display = 'block';
+            statusDiv.style.background = '#fee';
+            statusDiv.style.color = '#c33';
+            statusDiv.style.border = '1px solid #fcc';
+            statusDiv.textContent = '❌ Invalid phone number format. Use: +1234567890';
+            return;
+        }
+    }
+    
+    // Show loading state
+    const saveBtn = event.target;
+    const originalText = saveBtn.textContent;
+    saveBtn.textContent = 'Saving...';
+    saveBtn.disabled = true;
+    statusDiv.style.display = 'none';
+    
+    try {
+        const response = await fetch('/api/whatsapp/settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                enabled: enabled,
+                number: number
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            statusDiv.style.display = 'block';
+            statusDiv.style.background = '#efe';
+            statusDiv.style.color = '#3c3';
+            statusDiv.style.border = '1px solid #cfc';
+            statusDiv.textContent = '✅ Settings saved successfully!';
+            
+            // Auto-close after 2 seconds
+            setTimeout(() => {
+                closeSettingsModal();
+            }, 2000);
+        } else {
+            statusDiv.style.display = 'block';
+            statusDiv.style.background = '#fee';
+            statusDiv.style.color = '#c33';
+            statusDiv.style.border = '1px solid #fcc';
+            statusDiv.textContent = '❌ ' + (data.error || 'Failed to save settings');
+        }
+    } catch (error) {
+        console.error('Error saving WhatsApp settings:', error);
+        statusDiv.style.display = 'block';
+        statusDiv.style.background = '#fee';
+        statusDiv.style.color = '#c33';
+        statusDiv.style.border = '1px solid #fcc';
+        statusDiv.textContent = '❌ Error saving settings. Please try again.';
+    } finally {
+        saveBtn.textContent = originalText;
+        saveBtn.disabled = false;
+    }
+}
+
+// Close modal when clicking outside
+document.addEventListener('click', function(event) {
+    const modal = document.getElementById('settingsModal');
+    if (modal && event.target === modal) {
+        closeSettingsModal();
+    }
+});
+
+// Close modal on Escape key
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        const modal = document.getElementById('settingsModal');
+        if (modal && modal.style.display === 'flex') {
+            closeSettingsModal();
+        }
+    }
+});

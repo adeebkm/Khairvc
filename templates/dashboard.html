@@ -57,6 +57,9 @@
                             📧 Login
                         </a>
                         {% endif %}
+                        <button class="btn btn-secondary" onclick="openSettingsModal()" title="Settings" style="font-size: 12px; padding: 6px 12px; margin-right: 8px;">
+                            ⚙️ Settings
+                        </button>
                         <span class="user-info">{{ current_user.username }}</span>
                         <a href="{{ url_for('logout') }}" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">Logout</a>
                     </div>
@@ -417,6 +420,59 @@
         <div class="context-menu-item" onclick="contextMenuDelete()">
             <span>🗑️</span>
             <span>Delete</span>
+        </div>
+    </div>
+
+    <!-- WhatsApp Settings Modal -->
+    <div class="modal" id="settingsModal" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>⚙️ Settings</h2>
+                <button class="modal-close" onclick="closeSettingsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- WhatsApp Settings Section -->
+                <div class="settings-section">
+                    <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 18px; font-weight: 600;">
+                        📱 WhatsApp Notifications
+                    </h3>
+                    <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;">
+                        Receive instant WhatsApp alerts when new deal flow emails arrive, and automatic follow-up reminders every 6 hours.
+                    </p>
+                    
+                    <div class="settings-item" style="margin-bottom: 20px;">
+                        <label class="checkbox-label" style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" id="whatsappEnabled" style="width: 18px; height: 18px; margin-right: 12px; cursor: pointer;">
+                            <span style="font-weight: 500;">Enable WhatsApp alerts for deal flow</span>
+                        </label>
+                        <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px; margin-left: 30px;">
+                            You'll receive alerts when new deals are detected and follow-ups every 6 hours
+                        </p>
+                    </div>
+                    
+                    <div class="settings-item" style="margin-bottom: 20px;">
+                        <label style="display: block; font-weight: 500; margin-bottom: 8px;">
+                            WhatsApp Number
+                        </label>
+                        <input 
+                            type="tel" 
+                            id="whatsappNumber" 
+                            placeholder="+1234567890" 
+                            style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; background: var(--bg-primary); color: var(--text-primary);"
+                            pattern="^\+[1-9]\d{1,14}$"
+                        >
+                        <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">
+                            Include country code (e.g., +1234567890). Reply "STOP" to WhatsApp to disable follow-ups.
+                        </p>
+                    </div>
+                    
+                    <div id="whatsappStatus" style="margin-top: 16px; padding: 12px; border-radius: 8px; display: none;"></div>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+                <button class="btn btn-secondary" onclick="closeSettingsModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveWhatsAppSettings()">Save Settings</button>
+            </div>
         </div>
     </div>
 
