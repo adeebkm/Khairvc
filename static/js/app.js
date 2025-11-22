@@ -3769,7 +3769,7 @@ async function startFetchOlderEmailsSilently(maxEmails = 200) {
         
         if (data.success) {
             olderEmailsTaskId = data.task_id;
-            console.log('📧 Started silent older email fetch (up to 200 emails)');
+            console.log(`📧 Started silent older email fetch (up to 200 emails), task_id: ${data.task_id}`);
             // Don't show progress bar in silent mode, just poll quietly
             startOlderEmailsPollingSilent();
         } else if (response.status === 200 && data.error === 'Already have 200+ emails') {
@@ -3847,15 +3847,16 @@ function startOlderEmailsPollingSilent() {
             const data = await response.json();
             
             if (data.success) {
-                // Log progress silently (only in console)
-                if (data.status === 'PROGRESS') {
+                // Log all status updates for debugging
+                if (data.status === 'PENDING') {
+                    console.log(`⏳ Older email fetch task ${olderEmailsTaskId} is PENDING (waiting for worker)...`);
+                } else if (data.status === 'PROGRESS') {
                     const fetched = data.fetched || data.progress || 0;
                     const classified = data.classified || 0;
                     const total = data.total || 200;
-                    console.log(`📧 Older emails: ${fetched} fetched, ${classified} classified / ${total}`);
-                }
-                
-                if (data.status === 'SUCCESS' || data.status === 'FAILURE') {
+                    const statusMsg = data.message || data.status;
+                    console.log(`📧 Older emails: ${statusMsg} - ${fetched} fetched, ${classified} classified / ${total}`);
+                } else if (data.status === 'SUCCESS' || data.status === 'FAILURE') {
                     clearInterval(olderEmailsPollInterval);
                     olderEmailsTaskId = null;
                     olderEmailsSilentMode = false;
@@ -3867,11 +3868,11 @@ function startOlderEmailsPollingSilent() {
                             loadEmailsFromDatabase();
                         }, 1000);
                     } else {
-                        console.warn('⚠️ Older email fetch failed:', data.error);
+                        console.warn(`⚠️ Older email fetch failed: ${data.error || 'Unknown error'}`);
                     }
                 }
             } else {
-                console.error('Error polling older emails status:', data.error);
+                console.error(`❌ Error polling older emails status: ${data.error || 'Unknown error'}`);
             }
         } catch (error) {
             console.error('Error polling older emails status:', error);
