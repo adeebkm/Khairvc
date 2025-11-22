@@ -27,8 +27,8 @@ except ImportError:
     print("⚠️  Celery not available - background tasks disabled")
 
 # Rate limiting: Max concurrent OpenAI API calls to prevent 429 errors
-# Increased to 10 for better throughput with 20 users (10,000 RPM available)
-CLASSIFICATION_SEMAPHORE = Semaphore(10)  # Max 10 concurrent classifications
+# Increased to 20 for faster processing (Lambda can handle more concurrent requests)
+CLASSIFICATION_SEMAPHORE = Semaphore(20)  # Max 20 concurrent classifications
 
 # Load environment variables
 load_dotenv()
@@ -1141,6 +1141,7 @@ def get_emails():
             if message_ids and gmail and gmail.service:
                 try:
                     # Batch fetch labels for all messages to get star status
+                    # Gmail batch API limit is 100 requests per batch, so split into chunks
                     from googleapiclient.http import BatchHttpRequest
                     star_status_results = {}
                     
@@ -1156,19 +1157,28 @@ def get_emails():
                                 'label_ids': label_ids if isinstance(label_ids, list) else []
                             }
                     
-                    batch = gmail.service.new_batch_http_request(callback=star_callback)
-                    for idx, msg_id in enumerate(message_ids[:200]):  # Limit to 200 to avoid rate limits
-                        # Use index as request_id to avoid duplicates
-                        batch.add(gmail.service.users().messages().get(
-                            userId='me',
-                            id=msg_id,
-                            format='metadata'
-                        ), request_id=f"star_{idx}_{msg_id}")
+                    # Gmail batch API limit is 100 requests per batch
+                    BATCH_SIZE = 100
+                    message_ids_to_fetch = message_ids[:200]  # Limit to 200 to avoid rate limits
                     
-                    if message_ids:
-                        batch.execute()
-                        star_status_map = star_status_results
-                        print(f"⭐ Fetched star status for {len(star_status_map)} emails from Gmail")
+                    # Process in chunks of 100
+                    for chunk_start in range(0, len(message_ids_to_fetch), BATCH_SIZE):
+                        chunk = message_ids_to_fetch[chunk_start:chunk_start + BATCH_SIZE]
+                        batch = gmail.service.new_batch_http_request(callback=star_callback)
+                        
+                        for idx, msg_id in enumerate(chunk):
+                            # Use index as request_id to avoid duplicates
+                            batch.add(gmail.service.users().messages().get(
+                                userId='me',
+                                id=msg_id,
+                                format='metadata'
+                            ), request_id=f"star_{chunk_start + idx}_{msg_id}")
+                        
+                        if chunk:
+                            batch.execute()
+                    
+                    star_status_map = star_status_results
+                    print(f"⭐ Fetched star status for {len(star_status_map)} emails from Gmail")
                 except Exception as e:
                     print(f"⚠️  Could not batch fetch star status: {str(e)}")
             
@@ -1715,13 +1725,13 @@ def stream_emails():
                     time.sleep(0.5)
                 
                 try:
-                    # Check if already classified
-                    classification = EmailClassification.query.filter_by(
+                    # Check if already classified by message_id FIRST (more accurate than thread_id)
+                    existing_classification = EmailClassification.query.filter_by(
                         user_id=user_id,
-                        thread_id=email['thread_id']
+                        message_id=email['id']
                     ).first()
                     
-                    if classification:
+                    if existing_classification:
                         # Return existing classification
                         email_data = {
                             'id': email['id'],
@@ -1733,63 +1743,37 @@ def stream_emails():
                             'is_starred': email.get('is_starred', False),
                             'label_ids': email.get('label_ids', []),
                             'classification': {
-                                'category': classification.category,
-                                'tags': classification.tags.split(',') if classification.tags else [],
-                                'confidence': classification.confidence,
-                                'reply_type': classification.reply_type,
-                                'deal_state': classification.deal_state,
-                                'deck_link': classification.deck_link
+                                'category': existing_classification.category,
+                                'tags': existing_classification.tags.split(',') if existing_classification.tags else [],
+                                'confidence': existing_classification.confidence,
+                                'reply_type': existing_classification.reply_type,
+                                'deal_state': existing_classification.deal_state,
+                                'deck_link': existing_classification.deck_link
                             }
                         }
-                    else:
-                        # Classify new email
-                        with CLASSIFICATION_SEMAPHORE:
-                            classification_result = classifier.classify_email(
-                                subject=email.get('subject', ''),
-                                body=email.get('body', ''),
-                                headers=email.get('headers', {}),
-                                sender=email.get('from', ''),
-                                thread_id=email.get('thread_id', ''),
-                                user_id=user_id
-                            )
-                        
-                        # Check if email already exists (prevent duplicates)
-                        existing_classification = EmailClassification.query.filter_by(
-                            user_id=user_id,
-                            message_id=email['id']
-                        ).first()
-                        
-                        if existing_classification:
-                            # Update existing classification instead of creating duplicate
-                            new_classification = existing_classification
-                            new_classification.category = classification_result['category']
-                            new_classification.tags = ','.join(classification_result['tags'])
-                            new_classification.confidence = classification_result['confidence']
-                            new_classification.extracted_links = json.dumps(classification_result['links'])
-                            new_classification.sender = email.get('from', 'Unknown')
-                            new_classification.email_date = email.get('date')
-                            # Update encrypted fields
-                            new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
-                            new_classification.set_snippet_encrypted(email.get('snippet', ''))
-                        else:
-                            # Create new classification
-                            new_classification = EmailClassification(
-                                user_id=user_id,
-                                thread_id=email['thread_id'],
-                                message_id=email['id'],
-                                sender=email.get('from', 'Unknown'),
-                                email_date=email.get('date'),
-                                category=classification_result['category'],
-                                tags=','.join(classification_result['tags']),
-                                confidence=classification_result['confidence'],
-                                extracted_links=json.dumps(classification_result['links'])
-                            )
-                            # PRIORITY 2: Use encrypted field setters
-                            new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
-                            new_classification.set_snippet_encrypted(email.get('snippet', ''))
-                            db.session.add(new_classification)
-                        db.session.commit()
-                        
+                        # Stream this email to frontend
+                        yield f"data: {json.dumps({'email': email_data, 'progress': idx + 1, 'total': len(emails)})}\n\n"
+                        continue  # Skip classification, already exists
+                    
+                    # Classify new email
+                    with CLASSIFICATION_SEMAPHORE:
+                        classification_result = classifier.classify_email(
+                            subject=email.get('subject', ''),
+                            body=email.get('body', ''),
+                            headers=email.get('headers', {}),
+                            sender=email.get('from', ''),
+                            thread_id=email.get('thread_id', ''),
+                            user_id=user_id
+                        )
+                    
+                    # Double-check if email was inserted by another process (race condition)
+                    existing_classification = EmailClassification.query.filter_by(
+                        user_id=user_id,
+                        message_id=email['id']
+                    ).first()
+                    
+                    if existing_classification:
+                        # Another process inserted it, use existing
                         email_data = {
                             'id': email['id'],
                             'thread_id': email['thread_id'],
@@ -1800,20 +1784,110 @@ def stream_emails():
                             'is_starred': email.get('is_starred', False),
                             'label_ids': email.get('label_ids', []),
                             'classification': {
-                                'category': classification_result['category'],
-                                'tags': classification_result['tags'],
-                                'confidence': classification_result['confidence'],
-                                'reply_type': None,
-                                'deal_state': None,
-                                'deck_link': None
+                                'category': existing_classification.category,
+                                'tags': existing_classification.tags.split(',') if existing_classification.tags else [],
+                                'confidence': existing_classification.confidence,
+                                'reply_type': existing_classification.reply_type,
+                                'deal_state': existing_classification.deal_state,
+                                'deck_link': existing_classification.deck_link
                             }
                         }
+                    else:
+                        # Create new classification
+                        new_classification = EmailClassification(
+                            user_id=user_id,
+                            thread_id=email['thread_id'],
+                            message_id=email['id'],
+                            sender=email.get('from', 'Unknown'),
+                            email_date=email.get('date'),
+                            category=classification_result['category'],
+                            tags=','.join(classification_result['tags']),
+                            confidence=classification_result['confidence'],
+                            extracted_links=json.dumps(classification_result['links'])
+                        )
+                        # PRIORITY 2: Use encrypted field setters
+                        new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+                        new_classification.set_snippet_encrypted(email.get('snippet', ''))
+                        db.session.add(new_classification)
+                        
+                        # Commit with duplicate error handling
+                        try:
+                            db.session.commit()
+                        except Exception as commit_error:
+                            error_str = str(commit_error)
+                            # Handle duplicate key errors (unique constraint violation)
+                            if 'UniqueViolation' in error_str or 'duplicate key' in error_str.lower() or 'uq_user_message' in error_str:
+                                db.session.rollback()
+                                print(f"⏭️  Email {email['id']} was inserted by another process, skipping...")
+                                # Fetch the existing classification
+                                existing_classification = EmailClassification.query.filter_by(
+                                    user_id=user_id,
+                                    message_id=email['id']
+                                ).first()
+                                if existing_classification:
+                                    email_data = {
+                                        'id': email['id'],
+                                        'thread_id': email['thread_id'],
+                                        'subject': email.get('subject', 'No Subject'),
+                                        'from': email.get('from', 'Unknown'),
+                                        'snippet': email.get('snippet', ''),
+                                        'date': email.get('date'),
+                                        'is_starred': email.get('is_starred', False),
+                                        'label_ids': email.get('label_ids', []),
+                                        'classification': {
+                                            'category': existing_classification.category,
+                                            'tags': existing_classification.tags.split(',') if existing_classification.tags else [],
+                                            'confidence': existing_classification.confidence,
+                                            'reply_type': existing_classification.reply_type,
+                                            'deal_state': existing_classification.deal_state,
+                                            'deck_link': existing_classification.deck_link
+                                        }
+                                    }
+                                else:
+                                    # Skip this email if we can't find it
+                                    continue
+                            else:
+                                # Other errors - rollback and re-raise
+                                db.session.rollback()
+                                raise
+                        
+                        if not existing_classification:
+                            # New classification was created successfully
+                            email_data = {
+                                'id': email['id'],
+                                'thread_id': email['thread_id'],
+                                'subject': email.get('subject', 'No Subject'),
+                                'from': email.get('from', 'Unknown'),
+                                'snippet': email.get('snippet', ''),
+                                'date': email.get('date'),
+                                'is_starred': email.get('is_starred', False),
+                                'label_ids': email.get('label_ids', []),
+                                'classification': {
+                                    'category': classification_result['category'],
+                                    'tags': classification_result['tags'],
+                                    'confidence': classification_result['confidence'],
+                                    'reply_type': None,
+                                    'deal_state': None,
+                                    'deck_link': None
+                                }
+                            }
                     
                     # Stream this email to frontend
                     yield f"data: {json.dumps({'email': email_data, 'progress': idx + 1, 'total': len(emails)})}\n\n"
                     
                 except Exception as e:
-                    print(f"Error processing email {idx}: {str(e)}")
+                    error_str = str(e)
+                    # Rollback session on any error to prevent "session rolled back" errors
+                    try:
+                        db.session.rollback()
+                    except:
+                        pass
+                    
+                    # Check if it's a duplicate error (already handled above, but catch any edge cases)
+                    if 'UniqueViolation' in error_str or 'duplicate key' in error_str.lower() or 'uq_user_message' in error_str:
+                        print(f"⏭️  Email {email.get('id', 'unknown')} duplicate detected, skipping...")
+                    else:
+                        print(f"Error processing email {idx}: {str(e)}")
                     continue
             
             # Send completion

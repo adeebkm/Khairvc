@@ -16,7 +16,7 @@ if os.getcwd() not in sys.path:
 # Import models and clients inside functions to avoid circular imports
 
 
-@celery.task(bind=True, name='tasks.sync_user_emails')
+@celery.task(bind=True, name='tasks.sync_user_emails', time_limit=1800, soft_time_limit=1700)  # 30 min hard, 28.3 min soft
 def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
     """
     Background task to sync and classify emails for a user
@@ -55,7 +55,8 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
     from threading import Semaphore
     
     # Rate limiting semaphore (shared across all workers)
-    CLASSIFICATION_SEMAPHORE = Semaphore(10)
+    # Increased to 20 for faster processing (Lambda can handle more concurrent requests)
+    CLASSIFICATION_SEMAPHORE = Semaphore(20)
     
     with app.app_context():
         try:
@@ -209,7 +210,19 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
             print(f"📧 [TASK] Starting classification loop: {len(emails)} emails to process")
             print(f"📊 [TASK] Initial state: emails_fetched={len(emails)}, target={max_emails}")
             
+            # Track message_ids we've already processed in this task run to prevent duplicates
+            processed_message_ids = set()
+            
             for idx, email in enumerate(emails):
+                message_id = email.get('id', '')
+                
+                # Skip if we've already processed this message_id in this task run
+                if message_id in processed_message_ids:
+                    emails_skipped_duplicate += 1
+                    print(f"⏭️  [TASK] Email {idx + 1}/{len(emails)}: Skipped (already processed in this task run: {message_id[:16]}...)")
+                    continue
+                
+                processed_message_ids.add(message_id)
                 try:
                     # Update progress every 10 emails
                     if (idx + 1) % 10 == 0 or idx == 0:
@@ -239,10 +252,19 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                                 pdf_attachments.append(att)
                     
                     # Check if email already exists FIRST (before classification to save API calls)
-                    existing_classification = EmailClassification.query.filter_by(
-                        user_id=user_id,
-                        message_id=email.get('id', '')
-                    ).first()
+                    # Use a fresh query after any potential rollback
+                    try:
+                        existing_classification = EmailClassification.query.filter_by(
+                            user_id=user_id,
+                            message_id=email.get('id', '')
+                        ).first()
+                    except Exception as query_error:
+                        # If query fails (e.g., session rolled back), rollback and retry
+                        db.session.rollback()
+                        existing_classification = EmailClassification.query.filter_by(
+                            user_id=user_id,
+                            message_id=email.get('id', '')
+                        ).first()
                     
                     if existing_classification:
                         emails_processed += 1
@@ -271,10 +293,8 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                         print(f"❌ [TASK] {error_msg}")
                         continue  # Skip this email if classification fails
                     
-                    # Add delay between classifications to avoid rate limits
-                    # 1 second delay for background fetches (silent, can take time)
-                    if idx < len(emails) - 1:  # Don't delay after last email
-                        time.sleep(1.0)  # 1 second delay between emails
+                    # No delay needed - semaphore already provides rate limiting (max 10 concurrent)
+                    # Removing delay saves ~100 seconds for 200 emails
                     
                     # Create new classification
                     new_classification = EmailClassification(
@@ -293,17 +313,22 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                     new_classification.set_snippet_encrypted(email.get('snippet', ''))
                     db.session.add(new_classification)
                     
-                    # Commit with retry on connection errors and handle duplicate key errors
-                    max_commit_retries = 3
-                    commit_success = False
-                    duplicate_detected = False
+                    # Batch commits: Commit every 10 emails instead of each one (10x faster for DB operations)
+                    # Only commit immediately if it's the last email or we've accumulated 10
+                    should_commit_now = (idx + 1) % 10 == 0 or (idx + 1) == len(emails)
                     
-                    for commit_attempt in range(max_commit_retries):
-                        try:
-                            db.session.commit()
-                            commit_success = True
-                            break
-                        except Exception as commit_error:
+                    if should_commit_now:
+                        # Commit with retry on connection errors and handle duplicate key errors
+                        max_commit_retries = 3
+                        commit_success = False
+                        duplicate_detected = False
+                        
+                        for commit_attempt in range(max_commit_retries):
+                            try:
+                                db.session.commit()
+                                commit_success = True
+                                break
+                            except Exception as commit_error:
                             error_str = str(commit_error)
                             # Handle connection errors
                             if 'EOF' in error_str or 'SSL SYSCALL' in error_str or 'connection' in error_str.lower():
@@ -323,7 +348,9 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                                     db.session.expunge(new_classification)
                                 except:
                                     pass
-                                print(f"⏭️  Email {email.get('id', '')} was inserted by another process, skipping...")
+                                # Clear all pending changes to ensure clean state for next email
+                                db.session.expire_all()
+                                print(f"⏭️  [TASK] Email {idx + 1}/{len(emails)} (message_id: {email.get('id', 'unknown')[:16]}...): Duplicate key error - already exists, skipping")
                                 duplicate_detected = True
                                 break  # Skip this email, continue to next
                             else:
@@ -333,20 +360,31 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                                     db.session.expunge(new_classification)
                                 except:
                                     pass
+                                # Clear all pending changes
+                                db.session.expire_all()
                                 raise
-                    
-                    if duplicate_detected:
-                        emails_processed += 1
-                        emails_skipped_duplicate += 1
-                        print(f"⏭️  [TASK] Email {idx + 1}/{len(emails)}: Duplicate detected during commit, skipped")
-                        continue  # Skip to next email
-                    
-                    if not commit_success:
-                        # Commit failed for other reasons, skip this email
-                        emails_processed += 1
-                        emails_failed_commit += 1
-                        print(f"❌ [TASK] Email {idx + 1}/{len(emails)}: Commit failed, skipped")
-                        continue
+                        
+                        if duplicate_detected:
+                            emails_processed += 1
+                            emails_skipped_duplicate += 1
+                            # Ensure session is clean before processing next email
+                            try:
+                                db.session.rollback()
+                                db.session.expire_all()
+                            except:
+                                pass
+                            continue  # Skip to next email
+                        
+                        if not commit_success:
+                            # Commit failed for other reasons, skip this email
+                            emails_processed += 1
+                            emails_failed_commit += 1
+                            print(f"❌ [TASK] Email {idx + 1}/{len(emails)}: Commit failed, skipped")
+                            continue
+                    else:
+                        # Not committing yet - just add to session (will commit in batch)
+                        commit_success = True
+                        duplicate_detected = False
                     
                     emails_processed += 1
                     emails_classified += 1
@@ -418,6 +456,12 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                     error_msg = f"Error processing email {idx + 1}: {str(e)}"
                     errors.append(error_msg)
                     emails_processed += 1
+                    # Ensure session is clean after any error
+                    try:
+                        db.session.rollback()
+                        db.session.expire_all()
+                    except:
+                        pass
                     print(f"❌ [TASK] {error_msg}")
                     import traceback
                     traceback.print_exc()
@@ -513,7 +557,7 @@ def fetch_older_emails(self, user_id, max_emails=200):
     from auth import decrypt_token
     from threading import Semaphore
     
-    CLASSIFICATION_SEMAPHORE = Semaphore(10)
+    CLASSIFICATION_SEMAPHORE = Semaphore(20)  # Increased to 20 for faster processing
     
     print(f"📧 [TASK] fetch_older_emails STARTING for user {user_id}, max_emails={max_emails}")
     
@@ -693,7 +737,9 @@ def fetch_older_emails(self, user_id, max_emails=200):
                                     db.session.expunge(new_classification)
                                 except:
                                     pass
-                                print(f"⏭️  Email {email.get('id', '')} was inserted by another process, skipping...")
+                                # Clear all pending changes to ensure clean state for next email
+                                db.session.expire_all()
+                                print(f"⏭️  [TASK] Email {idx + 1}/{len(emails)} (message_id: {email.get('id', 'unknown')[:16]}...): Duplicate key error - already exists, skipping")
                                 duplicate_detected = True
                                 break  # Skip this email, continue to next
                             else:
