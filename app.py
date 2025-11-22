@@ -951,17 +951,28 @@ def trigger_fetch_older_emails():
         max_emails = min(request.json.get('max', 200), 200)
         
         # Trigger background task
-        task = fetch_older_emails.delay(
-            user_id=current_user.id,
-            max_emails=max_emails
-        )
-        
-        return jsonify({
-            'success': True,
-            'task_id': task.id,
-            'message': 'Older email fetch started in background',
-            'status': 'PENDING'
-        })
+        try:
+            print(f"🚀 Queuing fetch_older_emails task for user {current_user.id} with max_emails={max_emails}")
+            task = fetch_older_emails.delay(
+                user_id=current_user.id,
+                max_emails=max_emails
+            )
+            print(f"✅ Task queued successfully: {task.id}")
+            
+            return jsonify({
+                'success': True,
+                'task_id': task.id,
+                'message': 'Older email fetch started in background',
+                'status': 'PENDING'
+            })
+        except Exception as task_error:
+            print(f"❌ Error queuing task: {task_error}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({
+                'success': False,
+                'error': f'Failed to queue older email fetch task: {str(task_error)}'
+            }), 500
         
     except Exception as e:
         return jsonify({

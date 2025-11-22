@@ -468,6 +468,8 @@ def fetch_older_emails(self, user_id, max_emails=200):
     
     with app.app_context():
         try:
+            print(f"📧 [TASK] fetch_older_emails started for user {user_id}, max_emails={max_emails}")
+            
             # Update task state
             self.update_state(
                 state='PROGRESS',
@@ -477,17 +479,23 @@ def fetch_older_emails(self, user_id, max_emails=200):
             # Get user
             user = User.query.get(user_id)
             if not user:
+                print(f"❌ [TASK] User {user_id} not found")
                 return {'status': 'error', 'error': 'User not found'}
             
             if not user.gmail_token:
+                print(f"❌ [TASK] User {user_id} has no Gmail token")
                 return {'status': 'error', 'error': 'Gmail not connected'}
             
             # Get Gmail client
+            print(f"🔐 [TASK] Decrypting token and creating Gmail client...")
             token_json = decrypt_token(user.gmail_token.encrypted_token)
             gmail = GmailClient(token_json=token_json)
             
             if not gmail.service:
+                print(f"❌ [TASK] Failed to create Gmail service")
                 return {'status': 'error', 'error': 'Failed to connect to Gmail'}
+            
+            print(f"✅ [TASK] Gmail client created successfully")
             
             # Progress callback to update task state
             def progress_callback(fetched, total):
