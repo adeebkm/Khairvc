@@ -257,10 +257,21 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                     
                     # Extract email data
                     headers = email.get('headers', {})
-                    email_body = email.get('body', '')
+                    # Use combined_text if available (includes attachment content, limited to 1500 chars)
+                    # Otherwise fall back to body
+                    email_body = email.get('combined_text', email.get('body', ''))
                     
-                    # Extract attachments if any
+                    # Extract attachment text from combined_text if present (for check_four_basics)
                     attachment_text = None
+                    if '--- Attachment Content ---' in email_body:
+                        # Extract just the attachment portion (already limited to 1500 chars in gmail_client)
+                        parts = email_body.split('--- Attachment Content ---')
+                        if len(parts) > 1:
+                            attachment_text = parts[1].strip()
+                            # Ensure it doesn't exceed 1500 chars (safety check)
+                            if len(attachment_text) > 1500:
+                                attachment_text = attachment_text[:1500] + "... [truncated]"
+                    
                     pdf_attachments = []
                     if email.get('attachments'):
                         for att in email['attachments']:
@@ -743,9 +754,11 @@ def fetch_older_emails(self, user_id, max_emails=200):
                     
                     # Classify email
                     with CLASSIFICATION_SEMAPHORE:
+                        # Use combined_text if available (includes attachment content, limited to 1500 chars)
+                        email_body_for_classification = email.get('combined_text', email.get('body', ''))
                         classification_result = classifier.classify_email(
                             subject=email.get('subject', ''),
-                            body=email.get('body', ''),
+                            body=email_body_for_classification,
                             headers=email.get('headers', {}),
                             sender=email.get('from', ''),
                             thread_id=email.get('thread_id', ''),

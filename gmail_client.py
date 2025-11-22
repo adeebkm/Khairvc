@@ -775,9 +775,24 @@ class GmailClient:
             attachment_texts = []
             pdf_attachments = []
             
+            # Limit total attachment text to 1500 characters
+            total_attachment_chars = 0
+            MAX_ATTACHMENT_CHARS = 1500
+            
             for att in attachments_data:
                 if att.get('text'):
-                    attachment_texts.append(att['text'])
+                    att_text = att['text']
+                    # Calculate remaining characters available
+                    remaining_chars = MAX_ATTACHMENT_CHARS - total_attachment_chars
+                    if remaining_chars > 0:
+                        # Truncate if needed
+                        if len(att_text) > remaining_chars:
+                            att_text = att_text[:remaining_chars] + "... [truncated]"
+                        attachment_texts.append(att_text)
+                        total_attachment_chars += len(att_text)
+                    else:
+                        # No more space for attachments
+                        break
                 if att.get('mime_type') == 'application/pdf':
                     pdf_attachments.append(att)
             
