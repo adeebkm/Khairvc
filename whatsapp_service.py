@@ -64,6 +64,12 @@ class WhatsAppService:
                 try:
                     error_detail = e.response.json()
                     error_msg += f" - {json.dumps(error_detail)}"
+                    
+                    # Check for token expiration
+                    if e.response.status_code == 401:
+                        error_data = error_detail.get('error', {})
+                        if 'expired' in str(error_data).lower() or error_data.get('code') == 190:
+                            error_msg = f"WhatsApp access token has EXPIRED. Please get a new token from Meta Developer Console and update WHATSAPP_ACCESS_TOKEN in Railway.\n\nSteps:\n1. Go to https://developers.facebook.com/apps/\n2. Select your app → WhatsApp → API Setup\n3. Generate a new access token\n4. Update WHATSAPP_ACCESS_TOKEN in Railway web service environment variables\n\nOriginal error: {error_msg}"
                 except:
                     error_msg += f" - Status: {e.response.status_code}"
             raise Exception(error_msg)
