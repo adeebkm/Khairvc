@@ -110,13 +110,28 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
             )
             
             # Fetch emails from Gmail
-            print(f"📧 [TASK] Fetching emails: max_emails={max_emails}, force_full_sync={force_full_sync}, start_history_id={start_history_id}")
-            emails, new_history_id = gmail.get_emails(
-                max_results=max_emails,
-                unread_only=False,
-                start_history_id=start_history_id
-            )
-            print(f"📧 [TASK] Fetched {len(emails)} emails from Gmail (target: {max_emails})")
+            # For incremental sync, don't limit results - fetch ALL new emails
+            # For full sync, respect max_emails limit
+            if start_history_id:
+                # Incremental sync: fetch ALL new emails (no limit)
+                print(f"📧 [TASK] Incremental sync: Fetching ALL new emails since history_id={start_history_id}")
+                emails, new_history_id = gmail.get_emails(
+                    max_results=None,  # No limit for incremental sync
+                    unread_only=False,
+                    start_history_id=start_history_id
+                )
+            else:
+                # Full sync: respect max_emails limit
+                print(f"📧 [TASK] Full sync: Fetching up to {max_emails} emails...")
+                emails, new_history_id = gmail.get_emails(
+                    max_results=max_emails,
+                    unread_only=False,
+                    start_history_id=None
+                )
+            if start_history_id:
+                print(f"📧 [TASK] Incremental sync: Fetched {len(emails)} new emails (no limit)")
+            else:
+                print(f"📧 [TASK] Full sync: Fetched {len(emails)} emails from Gmail (target: {max_emails})")
             
             # Deduplicate emails by message_id to prevent processing the same email multiple times
             original_count = len(emails) if emails else 0
@@ -815,6 +830,68 @@ def fetch_older_emails(self, user_id, max_emails=200):
         return {'status': 'error', 'error': error_msg}
 
 
+
+@celery.task(name='tasks.periodic_email_sync')
+def periodic_email_sync():
+    """
+    Periodic task to check for new emails using incremental sync (Gmail History API)
+    Runs every 5 minutes via Celery Beat
+    Only syncs if user has 200+ emails already (initial setup complete)
+    """
+    try:
+        from app import app, db
+        from models import User, GmailToken
+        
+        with app.app_context():
+            # Get all users with Gmail connected
+            users = User.query.join(GmailToken).filter(
+                GmailToken.history_id.isnot(None)
+            ).all()
+            
+            print(f"🔄 [PERIODIC] Checking {len(users)} users for new emails...")
+            
+            synced_count = 0
+            errors = []
+            
+            for user in users:
+                try:
+                    # Check if user has completed initial setup (has 200+ emails)
+                    from models import EmailClassification
+                    email_count = EmailClassification.query.filter_by(user_id=user.id).count()
+                    
+                    # Only sync if user has completed initial setup (has 200+ emails)
+                    if email_count >= 200:
+                        # Trigger incremental sync (no limit, force_full_sync=False)
+                        # Call the task directly (we're in the same module)
+                        task = sync_user_emails.delay(
+                            user_id=user.id,
+                            max_emails=200,  # This will be ignored for incremental sync
+                            force_full_sync=False  # Use incremental sync
+                        )
+                        synced_count += 1
+                        print(f"✅ [PERIODIC] Triggered incremental sync for user {user.id} (has {email_count} emails)")
+                    else:
+                        print(f"⏭️  [PERIODIC] Skipping user {user.id} - still in setup ({email_count} emails, need 200+)")
+                        
+                except Exception as e:
+                    error_msg = f"Error syncing user {user.id}: {str(e)}"
+                    errors.append(error_msg)
+                    print(f"⚠️  [PERIODIC] {error_msg}")
+                    continue
+            
+            print(f"📧 [PERIODIC] Sync complete: {synced_count} users synced, {len(errors)} errors")
+            return {
+                'status': 'complete',
+                'users_synced': synced_count,
+                'errors': errors[:10]
+            }
+            
+    except Exception as e:
+        error_msg = f"Periodic email sync failed: {str(e)}"
+        print(f"❌ [PERIODIC] {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return {'status': 'error', 'error': error_msg}
 
 @celery.task(name='tasks.send_whatsapp_followups')
 def send_whatsapp_followups():

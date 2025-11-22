@@ -40,6 +40,8 @@ celery.conf.task_routes = {
 # Periodic tasks (Celery Beat schedule)
 from celery.schedules import crontab
 celery.conf.beat_schedule = {
+    # Note: Email sync is handled by Pub/Sub push notifications, not periodic polling
+    # 'periodic-email-sync' removed - using Pub/Sub webhook instead
     'send-whatsapp-followups': {
         'task': 'tasks.send_whatsapp_followups',
         'schedule': crontab(minute='*/30'),  # Every 30 minutes (checks if 6 hours passed)

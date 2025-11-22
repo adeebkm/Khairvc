@@ -255,9 +255,9 @@ class GmailClient:
         Supports incremental sync via Gmail History API.
         
         Args:
-            max_results: Max emails to fetch in full sync
+            max_results: Max emails to fetch in full sync (ignored for incremental sync)
             unread_only: Only fetch unread emails
-            start_history_id: If provided, use incremental sync (fetch only changes since this ID)
+            start_history_id: If provided, use incremental sync (fetch ALL changes since this ID, ignores max_results)
         
         Returns:
             tuple: (emails_list, new_history_id)
@@ -267,8 +267,9 @@ class GmailClient:
         
         try:
             # INCREMENTAL SYNC: Use History API if we have a history_id
+            # This fetches ALL new emails since history_id (ignores max_results limit)
             if start_history_id:
-                print(f"🔄 Using incremental sync from history ID: {start_history_id}")
+                print(f"🔄 Using incremental sync from history ID: {start_history_id} (fetching ALL new emails, no limit)")
                 return self._get_emails_incremental(start_history_id, unread_only)
             
             # FULL SYNC: Use messages.list() for first time or full refresh

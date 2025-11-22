@@ -3510,11 +3510,16 @@ def pubsub_webhook():
             db.session.commit()
         
         # Trigger email sync in background (if Celery is available)
-        # Use incremental sync with the history_id from the notification
+        # Use incremental sync - the task will use the updated history_id from database
         if CELERY_AVAILABLE:
             try:
                 from tasks import sync_user_emails
-                task = sync_user_emails.delay(user.id, start_history_id=history_id)
+                # Use incremental sync (force_full_sync=False) - it will use history_id from database
+                task = sync_user_emails.delay(
+                    user_id=user.id,
+                    max_emails=200,  # This will be ignored for incremental sync
+                    force_full_sync=False  # Use incremental sync with history_id from database
+                )
                 print(f"✅ Background sync task queued: {task.id} (incremental sync from historyId: {history_id})")
             except Exception as e:
                 print(f"⚠️  Could not queue background task: {str(e)}")
