@@ -466,15 +466,23 @@ def fetch_older_emails(self, user_id, max_emails=200):
     
     CLASSIFICATION_SEMAPHORE = Semaphore(10)
     
-    with app.app_context():
-        try:
-            print(f"📧 [TASK] fetch_older_emails started for user {user_id}, max_emails={max_emails}")
+    print(f"📧 [TASK] fetch_older_emails STARTING for user {user_id}, max_emails={max_emails}")
+    
+    try:
+        with app.app_context():
+            print(f"📧 [TASK] App context acquired successfully")
+            print(f"📧 [TASK] App context acquired, starting task execution...")
             
             # Update task state
-            self.update_state(
-                state='PROGRESS',
-                meta={'status': 'initializing', 'progress': 0, 'total': max_emails, 'fetched': 0, 'classified': 0}
-            )
+            try:
+                self.update_state(
+                    state='PROGRESS',
+                    meta={'status': 'initializing', 'progress': 0, 'total': max_emails, 'fetched': 0, 'classified': 0}
+                )
+                print(f"📧 [TASK] Task state updated to PROGRESS")
+            except Exception as state_error:
+                print(f"⚠️ [TASK] Error updating state: {state_error}")
+                # Continue anyway
             
             # Get user
             user = User.query.get(user_id)
