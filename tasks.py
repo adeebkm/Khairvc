@@ -477,6 +477,12 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                                 except Exception as whatsapp_error:
                                     error_msg = str(whatsapp_error)
                                     print(f"❌ [TASK] WhatsApp alert failed for deal {deal.id}: {error_msg}")
+                                    
+                                    # Check if it's an access token expiration error
+                                    if '401' in error_msg or 'expired' in error_msg.lower() or 'OAuthException' in error_msg:
+                                        print(f"⚠️  [TASK] WhatsApp access token has expired. Please update WHATSAPP_ACCESS_TOKEN in Railway environment variables.")
+                                        print(f"   Get a new token from: https://developers.facebook.com/apps/")
+                                    
                                     import traceback
                                     traceback.print_exc()
                                     # Don't fail the whole task if WhatsApp fails

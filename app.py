@@ -1746,13 +1746,13 @@ def get_emails():
                 # Continue processing other emails
                 continue
         
-        # Enforce 20 email limit: Delete oldest emails if more than 20 exist (after processing all emails)
+        # Keep latest 200 emails (not 20) - delete older emails if more than 200 exist
         total_classifications = EmailClassification.query.filter_by(user_id=current_user.id).count()
-        if total_classifications > 20:
-            # Get IDs of oldest emails (keep latest 20)
+        if total_classifications > 200:
+            # Get IDs of oldest emails (keep latest 200)
             oldest_classifications = EmailClassification.query.filter_by(
                 user_id=current_user.id
-            ).order_by(EmailClassification.classified_at.asc()).limit(total_classifications - 20).all()
+            ).order_by(EmailClassification.classified_at.asc()).limit(total_classifications - 200).all()
             
             # Delete associated deals first (to avoid foreign key constraints)
             for old_class in oldest_classifications:
@@ -1763,7 +1763,7 @@ def get_emails():
                 db.session.delete(old_class)
             
             db.session.commit()
-            print(f"🗑️  Deleted {len(oldest_classifications)} old emails (keeping latest 20)")
+            print(f"🗑️  Deleted {len(oldest_classifications)} old emails (keeping latest 200)")
         
         print(f"✅ Returning {len(classified_emails)} emails to frontend")
         
