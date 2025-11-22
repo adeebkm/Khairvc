@@ -1171,21 +1171,47 @@ def get_emails():
                     db.session.commit()
                     print(f"💾 Stored new historyId: {new_history_id}")
                 
-                # If incremental sync found no new emails, trigger background sync as fallback
-                # This handles cases where Pub/Sub didn't trigger or history_id is stale
+                # If incremental sync found no new emails, check if history_id is stale
+                # If history_id is stale, there might be new emails that weren't detected
                 if len(emails) == 0 and start_history_id and CELERY_AVAILABLE:
-                    print(f"🔄 Incremental sync found no new emails. Triggering background sync to check for new emails...")
+                    print(f"🔄 Incremental sync found no new emails. Checking if history_id is stale...")
                     try:
-                        from tasks import sync_user_emails
-                        # Trigger background sync with incremental sync (will use updated history_id)
-                        task = sync_user_emails.delay(
-                            user_id=current_user.id,
-                            max_emails=200,
-                            force_full_sync=False  # Use incremental sync
-                        )
-                        print(f"✅ Background sync triggered: {task.id}")
+                        # Get current history_id from Gmail profile to check if it's different
+                        profile = gmail.get_profile()
+                        current_history_id = profile.get('historyId') if profile else None
+                        
+                        if current_history_id and str(current_history_id) != str(start_history_id):
+                            print(f"⚠️  History_id is stale! Stored: {start_history_id}, Current: {current_history_id}")
+                            print(f"   Updating history_id and triggering background sync to fetch new emails...")
+                            
+                            # Update history_id in database
+                            if gmail_token:
+                                gmail_token.history_id = str(current_history_id)
+                                db.session.commit()
+                            
+                            # Trigger background sync with updated history_id
+                            from tasks import sync_user_emails
+                            task = sync_user_emails.delay(
+                                user_id=current_user.id,
+                                max_emails=200,  # This will be ignored for incremental sync
+                                force_full_sync=False  # Use incremental sync with updated history_id
+                            )
+                            print(f"✅ Background sync triggered with updated history_id: {task.id}")
+                        else:
+                            print(f"✅ History_id is current ({start_history_id}). No new emails.")
                     except Exception as sync_error:
-                        print(f"⚠️  Could not trigger background sync: {str(sync_error)}")
+                        print(f"⚠️  Could not check history_id or trigger background sync: {str(sync_error)}")
+                        # Fallback: trigger sync anyway
+                        try:
+                            from tasks import sync_user_emails
+                            task = sync_user_emails.delay(
+                                user_id=current_user.id,
+                                max_emails=200,
+                                force_full_sync=False
+                            )
+                            print(f"✅ Background sync triggered (fallback): {task.id}")
+                        except:
+                            pass
                 
             except Exception as e:
                 error_str = str(e)
