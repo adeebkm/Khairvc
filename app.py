@@ -3142,11 +3142,11 @@ def fetch_initial_emails():
     
     try:
         # Check if user already has emails - if so, skip setup
-        # BUT only if they have at least 60 emails (initial setup target)
+        # BUT only if they have at least 200 emails (initial setup target)
         from models import EmailClassification
         existing_count = EmailClassification.query.filter_by(user_id=current_user.id).count()
-        if existing_count >= 60:
-            print(f"✅ User {current_user.id} already has {existing_count} emails (>= 60), marking setup as complete")
+        if existing_count >= 200:
+            print(f"✅ User {current_user.id} already has {existing_count} emails (>= 200), marking setup as complete")
             current_user.setup_completed = True
             current_user.initial_emails_fetched = existing_count
             db.session.commit()
@@ -3156,12 +3156,12 @@ def fetch_initial_emails():
                 'message': f'Setup already complete ({existing_count} emails found)',
                 'email_count': existing_count
             })
-        elif existing_count > 0 and existing_count < 60:
-            # User has some emails but not enough - continue setup to reach 60
-            print(f"⚠️  User {current_user.id} has {existing_count} emails (< 60), continuing setup...")
+        elif existing_count > 0 and existing_count < 200:
+            # User has some emails but not enough - continue setup to reach 200
+            print(f"⚠️  User {current_user.id} has {existing_count} emails (< 200), continuing setup...")
             # Don't mark as complete, continue with setup
         
-        max_emails = 60  # Initial fetch: 60 emails (3 pages of 40)
+        max_emails = 200  # Initial fetch: 200 emails (to match our target)
         
         # Try to use background task if available
         if CELERY_AVAILABLE:

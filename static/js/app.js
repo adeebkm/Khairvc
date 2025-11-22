@@ -200,8 +200,8 @@ async function startSetup() {
     if (progressDiv) progressDiv.style.display = 'block';
     
     try {
-        // Start initial fetch (60 emails)
-        if (progressText) progressText.textContent = 'Fetching your first 60 emails...';
+        // Start initial fetch (200 emails)
+        if (progressText) progressText.textContent = 'Fetching your first 200 emails...';
         if (progressBar) progressBar.style.width = '10%';
         
         const response = await fetch('/api/setup/fetch-initial', {
@@ -238,13 +238,13 @@ async function startSetup() {
             // Wait a bit for any background classification to complete
             await new Promise(resolve => setTimeout(resolve, 2000));
             
-            // Load emails and wait until we get 60 emails OR all available if less than 60
+            // Load emails and wait until we get 200 emails OR all available if less than 200
             // Setup screen should NOT disappear until emails are ready
             let retryCount = 0;
             const maxRetries = 60; // 60 seconds max wait (1 second per retry)
             let previousCount = 0;
             let stableCount = 0; // Track how many times count stayed the same
-            const targetCount = 60; // Always target 60 emails
+            const targetCount = 200; // Always target 200 emails
             
             while (retryCount < maxRetries) {
                 await loadEmailsFromDatabase();
@@ -252,7 +252,7 @@ async function startSetup() {
                 
                 console.log(`📊 Email count: ${currentCount} (attempt ${retryCount + 1}/${maxRetries}, target: ${targetCount})`);
                 
-                // If we have 60+ emails, we're done
+                // If we have 200+ emails, we're done
                 if (currentCount >= targetCount) {
                     console.log(`✅ Loaded ${currentCount} emails (target: ${targetCount}+)`);
                     break;
@@ -333,7 +333,7 @@ async function startSetup() {
                 }
             }, 500);
             
-            // Start fetching older emails if we have 60 emails but less than 200
+            // Start fetching older emails if we have less than 200 (shouldn't be needed if initial fetch is 200)
             // Check database count, not just frontend array
             try {
                 const countResponse = await fetch('/api/emails/count');
@@ -347,14 +347,14 @@ async function startSetup() {
                         startFetchOlderEmailsSilently(200);
                     }, 2000);
                 } else if (dbCount < 60) {
-                    console.log(`ℹ️  Only ${dbCount} emails in database (less than 60), skipping older email fetch`);
+                    console.log(`ℹ️  Only ${dbCount} emails in database (less than 200), skipping older email fetch`);
                 } else {
                     console.log(`✅ Already have ${dbCount} emails (200+), skipping older email fetch`);
                 }
             } catch (error) {
                 console.warn('⚠️ Could not check database count, using frontend count:', error);
                 // Fallback to frontend count
-                if (allEmails.length >= 60 && allEmails.length < 200) {
+                if (allEmails.length < 200) {
                     console.log('🔄 Setup complete, starting older email fetch...');
                     setTimeout(() => {
                         startFetchOlderEmailsSilently(200);
@@ -710,7 +710,7 @@ async function fetchInitialEmailsStreaming(progressBar, progressText) {
     // Use streaming endpoint for initial fetch
     if (progressText) progressText.textContent = 'Connecting to server...';
     
-    const response = await fetch('/api/emails/stream?max=60&force_full_sync=true');
+    const response = await fetch('/api/emails/stream?max=200&force_full_sync=true');
     
     if (!response.ok) {
         throw new Error(`Streaming failed: ${response.status} ${response.statusText}`);
@@ -724,7 +724,7 @@ async function fetchInitialEmailsStreaming(progressBar, progressText) {
     const decoder = new TextDecoder();
     let buffer = '';
     let processed = 0;
-    const total = 60;
+    const total = 200;
     
     try {
         while (true) {
@@ -1103,7 +1103,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     retryCount++;
                 }
                 
-                // If we have 60+ emails, we're done
+                // If we have 200+ emails, we're done
                 if (allEmails.length >= 60) break;
             }
             console.log(`✅ Loaded ${allEmails.length} emails after waiting`);
