@@ -2267,7 +2267,9 @@ async function loadEmailsFromDatabase() {
         // ALWAYS load ALL emails from database (no category filter)
         // Let applyFilters() handle category filtering on the frontend
         // This ensures allEmails contains all emails, and filtering happens client-side
-        let url = `/api/emails?db_only=true&max=200&show_spam=true`;
+        // NOTE: Removed db_only=true to allow Gmail API to check for new emails
+        // This will trigger incremental sync, and if no new emails found, will trigger background sync as fallback
+        let url = `/api/emails?max=200&show_spam=true`;
         
         const response = await fetch(url);
         const data = await response.json();
