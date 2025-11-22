@@ -304,6 +304,8 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                     try:
                         with CLASSIFICATION_SEMAPHORE:
                             print(f"🤖 [TASK] Email {idx + 1}/{len(emails)}: Classifying (message_id: {email.get('id', 'unknown')[:16]}...)")
+                            print(f"   📧 Subject: {email.get('subject', 'No Subject')[:50]}")
+                            print(f"   👤 From: {email.get('from', 'Unknown')[:50]}")
                             classification_result = classifier.classify_email(
                                 subject=email.get('subject', ''),
                                 body=email_body,
@@ -312,7 +314,9 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                                 thread_id=email.get('thread_id', ''),
                                 user_id=str(user_id)
                             )
-                            print(f"✅ [TASK] Email {idx + 1}/{len(emails)}: Classified as {classification_result.get('category', 'UNKNOWN')}")
+                            category = classification_result.get('category', 'UNKNOWN')
+                            confidence = classification_result.get('confidence', 0.0)
+                            print(f"✅ [TASK] Email {idx + 1}/{len(emails)}: Classified as {category} (confidence: {confidence:.2f})")
                     except Exception as classify_error:
                         emails_failed_classification += 1
                         error_msg = f"Error classifying email {idx + 1}: {str(classify_error)}"
@@ -473,16 +477,19 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                                     if user:
                                         print(f"📱 [TASK] Checking WhatsApp for deal {deal.id}: enabled={user.whatsapp_enabled}, number={user.whatsapp_number[:10] + '...' if user.whatsapp_number else 'None'}")
                                         
-                                        if user.whatsapp_enabled and user.whatsapp_number:
-                                            print(f"📱 [TASK] Sending WhatsApp alert for deal {deal.id} to {user.whatsapp_number}")
-                                            whatsapp = WhatsAppService()
-                                            whatsapp.send_deal_alert(deal, user.whatsapp_number)
-                                            deal.whatsapp_alert_sent = True
-                                            deal.whatsapp_alert_sent_at = datetime.utcnow()
-                                            db.session.commit()
-                                            print(f"✅ [TASK] WhatsApp alert sent for deal {deal.id}")
-                                        else:
-                                            print(f"⚠️  [TASK] WhatsApp not enabled or number not set for user {user.id}")
+                        if user.whatsapp_enabled and user.whatsapp_number:
+                            print(f"📱 [TASK] Sending WhatsApp alert for deal {deal.id} to {user.whatsapp_number}")
+                            print(f"   📧 Deal subject: {deal.subject or 'No subject'}")
+                            print(f"   👤 Founder: {deal.founder_name or 'Unknown'}")
+                            whatsapp = WhatsAppService()
+                            whatsapp.send_deal_alert(deal, user.whatsapp_number)
+                            deal.whatsapp_alert_sent = True
+                            deal.whatsapp_alert_sent_at = datetime.utcnow()
+                            db.session.commit()
+                            print(f"✅ [TASK] WhatsApp alert sent for deal {deal.id}")
+                        else:
+                            print(f"⚠️  [TASK] WhatsApp not enabled or number not set for user {user.id}")
+                            print(f"   Enabled: {user.whatsapp_enabled}, Number: {user.whatsapp_number[:10] + '...' if user.whatsapp_number else 'None'}")
                                     else:
                                         print(f"⚠️  [TASK] User {user_id} not found for WhatsApp alert")
                                 except Exception as whatsapp_error:

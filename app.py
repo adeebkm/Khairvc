@@ -3492,6 +3492,69 @@ def background_fetch_emails():
 
 # ==================== PUB/SUB WEBHOOK (TEST ENVIRONMENT) ====================
 
+@app.route('/api/whatsapp/send-pending-alerts', methods=['POST'])
+@login_required
+def send_pending_whatsapp_alerts():
+    """
+    Send WhatsApp alerts for existing deals that haven't received alerts yet
+    Useful when WhatsApp was enabled after emails were already classified
+    """
+    try:
+        if not current_user.whatsapp_enabled or not current_user.whatsapp_number:
+            return jsonify({
+                'success': False,
+                'error': 'WhatsApp not enabled or number not set. Please configure in Settings.'
+            }), 400
+        
+        # Find deals that haven't received WhatsApp alerts yet
+        pending_deals = Deal.query.filter_by(
+            user_id=current_user.id,
+            whatsapp_alert_sent=False
+        ).all()
+        
+        if not pending_deals:
+            return jsonify({
+                'success': True,
+                'message': 'No pending deals found. All deals have already received WhatsApp alerts.',
+                'alerts_sent': 0
+            })
+        
+        from whatsapp_service import WhatsAppService
+        whatsapp = WhatsAppService()
+        
+        alerts_sent = 0
+        errors = []
+        
+        for deal in pending_deals:
+            try:
+                whatsapp.send_deal_alert(deal, current_user.whatsapp_number)
+                deal.whatsapp_alert_sent = True
+                deal.whatsapp_alert_sent_at = datetime.utcnow()
+                db.session.commit()
+                alerts_sent += 1
+                print(f"✅ Sent WhatsApp alert for existing deal {deal.id}: {deal.subject}")
+            except Exception as e:
+                error_msg = str(e)
+                errors.append(f"Deal {deal.id}: {error_msg}")
+                print(f"❌ Failed to send WhatsApp alert for deal {deal.id}: {error_msg}")
+                db.session.rollback()
+                continue
+        
+        return jsonify({
+            'success': True,
+            'message': f'Sent {alerts_sent} WhatsApp alerts for pending deals',
+            'alerts_sent': alerts_sent,
+            'total_pending': len(pending_deals),
+            'errors': errors[:5] if errors else []
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/pubsub/gmail-notifications', methods=['POST'])
 def pubsub_webhook():
     """
