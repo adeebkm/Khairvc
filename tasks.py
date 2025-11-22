@@ -329,40 +329,40 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                                 commit_success = True
                                 break
                             except Exception as commit_error:
-                            error_str = str(commit_error)
-                            # Handle connection errors
-                            if 'EOF' in error_str or 'SSL SYSCALL' in error_str or 'connection' in error_str.lower():
-                                if commit_attempt < max_commit_retries - 1:
+                                error_str = str(commit_error)
+                                # Handle connection errors
+                                if 'EOF' in error_str or 'SSL SYSCALL' in error_str or 'connection' in error_str.lower():
+                                    if commit_attempt < max_commit_retries - 1:
+                                        db.session.rollback()
+                                        time.sleep(0.5)
+                                        # Re-add the classification
+                                        db.session.add(new_classification)
+                                        continue
+                                    else:
+                                        raise
+                                # Handle duplicate key errors (unique constraint violation)
+                                elif 'UniqueViolation' in error_str or 'duplicate key' in error_str.lower() or 'uq_user_message' in error_str:
                                     db.session.rollback()
-                                    time.sleep(0.5)
-                                    # Re-add the classification
-                                    db.session.add(new_classification)
-                                    continue
+                                    # Expire the object to clear it from session
+                                    try:
+                                        db.session.expunge(new_classification)
+                                    except:
+                                        pass
+                                    # Clear all pending changes to ensure clean state for next email
+                                    db.session.expire_all()
+                                    print(f"⏭️  [TASK] Email {idx + 1}/{len(emails)} (message_id: {email.get('id', 'unknown')[:16]}...): Duplicate key error - already exists, skipping")
+                                    duplicate_detected = True
+                                    break  # Skip this email, continue to next
                                 else:
+                                    db.session.rollback()
+                                    # Expire the object to clear it from session
+                                    try:
+                                        db.session.expunge(new_classification)
+                                    except:
+                                        pass
+                                    # Clear all pending changes
+                                    db.session.expire_all()
                                     raise
-                            # Handle duplicate key errors (unique constraint violation)
-                            elif 'UniqueViolation' in error_str or 'duplicate key' in error_str.lower() or 'uq_user_message' in error_str:
-                                db.session.rollback()
-                                # Expire the object to clear it from session
-                                try:
-                                    db.session.expunge(new_classification)
-                                except:
-                                    pass
-                                # Clear all pending changes to ensure clean state for next email
-                                db.session.expire_all()
-                                print(f"⏭️  [TASK] Email {idx + 1}/{len(emails)} (message_id: {email.get('id', 'unknown')[:16]}...): Duplicate key error - already exists, skipping")
-                                duplicate_detected = True
-                                break  # Skip this email, continue to next
-                            else:
-                                db.session.rollback()
-                                # Expire the object to clear it from session
-                                try:
-                                    db.session.expunge(new_classification)
-                                except:
-                                    pass
-                                # Clear all pending changes
-                                db.session.expire_all()
-                                raise
                         
                         if duplicate_detected:
                             emails_processed += 1
