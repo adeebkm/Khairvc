@@ -502,11 +502,17 @@ def fetch_older_emails(self, user_id, max_emails=200):
                     }
                 )
             
-            # Fetch older emails slowly
+            # Get existing message IDs to skip duplicates
+            existing_classifications = EmailClassification.query.filter_by(user_id=user_id).all()
+            existing_message_ids = {c.message_id for c in existing_classifications}
+            print(f"📊 Found {len(existing_message_ids)} existing emails in database, will skip duplicates")
+            
+            # Fetch older emails slowly (skip existing ones)
             print(f"📧 Starting to fetch older emails for user {user_id} (target: {max_emails})...")
             emails, next_page_token, total_fetched = gmail.get_older_emails(
                 max_results=max_emails,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                skip_existing_ids=existing_message_ids
             )
             
             if not emails:

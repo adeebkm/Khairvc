@@ -380,7 +380,7 @@ class GmailClient:
                 print(f"Error fetching emails: {error_str}")
                 return [], None
     
-    def get_older_emails(self, max_results=200, start_page_token=None, progress_callback=None):
+    def get_older_emails(self, max_results=200, start_page_token=None, progress_callback=None, skip_existing_ids=None):
         """
         Fetch older emails using pagination (for emails before the initial 60).
         Fetches slowly with delays to avoid rate limits.
@@ -389,6 +389,7 @@ class GmailClient:
             max_results: Maximum total emails to fetch (default 200)
             start_page_token: Optional pageToken to start from (for resuming)
             progress_callback: Optional callback function(emails_fetched, total_target) for progress updates
+            skip_existing_ids: Optional set of message IDs to skip (already in database)
         
         Returns:
             tuple: (emails_list, next_page_token, total_fetched)
@@ -401,6 +402,7 @@ class GmailClient:
             emails = []
             page_token = start_page_token
             total_fetched = 0
+            existing_ids = skip_existing_ids or set()
             
             # Fetch in smaller pages to avoid rate limits (super slow for background fetching)
             PAGE_SIZE = 20  # Fetch 20 emails per page
@@ -445,6 +447,23 @@ class GmailClient:
                     print(f"✅ No more emails to fetch")
                     break
                 
+                # Filter out messages we already have (if skip_existing_ids provided)
+                messages_to_fetch = messages
+                if existing_ids:
+                    messages_to_fetch = [msg for msg in messages if msg.get('id') not in existing_ids]
+                    skipped = len(messages) - len(messages_to_fetch)
+                    if skipped > 0:
+                        print(f"⏭️  Skipping {skipped} emails that are already in database")
+                
+                if not messages_to_fetch:
+                    # All messages in this page are duplicates, move to next page
+                    if next_page_token:
+                        page_token = next_page_token
+                        time.sleep(DELAY_BETWEEN_PAGES)
+                        continue
+                    else:
+                        break
+                
                 # Batch fetch email details for this page
                 BATCH_SIZE = 10
                 page_emails = []
@@ -462,8 +481,8 @@ class GmailClient:
                             page_emails.append(email_data)
                 
                 # Process messages in batches
-                for i in range(0, len(messages), BATCH_SIZE):
-                    batch_chunk = messages[i:i + BATCH_SIZE]
+                for i in range(0, len(messages_to_fetch), BATCH_SIZE):
+                    batch_chunk = messages_to_fetch[i:i + BATCH_SIZE]
                     
                     batch = self.service.new_batch_http_request(callback=callback)
                     for message in batch_chunk:
@@ -489,7 +508,7 @@ class GmailClient:
                             print(f"⚠️ Batch error: {batch_error}")
                     
                     # Delay between batches (except for the last batch of the page)
-                    if i + BATCH_SIZE < len(messages):
+                    if i + BATCH_SIZE < len(messages_to_fetch):
                         time.sleep(DELAY_BETWEEN_BATCHES)
                 
                 emails.extend(page_emails)

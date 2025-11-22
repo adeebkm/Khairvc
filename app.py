@@ -902,12 +902,16 @@ def trigger_fetch_older_emails():
         
         # Check if we already have 200+ emails
         email_count = EmailClassification.query.filter_by(user_id=current_user.id).count()
+        print(f"📊 Checking older email fetch: current count = {email_count}, target = 200")
         if email_count >= 200:
+            print(f"✅ Already have {email_count} emails (200+), skipping older email fetch")
             return jsonify({
                 'success': False,
                 'error': 'Already have 200+ emails',
                 'count': email_count
             }), 200  # Return 200 to indicate success but no action needed
+        
+        print(f"📧 Starting older email fetch: have {email_count} emails, need {200 - email_count} more")
         
         # Check if workers are running (with timeout to prevent hanging)
         try:

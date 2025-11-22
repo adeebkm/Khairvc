@@ -105,7 +105,7 @@ async function autoFetchNewEmails() {
     
     try {
         // Use incremental sync - only fetch new emails (no force_full_sync)
-        const response = await fetch(`/api/emails?max=100&show_spam=true`);
+        const response = await fetch(`/api/emails?max=200&show_spam=true`);
         const data = await response.json();
         
         // Handle rate limit errors
@@ -1966,7 +1966,7 @@ async function fetchEmails() {
         }
         
         // FALLBACK: Use streaming endpoint (original implementation)
-        let url = `/api/emails/stream?max=100&`;
+        let url = `/api/emails/stream?max=200&`;
         if (forceFullSync) url += 'force_full_sync=true&';
         
         const response = await fetch(url);
@@ -1975,7 +1975,7 @@ async function fetchEmails() {
         if (!response.body) {
             console.warn('Streaming not supported, falling back to regular fetch');
             // Fallback to regular endpoint
-            url = `/api/emails?max=100&`;
+            url = `/api/emails?max=200&`;
             if (categoryParam) url += `category=${categoryParam}&`;
             if (forceFullSync) url += 'force_full_sync=true&';
             url += 'show_spam=true';
@@ -2246,7 +2246,7 @@ async function loadEmailsFromDatabase() {
         // ALWAYS load ALL emails from database (no category filter)
         // Let applyFilters() handle category filtering on the frontend
         // This ensures allEmails contains all emails, and filtering happens client-side
-        let url = `/api/emails?db_only=true&max=100&show_spam=true`;
+        let url = `/api/emails?db_only=true&max=200&show_spam=true`;
         
         const response = await fetch(url);
         const data = await response.json();
