@@ -486,6 +486,8 @@ def signup():
         email = request.form.get('email')
         password = request.form.get('password')
         confirm_password = request.form.get('confirm_password')
+        whatsapp_enabled = request.form.get('whatsapp_enabled') == 'on'
+        whatsapp_number = request.form.get('whatsapp_number', '').strip()
         
         # Validation
         if password != confirm_password:
@@ -497,9 +499,26 @@ def signup():
         if User.query.filter_by(email=email).first():
             return render_template('signup.html', error='Email already registered')
         
+        # Validate WhatsApp number if enabled
+        if whatsapp_enabled and not whatsapp_number:
+            return render_template('signup.html', error='Please enter a WhatsApp number')
+        
+        if whatsapp_enabled and not whatsapp_number.startswith('+'):
+            return render_template('signup.html', error='WhatsApp number must include country code (e.g., +1234567890)')
+        
         # Create new user
         new_user = User(username=username, email=email)
         new_user.set_password(password)
+        
+        # Set WhatsApp preferences
+        if whatsapp_enabled and whatsapp_number:
+            new_user.whatsapp_enabled = True
+            new_user.whatsapp_number = whatsapp_number
+            print(f"✅ New user {username} signed up with WhatsApp: {whatsapp_number}")
+        else:
+            new_user.whatsapp_enabled = False
+            new_user.whatsapp_number = None
+        
         db.session.add(new_user)
         db.session.commit()
         

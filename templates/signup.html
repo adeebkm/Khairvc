@@ -97,6 +97,25 @@
                 <input type="password" id="confirm_password" name="confirm_password" required>
             </div>
             
+            <!-- WhatsApp Settings -->
+            <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 20px; margin-top: 30px;">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="whatsapp_enabled" name="whatsapp_enabled" style="width: auto; margin-right: 10px;">
+                    <span>📱 Enable WhatsApp alerts for deal flow</span>
+                </label>
+                <p style="font-size: 0.85rem; color: #666; margin-top: 5px; margin-left: 30px;">
+                    Get instant notifications when we detect potential deals
+                </p>
+            </div>
+            
+            <div class="form-group" id="whatsapp_number_group" style="display: none;">
+                <label for="whatsapp_number">WhatsApp Number</label>
+                <input type="tel" id="whatsapp_number" name="whatsapp_number" placeholder="+1234567890">
+                <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
+                    Include country code (e.g., +1 for US)
+                </p>
+            </div>
+            
             <button type="submit" class="btn btn-primary btn-block">Create Account</button>
         </form>
         
@@ -164,6 +183,23 @@
             }
         }
     </style>
+
+    <script>
+        // Show/hide WhatsApp number field based on checkbox
+        const whatsappCheckbox = document.getElementById('whatsapp_enabled');
+        const whatsappNumberGroup = document.getElementById('whatsapp_number_group');
+        const whatsappNumberInput = document.getElementById('whatsapp_number');
+        
+        whatsappCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                whatsappNumberGroup.style.display = 'block';
+                whatsappNumberInput.required = true;
+            } else {
+                whatsappNumberGroup.style.display = 'none';
+                whatsappNumberInput.required = false;
+            }
+        });
+    </script>
 </body>
 </html>
 
