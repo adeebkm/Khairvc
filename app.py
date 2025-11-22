@@ -1146,9 +1146,10 @@ def get_emails():
         if not gmail:
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
-        # Get max_emails from query param - dynamically fetch based on filter selection
-        # Default to 200 to show all emails (not 20)
-        max_emails = min(request.args.get('max', default=200, type=int), 200)  # Cap at 200 emails max (user can select 20, 50, 100, or 200)
+        # Get max_emails from query param for Gmail API fetching
+        # For display, there's no limit - pagination handles it
+        # For initial setup (full sync), limit to 200. For incremental sync, fetch all new emails.
+        max_emails = request.args.get('max', default=None, type=int)  # No default limit - will be set based on sync type
         category_filter = request.args.get('category')  # Optional category filter
         show_spam = request.args.get('show_spam', 'false').lower() == 'true'
         unread_only = False  # Always fetch all emails (unread only filter removed)
@@ -1178,9 +1179,22 @@ def get_emails():
                     start_history_id = None  # Force full sync
             
             try:
+                # Determine max_results based on sync type:
+                # - Full sync (initial setup): Limit to 200
+                # - Incremental sync (has history_id): Fetch all new emails (no limit)
+                if start_history_id is None:
+                    # Full sync - limit to 200 for initial setup
+                    gmail_max_results = min(max_emails, 200) if max_emails else 200
+                    print(f"🔄 Full sync: Limiting to {gmail_max_results} emails for initial setup")
+                else:
+                    # Incremental sync - fetch all new emails (gmail_client ignores max_results for incremental)
+                    # Pass a large number as placeholder (method ignores it anyway)
+                    gmail_max_results = max_emails if max_emails else 10000  # Large number, but method ignores it for incremental
+                    print(f"🔄 Incremental sync: Fetching all new emails (no limit)")
+                
                 # Use incremental sync if we have a history_id (90%+ reduction in API calls!)
                 emails, new_history_id = gmail.get_emails(
-                    max_results=max_emails, 
+                    max_results=gmail_max_results, 
                     unread_only=unread_only,
                     start_history_id=start_history_id
                 )
@@ -1266,10 +1280,10 @@ def get_emails():
             if category_filter:
                 query = query.filter_by(category=category_filter)
             
-            # Limit to max_emails (user can request 20, 50, 100, or 200)
-            # When category filter is applied, we still limit to max_emails since filter is in SQL
-            print(f"   Loading latest {max_emails} emails from database" + (f" (category: {category_filter})" if category_filter else ""))
-            db_classifications = query.order_by(EmailClassification.classified_at.desc()).limit(max_emails).all()
+            # No limit on database queries - pagination handles display
+            # Show all emails from database (pagination will handle large result sets)
+            print(f"   Loading all emails from database" + (f" (category: {category_filter})" if category_filter else ""))
+            db_classifications = query.order_by(EmailClassification.classified_at.desc()).all()
             
             classified_emails = []
             # Batch fetch star status for all emails from database
@@ -1726,7 +1740,31 @@ def get_emails():
                     if classification_result['category'] != CATEGORY_DEAL_FLOW:
                         db.session.add(classification)
                     
-                    db.session.commit()
+                    # Commit with duplicate error handling (race condition protection)
+                    try:
+                        db.session.commit()
+                    except Exception as commit_error:
+                        error_str = str(commit_error)
+                        # Handle duplicate key errors (unique constraint violation)
+                        if 'UniqueViolation' in error_str or 'duplicate key' in error_str.lower() or 'uq_user_message' in error_str:
+                            db.session.rollback()
+                            print(f"⏭️  Email {email['id']} was inserted by another process, fetching existing classification...")
+                            # Fetch the existing classification
+                            existing_classification = EmailClassification.query.filter_by(
+                                user_id=current_user.id,
+                                message_id=email['id']
+                            ).first()
+                            if existing_classification:
+                                # Use existing classification instead
+                                classification = existing_classification
+                            else:
+                                # If we can't find it, skip this email
+                                print(f"⚠️  Could not find existing classification for email {email['id']}, skipping...")
+                                continue
+                        else:
+                            # Other errors - rollback and re-raise
+                            db.session.rollback()
+                            raise
                 
                 # Add classification info to email
                 email['classification'] = {
@@ -1765,25 +1803,8 @@ def get_emails():
                 # Continue processing other emails
                 continue
         
-        # Keep latest 200 emails (not 20) - delete older emails if more than 200 exist
-        total_classifications = EmailClassification.query.filter_by(user_id=current_user.id).count()
-        if total_classifications > 200:
-            # Get IDs of oldest emails (keep latest 200)
-            oldest_classifications = EmailClassification.query.filter_by(
-                user_id=current_user.id
-            ).order_by(EmailClassification.classified_at.asc()).limit(total_classifications - 200).all()
-            
-            # Delete associated deals first (to avoid foreign key constraints)
-            for old_class in oldest_classifications:
-                Deal.query.filter_by(classification_id=old_class.id).delete()
-            
-            # Delete oldest classifications
-            for old_class in oldest_classifications:
-                db.session.delete(old_class)
-            
-            db.session.commit()
-            print(f"🗑️  Deleted {len(oldest_classifications)} old emails (keeping latest 200)")
-        
+        # Note: Database accumulates emails over time (no deletion limit)
+        # Initial setup fetches 200 emails, but pub/sub can add more beyond that
         print(f"✅ Returning {len(classified_emails)} emails to frontend")
         
         return jsonify({
@@ -1827,19 +1848,32 @@ def stream_emails():
                 yield f"data: {json.dumps({'error': 'Failed to connect to Gmail'})}\n\n"
                 return
             
-            max_emails = min(request.args.get('max', default=20, type=int), 200)
+            max_emails = request.args.get('max', default=None, type=int)  # No default limit
             force_full_sync = request.args.get('force_full_sync', 'false').lower() == 'true'
             
             # Get history_id for incremental sync
             gmail_token = GmailToken.query.filter_by(user_id=user_id).first()
             start_history_id = gmail_token.history_id if gmail_token and not force_full_sync else None
             
+            # Determine max_results based on sync type:
+            # - Full sync (initial setup): Limit to 200
+            # - Incremental sync (has history_id): Fetch all new emails (no limit)
+            if start_history_id is None:
+                # Full sync - limit to 200 for initial setup
+                gmail_max_results = min(max_emails, 200) if max_emails else 200
+                print(f"🔄 Full sync: Limiting to {gmail_max_results} emails for initial setup")
+            else:
+                # Incremental sync - fetch all new emails (gmail_client ignores max_results for incremental)
+                # Pass a large number as placeholder (method ignores it anyway)
+                gmail_max_results = max_emails if max_emails else 10000  # Large number, but method ignores it for incremental
+                print(f"🔄 Incremental sync: Fetching all new emails (no limit)")
+            
             # Send initial status
-            yield f"data: {json.dumps({'status': 'fetching', 'total': max_emails})}\n\n"
+            yield f"data: {json.dumps({'status': 'fetching', 'total': gmail_max_results if start_history_id is None else 'unlimited'})}\n\n"
             
             # Fetch emails from Gmail
             emails, new_history_id = gmail.get_emails(
-                max_results=max_emails,
+                max_results=gmail_max_results,
                 unread_only=False,
                 start_history_id=start_history_id
             )

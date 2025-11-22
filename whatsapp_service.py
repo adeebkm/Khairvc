@@ -121,8 +121,28 @@ class WhatsAppService:
         # Build template payload
         # If using custom template, include parameters
         if self.template_name != 'hello_world':
-            # Custom template with parameters
-            # Template should have 6 variables: subject, sender, founder, snippet, deck, state
+            # Check how many variables the template expects by trying different formats
+            # First, try 3-variable format (subject, sender, details)
+            # If that fails, fall back to 6-variable format
+            
+            # Combine details into one field to reduce variable count
+            details_parts = []
+            if founder_name and founder_name != 'Unknown':
+                details_parts.append(f"Founder: {founder_name}")
+            if snippet:
+                details_parts.append(snippet[:150])  # Limit snippet for combined field
+            if deck_link and deck_link != 'No deck':
+                details_parts.append(f"Deck: {deck_link[:40]}")
+            if deal_state:
+                details_parts.append(f"State: {deal_state}")
+            
+            details_text = "\n".join(details_parts) if details_parts else "No additional details"
+            # Limit total details to 300 chars
+            if len(details_text) > 300:
+                details_text = details_text[:297] + "..."
+            
+            # Try 3-variable format first (most common)
+            # Template variables: {{subject}}, {{sender}}, {{details}}
             payload = {
                 'messaging_product': 'whatsapp',
                 'to': to_number,
@@ -136,12 +156,9 @@ class WhatsAppService:
                         {
                             'type': 'body',
                             'parameters': [
-                                {'type': 'text', 'text': subject[:50]},  # Variable 1: Subject (max 50 chars)
-                                {'type': 'text', 'text': sender[:50]},   # Variable 2: Sender (max 50 chars)
-                                {'type': 'text', 'text': founder_name[:50]},  # Variable 3: Founder (max 50 chars)
-                                {'type': 'text', 'text': snippet[:200]},  # Variable 4: Snippet (max 200 chars)
-                                {'type': 'text', 'text': deck_link[:50]},  # Variable 5: Deck (max 50 chars)
-                                {'type': 'text', 'text': deal_state[:20]}  # Variable 6: State (max 20 chars)
+                                {'type': 'text', 'text': subject[:50]},  # {{subject}}
+                                {'type': 'text', 'text': sender[:50]},   # {{sender}}
+                                {'type': 'text', 'text': details_text[:300]}  # {{details}}
                             ]
                         }
                     ]
