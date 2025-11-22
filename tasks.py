@@ -470,7 +470,6 @@ def fetch_older_emails(self, user_id, max_emails=200):
     
     try:
         with app.app_context():
-            print(f"📧 [TASK] App context acquired successfully")
             print(f"📧 [TASK] App context acquired, starting task execution...")
             
             # Update task state
@@ -661,17 +660,10 @@ def fetch_older_emails(self, user_id, max_emails=200):
                 'emails_classified': emails_classified,
                 'errors': errors[:10]
             }
-            
-        except Exception as e:
-            error_msg = f"Task failed: {str(e)}"
-            print(f"❌ [TASK] fetch_older_emails exception: {error_msg}")
-            import traceback
-            traceback.print_exc()
-            return {'status': 'error', 'error': error_msg}
-    except Exception as outer_error:
-        # Catch errors that happen before app context
-        error_msg = f"Critical error before app context: {str(outer_error)}"
-        print(f"❌ [TASK] CRITICAL: {error_msg}")
+    except Exception as e:
+        # Catch all exceptions (both from app context and before)
+        error_msg = f"Task failed: {str(e)}"
+        print(f"❌ [TASK] fetch_older_emails exception: {error_msg}")
         import traceback
         traceback.print_exc()
         return {'status': 'error', 'error': error_msg}
