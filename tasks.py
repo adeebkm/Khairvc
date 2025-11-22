@@ -477,19 +477,19 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                                     if user:
                                         print(f"📱 [TASK] Checking WhatsApp for deal {deal.id}: enabled={user.whatsapp_enabled}, number={user.whatsapp_number[:10] + '...' if user.whatsapp_number else 'None'}")
                                         
-                        if user.whatsapp_enabled and user.whatsapp_number:
-                            print(f"📱 [TASK] Sending WhatsApp alert for deal {deal.id} to {user.whatsapp_number}")
-                            print(f"   📧 Deal subject: {deal.subject or 'No subject'}")
-                            print(f"   👤 Founder: {deal.founder_name or 'Unknown'}")
-                            whatsapp = WhatsAppService()
-                            whatsapp.send_deal_alert(deal, user.whatsapp_number)
-                            deal.whatsapp_alert_sent = True
-                            deal.whatsapp_alert_sent_at = datetime.utcnow()
-                            db.session.commit()
-                            print(f"✅ [TASK] WhatsApp alert sent for deal {deal.id}")
-                        else:
-                            print(f"⚠️  [TASK] WhatsApp not enabled or number not set for user {user.id}")
-                            print(f"   Enabled: {user.whatsapp_enabled}, Number: {user.whatsapp_number[:10] + '...' if user.whatsapp_number else 'None'}")
+                                        if user.whatsapp_enabled and user.whatsapp_number:
+                                            print(f"📱 [TASK] Sending WhatsApp alert for deal {deal.id} to {user.whatsapp_number}")
+                                            print(f"   📧 Deal subject: {deal.subject or 'No subject'}")
+                                            print(f"   👤 Founder: {deal.founder_name or 'Unknown'}")
+                                            whatsapp = WhatsAppService()
+                                            whatsapp.send_deal_alert(deal, user.whatsapp_number)
+                                            deal.whatsapp_alert_sent = True
+                                            deal.whatsapp_alert_sent_at = datetime.utcnow()
+                                            db.session.commit()
+                                            print(f"✅ [TASK] WhatsApp alert sent for deal {deal.id}")
+                                        else:
+                                            print(f"⚠️  [TASK] WhatsApp not enabled or number not set for user {user.id}")
+                                            print(f"   Enabled: {user.whatsapp_enabled}, Number: {user.whatsapp_number[:10] + '...' if user.whatsapp_number else 'None'}")
                                     else:
                                         print(f"⚠️  [TASK] User {user_id} not found for WhatsApp alert")
                                 except Exception as whatsapp_error:
