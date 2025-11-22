@@ -459,15 +459,26 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                                     from whatsapp_service import WhatsAppService
                                     user = User.query.get(user_id)
                                     
-                                    if user and user.whatsapp_enabled and user.whatsapp_number:
-                                        whatsapp = WhatsAppService()
-                                        whatsapp.send_deal_alert(deal, user.whatsapp_number)
-                                        deal.whatsapp_alert_sent = True
-                                        deal.whatsapp_alert_sent_at = datetime.utcnow()
-                                        db.session.commit()
-                                        print(f"✅ [TASK] WhatsApp alert sent for deal {deal.id}")
+                                    if user:
+                                        print(f"📱 [TASK] Checking WhatsApp for deal {deal.id}: enabled={user.whatsapp_enabled}, number={user.whatsapp_number[:10] + '...' if user.whatsapp_number else 'None'}")
+                                        
+                                        if user.whatsapp_enabled and user.whatsapp_number:
+                                            print(f"📱 [TASK] Sending WhatsApp alert for deal {deal.id} to {user.whatsapp_number}")
+                                            whatsapp = WhatsAppService()
+                                            whatsapp.send_deal_alert(deal, user.whatsapp_number)
+                                            deal.whatsapp_alert_sent = True
+                                            deal.whatsapp_alert_sent_at = datetime.utcnow()
+                                            db.session.commit()
+                                            print(f"✅ [TASK] WhatsApp alert sent for deal {deal.id}")
+                                        else:
+                                            print(f"⚠️  [TASK] WhatsApp not enabled or number not set for user {user.id}")
+                                    else:
+                                        print(f"⚠️  [TASK] User {user_id} not found for WhatsApp alert")
                                 except Exception as whatsapp_error:
-                                    print(f"⚠️  [TASK] WhatsApp alert failed for deal {deal.id}: {str(whatsapp_error)}")
+                                    error_msg = str(whatsapp_error)
+                                    print(f"❌ [TASK] WhatsApp alert failed for deal {deal.id}: {error_msg}")
+                                    import traceback
+                                    traceback.print_exc()
                                     # Don't fail the whole task if WhatsApp fails
                                 break
                             except Exception as commit_error:

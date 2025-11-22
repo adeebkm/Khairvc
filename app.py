@@ -1128,7 +1128,8 @@ def get_emails():
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
         # Get max_emails from query param - dynamically fetch based on filter selection
-        max_emails = min(request.args.get('max', default=20, type=int), 200)  # Cap at 200 emails max (user can select 20, 50, 100, or 200)
+        # Default to 200 to show all emails (not 20)
+        max_emails = min(request.args.get('max', default=200, type=int), 200)  # Cap at 200 emails max (user can select 20, 50, 100, or 200)
         category_filter = request.args.get('category')  # Optional category filter
         show_spam = request.args.get('show_spam', 'false').lower() == 'true'
         unread_only = False  # Always fetch all emails (unread only filter removed)
