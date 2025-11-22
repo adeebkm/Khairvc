@@ -15,6 +15,7 @@ class WhatsAppService:
         self.phone_number_id = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
         self.access_token = os.getenv('WHATSAPP_ACCESS_TOKEN')
         self.api_version = os.getenv('WHATSAPP_API_VERSION', 'v21.0')
+        self.template_name = os.getenv('WHATSAPP_TEMPLATE_NAME', 'hello_world')  # Default to hello_world
         self.base_url = f"https://graph.facebook.com/{self.api_version}/{self.phone_number_id}"
         
         if not self.phone_number_id or not self.access_token:
@@ -85,10 +86,6 @@ class WhatsAppService:
         Returns:
             dict: API response
         """
-        # WhatsApp Business API requires template messages for initial contact
-        # Using hello_world template (approved by default)
-        # TODO: Create custom template for deal alerts in Meta Developer Console
-        
         # Clean up phone number
         to_number = user_whatsapp_number.replace(' ', '').replace('-', '')
         if not to_number.startswith('+'):
@@ -101,26 +98,77 @@ class WhatsAppService:
             'Content-Type': 'application/json'
         }
         
-        # Use hello_world template (works immediately, no approval needed)
-        payload = {
-            'messaging_product': 'whatsapp',
-            'to': to_number,
-            'type': 'template',
-            'template': {
-                'name': 'hello_world',
-                'language': {
-                    'code': 'en_US'
+        # Prepare deal information
+        subject = deal.subject or 'No subject'
+        sender = deal.founder_email or 'Unknown'
+        founder_name = deal.founder_name or 'Unknown'
+        
+        # Get snippet from classification if available
+        snippet = ''
+        if deal.classification:
+            snippet = deal.classification.snippet or ''
+            # Limit snippet to 200 chars for WhatsApp
+            if len(snippet) > 200:
+                snippet = snippet[:197] + '...'
+        
+        deck_link = deal.deck_link or 'No deck'
+        # Truncate deck link if too long
+        if len(deck_link) > 50:
+            deck_link = deck_link[:47] + '...'
+        
+        deal_state = deal.state or 'New'
+        
+        # Build template payload
+        # If using custom template, include parameters
+        if self.template_name != 'hello_world':
+            # Custom template with parameters
+            # Template should have 6 variables: subject, sender, founder, snippet, deck, state
+            payload = {
+                'messaging_product': 'whatsapp',
+                'to': to_number,
+                'type': 'template',
+                'template': {
+                    'name': self.template_name,
+                    'language': {
+                        'code': 'en_US'
+                    },
+                    'components': [
+                        {
+                            'type': 'body',
+                            'parameters': [
+                                {'type': 'text', 'text': subject[:50]},  # Variable 1: Subject (max 50 chars)
+                                {'type': 'text', 'text': sender[:50]},   # Variable 2: Sender (max 50 chars)
+                                {'type': 'text', 'text': founder_name[:50]},  # Variable 3: Founder (max 50 chars)
+                                {'type': 'text', 'text': snippet[:200]},  # Variable 4: Snippet (max 200 chars)
+                                {'type': 'text', 'text': deck_link[:50]},  # Variable 5: Deck (max 50 chars)
+                                {'type': 'text', 'text': deal_state[:20]}  # Variable 6: State (max 20 chars)
+                            ]
+                        }
+                    ]
                 }
             }
-        }
+        else:
+            # Fallback to hello_world template (no parameters)
+            payload = {
+                'messaging_product': 'whatsapp',
+                'to': to_number,
+                'type': 'template',
+                'template': {
+                    'name': 'hello_world',
+                    'language': {
+                        'code': 'en_US'
+                    }
+                }
+            }
         
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=10)
             response.raise_for_status()
             
             # Log deal info for reference
-            print(f"📱 Sent WhatsApp template for: {deal.subject or 'No subject'}")
-            print(f"   Founder: {deal.founder_name or 'Unknown'}")
+            template_used = self.template_name if self.template_name != 'hello_world' else 'hello_world (fallback)'
+            print(f"📱 Sent WhatsApp template ({template_used}) for: {subject}")
+            print(f"   Founder: {founder_name}")
             print(f"   Deck: {'Yes' if deal.has_deck else 'No'}")
             
             return response.json()
