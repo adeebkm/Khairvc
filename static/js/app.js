@@ -3257,12 +3257,18 @@ async function openEmail(indexOrEmail) {
     
     const threadId = currentEmail.thread_id;
     
-    // Check IndexedDB cache FIRST for instant loading
+    // ALWAYS show email from list immediately (no "Loading thread..." delay)
+    if (currentEmail.body || currentEmail.combined_text) {
+        threadContainer.innerHTML = renderThreadMessage(currentEmail, true);
+        enhanceHtmlEmails([currentEmail]);
+    }
+    
+    // Check IndexedDB cache for full thread
     const cached = await getCachedThread(threadId);
     if (cached && cached.emails && cached.emails.length > 0) {
         console.log(`⚡ Loading thread ${threadId} from cache (instant)`);
         
-        // Display cached data immediately
+        // Display cached thread data immediately (replace single email with full thread)
         let threadHtml = '';
         cached.emails.forEach((email, idx) => {
             threadHtml += renderThreadMessage(email, idx === 0);
@@ -3272,14 +3278,6 @@ async function openEmail(indexOrEmail) {
         
         // Show subtle "refreshing" indicator
         showCacheRefreshIndicator();
-    } else {
-        // No cache - display cached email from email list if available
-        if (currentEmail.body || currentEmail.combined_text) {
-            threadContainer.innerHTML = renderThreadMessage(currentEmail, true);
-            enhanceHtmlEmails([currentEmail]);
-        } else {
-            threadContainer.innerHTML = '<div class="spinner-small"></div><p>Loading thread...</p>';
-        }
     }
     
     // Always fetch fresh data in background (even if cache exists)
@@ -3372,6 +3370,9 @@ async function openEmail(indexOrEmail) {
     document.getElementById('replyActions').style.display = 'none';
     document.getElementById('replyEditor').style.display = 'none';
     document.getElementById('replyLoading').style.display = 'none';
+    
+    // Clear composer when opening a new email (prevent draft from previous email)
+    clearComposer();
 }
 
 // Close modal
@@ -3843,6 +3844,34 @@ function closeComposer() {
     document.getElementById('composerSection').style.display = 'none';
     document.getElementById('ccBccFields').style.display = 'none';
     composerAttachments = [];
+    // Clear composer fields when closing
+    clearComposerFields();
+}
+
+function clearComposer() {
+    // Clear composer section and fields
+    document.getElementById('composerSection').style.display = 'none';
+    document.getElementById('ccBccFields').style.display = 'none';
+    clearComposerFields();
+}
+
+function clearComposerFields() {
+    // Clear all composer input fields
+    const composerTo = document.getElementById('composerTo');
+    const composerCc = document.getElementById('composerCc');
+    const composerBcc = document.getElementById('composerBcc');
+    const composerSubject = document.getElementById('composerSubject');
+    const composerBody = document.getElementById('composerBody');
+    
+    if (composerTo) composerTo.value = '';
+    if (composerCc) composerCc.value = '';
+    if (composerBcc) composerBcc.value = '';
+    if (composerSubject) composerSubject.value = '';
+    if (composerBody) composerBody.value = '';
+    
+    // Clear attachments
+    composerAttachments = [];
+    updateAttachmentPreview();
 }
 
 function applyFormatting(command) {
