@@ -594,46 +594,58 @@
                             Manage your Gmail account connection and settings.
                         </p>
                         
+                        {% if has_gmail %}
+                        <!-- Connected State -->
                         <div class="modern-settings-item">
                             <label class="modern-input-label">Connection Status</label>
-                            <div class="modern-status-badge" {% if has_gmail %}style="background: #ECFDF5;"{% else %}style="background: #F3F4F6;"{% endif %}>
-                                {% if has_gmail %}
+                            <div class="modern-status-badge" style="background: #ECFDF5; padding: 10px 12px;">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2">
                                     <circle cx="12" cy="12" r="10"/>
                                     <path d="m9 12 2 2 4-4"/>
                                 </svg>
-                                <span id="gmailStatus" class="modern-badge-text" style="color: #10b981;">Gmail Connected</span>
-                                {% else %}
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2">
+                                <span class="modern-badge-text" style="color: #10b981; font-weight: 500;">Gmail Connected</span>
+                            </div>
+                        </div>
+                        
+                        <div class="modern-settings-item">
+                            <label class="modern-input-label">Connected Account</label>
+                            <div class="modern-readonly-field" style="padding: 12px; background: #F9FAFB; border-radius: 8px;">
+                                <span id="gmailEmail" style="font-weight: 500; color: #111827;">{{ gmail_email if gmail_email else 'Loading...' }}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="modern-settings-item" style="margin-top: 20px;">
+                            <button class="modern-btn-secondary" onclick="disconnectGmail()" style="width: 100%; padding: 12px; background: #FEE2E2; color: #DC2626; font-weight: 500; border-radius: 8px;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 6px;">
+                                    <path d="M18 6L6 18M6 6l12 12"/>
+                                </svg>
+                                Disconnect Gmail Account
+                            </button>
+                        </div>
+                        {% else %}
+                        <!-- Not Connected State -->
+                        <div class="modern-settings-item">
+                            <label class="modern-input-label">Connection Status</label>
+                            <div class="modern-status-badge" style="background: #FEE2E2; padding: 10px 12px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="2">
                                     <circle cx="12" cy="12" r="10"/>
                                     <line x1="15" y1="9" x2="9" y2="15"/>
                                     <line x1="9" y1="9" x2="15" y2="15"/>
                                 </svg>
-                                <span id="gmailStatus" class="modern-badge-text" style="color: #ef4444;">Not Connected</span>
-                                {% endif %}
+                                <span class="modern-badge-text" style="color: #DC2626; font-weight: 500;">Gmail Not Connected</span>
                             </div>
                         </div>
                         
-                        {% if has_gmail %}
-                        <div class="modern-settings-item">
-                            <label class="modern-input-label">Connected Email</label>
-                            <div class="modern-readonly-field">
-                                <span id="gmailEmail" style="font-weight: 500;">{{ gmail_email if gmail_email else 'Not connected' }}</span>
-                            </div>
-                        </div>
-                        {% endif %}
-                        
-                        <div class="modern-settings-item">
-                            {% if has_gmail %}
-                            <button class="modern-btn-secondary" onclick="disconnectGmail()" style="width: 100%;">
-                                Disconnect Gmail
-                            </button>
-                            {% else %}
-                            <a href="{{ url_for('connect_gmail') }}" class="modern-btn-primary" style="width: 100%; text-decoration: none; display: block; text-align: center;">
+                        <div class="modern-settings-item" style="margin-top: 20px;">
+                            <a href="{{ url_for('connect_gmail') }}" class="modern-btn-primary" style="width: 100%; text-decoration: none; display: block; text-align: center; padding: 14px; font-weight: 600; border-radius: 8px;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline-block; vertical-align: middle; margin-right: 6px;">
+                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                                    <circle cx="12" cy="7" r="4"/>
+                                </svg>
                                 Connect Gmail Account
                             </a>
-                            {% endif %}
                         </div>
+                        {% endif %}
                         
                         <div id="gmailStatus" class="modern-status-message" style="display: none;"></div>
                     </div>
