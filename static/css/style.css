@@ -2220,6 +2220,15 @@ body::before {
     visibility: hidden;
 }
 
+/* Sidebar label text (prevent truncation) */
+.sidebar-label {
+    flex: 1;
+    min-width: 0; /* Allow text to shrink */
+    overflow: visible;
+    white-space: nowrap;
+    margin-right: 8px; /* Space between label and count */
+}
+
 /* Sidebar unread count badges (Superhuman style) */
 .sidebar-unread-count {
     margin-left: auto;
@@ -2232,6 +2241,7 @@ body::before {
     line-height: 1.5;
     min-width: 20px;
     text-align: center;
+    flex-shrink: 0; /* Prevent badge from shrinking */
 }
 
 .sidebar-item.active .sidebar-unread-count {
@@ -2998,7 +3008,7 @@ body::before {
     letter-spacing: 0.08em;
     font-size: 11px;
     position: sticky;
-    top: 0;
+    top: -28px; /* Offset by container padding to prevent overlap */
     background: #ffffff;
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(139, 92, 246, 0.08) 100%);
     z-index: 10;

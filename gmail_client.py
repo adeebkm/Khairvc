@@ -793,37 +793,51 @@ class GmailClient:
                 
                 # Track label additions (e.g., marking as unread in Gmail)
                 if 'labelAdded' in change:
-                    for label_change in change['labelAdded']:
-                        message = label_change.get('message', {})
-                        message_id = message.get('id')
-                        label_ids = message.get('labelIds', [])
-                        
-                        # Only care about UNREAD label changes
-                        if 'UNREAD' in label_change.get('labelIds', []):
-                            print(f"📧 [SYNC] Detected UNREAD label ADDED to {message_id[:16]} in Gmail")
-                            if message_id not in label_changes:
-                                label_changes[message_id] = {'label_ids': label_ids, 'is_read': False}
-                            else:
-                                label_changes[message_id]['is_read'] = False
-                                if 'UNREAD' not in label_changes[message_id]['label_ids']:
-                                    label_changes[message_id]['label_ids'].append('UNREAD')
+                    try:
+                        for label_change in change['labelAdded']:
+                            message = label_change.get('message', {})
+                            message_id = message.get('id')
+                            if not message_id:
+                                continue
+                                
+                            label_ids = message.get('labelIds', [])
+                            
+                            # Only care about UNREAD label changes
+                            if 'UNREAD' in label_change.get('labelIds', []):
+                                print(f"📧 [SYNC] Detected UNREAD label ADDED to {message_id[:16]} in Gmail")
+                                if message_id not in label_changes:
+                                    label_changes[message_id] = {'label_ids': label_ids, 'is_read': False}
+                                else:
+                                    label_changes[message_id]['is_read'] = False
+                                    if 'UNREAD' not in label_changes[message_id]['label_ids']:
+                                        label_changes[message_id]['label_ids'].append('UNREAD')
+                    except Exception as label_error:
+                        print(f"⚠️  Error processing labelAdded: {str(label_error)}")
+                        continue
                 
                 # Track label removals (e.g., marking as read in Gmail)
                 if 'labelRemoved' in change:
-                    for label_change in change['labelRemoved']:
-                        message = label_change.get('message', {})
-                        message_id = message.get('id')
-                        label_ids = message.get('labelIds', [])
-                        
-                        # Only care about UNREAD label changes
-                        if 'UNREAD' in label_change.get('labelIds', []):
-                            print(f"✅ [SYNC] Detected UNREAD label REMOVED from {message_id[:16]} in Gmail")
-                            if message_id not in label_changes:
-                                label_changes[message_id] = {'label_ids': label_ids, 'is_read': True}
-                            else:
-                                label_changes[message_id]['is_read'] = True
-                                if 'UNREAD' in label_changes[message_id]['label_ids']:
-                                    label_changes[message_id]['label_ids'].remove('UNREAD')
+                    try:
+                        for label_change in change['labelRemoved']:
+                            message = label_change.get('message', {})
+                            message_id = message.get('id')
+                            if not message_id:
+                                continue
+                                
+                            label_ids = message.get('labelIds', [])
+                            
+                            # Only care about UNREAD label changes
+                            if 'UNREAD' in label_change.get('labelIds', []):
+                                print(f"✅ [SYNC] Detected UNREAD label REMOVED from {message_id[:16]} in Gmail")
+                                if message_id not in label_changes:
+                                    label_changes[message_id] = {'label_ids': label_ids, 'is_read': True}
+                                else:
+                                    label_changes[message_id]['is_read'] = True
+                                    if 'UNREAD' in label_changes[message_id].get('label_ids', []):
+                                        label_changes[message_id]['label_ids'].remove('UNREAD')
+                    except Exception as label_error:
+                        print(f"⚠️  Error processing labelRemoved: {str(label_error)}")
+                        continue
                 
                 # Track additions
                 if 'messagesAdded' in change:

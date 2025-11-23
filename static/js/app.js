@@ -1786,8 +1786,17 @@ async function fetchStarredEmails() {
 // Fetch sent emails
 async function fetchSentEmails() {
     try {
+        console.log('📤 Fetching sent emails...');
         const response = await fetch(`/api/sent-emails?max=100`);
+        
+        console.log(`📤 Sent emails response status: ${response.status}`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const data = await response.json();
+        console.log(`📤 Sent emails data:`, data);
         
         if (data.success) {
             // Format sent emails similar to received emails
@@ -1796,6 +1805,8 @@ async function fetchSentEmails() {
                 classification: { category: 'SENT' },
                 is_sent: true
             }));
+            
+            console.log(`✅ Fetched ${sentEmails.length} sent emails`);
             
             // Update cache (both memory and localStorage)
             sentEmailsCache = sentEmails;
@@ -1813,15 +1824,17 @@ async function fetchSentEmails() {
                 }
             }
         } else {
-            console.error('Error fetching sent emails:', data.error);
+            console.error('❌ Error fetching sent emails:', data.error);
             if (currentTab === 'sent') {
                 displayEmails([]);
+                showToast('Failed to load sent emails', 'error');
             }
         }
     } catch (error) {
-        console.error('Error fetching sent emails:', error);
+        console.error('❌ Exception fetching sent emails:', error);
         if (currentTab === 'sent') {
             displayEmails([]);
+            showToast(`Failed to load sent emails: ${error.message}`, 'error');
         }
     }
 }
