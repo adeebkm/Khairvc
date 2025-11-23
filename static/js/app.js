@@ -2854,6 +2854,7 @@ function displayEmails(emails) {
                         <span class="star-icon ${starClass}">★</span>
                     </div>
                     <div class="email-sender-name">
+                        ${isUnread ? '<span class="unread-dot"></span>' : '<span class="unread-dot-placeholder"></span>'}
                         <span>${escapeHtml(decodeHtmlEntities(displayName))}</span>
                     </div>
                     <div class="email-content">
@@ -2879,6 +2880,57 @@ function displayEmails(emails) {
     
     // Start observing new emails for pre-fetching
     setTimeout(() => observeEmailsForPrefetch(), 100);
+    
+    // Update unread counts in sidebar
+    updateSidebarUnreadCounts();
+}
+
+// Update unread count badges in sidebar (Superhuman style)
+function updateSidebarUnreadCounts() {
+    if (!emailCache || !emailCache.data) return;
+    
+    // Count unread emails by category
+    const counts = {
+        'all': 0,
+        'deal-flow': 0,
+        'networking': 0,
+        'hiring': 0,
+        'general': 0,
+        'spam': 0
+    };
+    
+    emailCache.data.forEach(email => {
+        if (!email.is_read) {
+            counts['all']++;
+            
+            // Count by category
+            const category = email.category;
+            if (category === 'DEAL_FLOW') {
+                counts['deal-flow']++;
+            } else if (category === 'NETWORKING') {
+                counts['networking']++;
+            } else if (category === 'HIRING') {
+                counts['hiring']++;
+            } else if (category === 'GENERAL') {
+                counts['general']++;
+            } else if (category === 'SPAM') {
+                counts['spam']++;
+            }
+        }
+    });
+    
+    // Update each badge
+    Object.keys(counts).forEach(tab => {
+        const badge = document.getElementById(`unread-count-${tab}`);
+        if (badge) {
+            if (counts[tab] > 0) {
+                badge.textContent = counts[tab];
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+    });
 }
 
 // Get category badge HTML

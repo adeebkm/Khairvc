@@ -1952,30 +1952,37 @@ body::before {
 }
 
 .email-card {
-    background: var(--bg-primary);
-    padding: 10px 20px;
+    background: #FFFFFF;
+    padding: 12px 20px;
     margin-bottom: 0;
     border-radius: 0;
     cursor: pointer;
     transition: all 0.15s ease;
-    border-left: 2px solid transparent;
+    border-left: 3px solid transparent;
     border-bottom: 1px solid rgba(229, 231, 235, 0.3);
     position: relative;
     overflow: hidden;
     display: flex;
     align-items: center;
     gap: 12px;
-    min-height: 44px;
+    min-height: 52px;
 }
 
+/* Unread email - Superhuman/Linear style */
 .email-card.unread {
-    border-left-color: #6366f1;
-    background: rgba(99, 102, 241, 0.02);
+    border-left-color: #6366F1;
+    background: #F9FAFF;
 }
 
+/* Read email hover */
 .email-card:hover {
-    background: rgba(0, 0, 0, 0.02);
-    border-left-color: var(--primary-color);
+    background: #F9FAFB;
+}
+
+/* Unread email hover */
+.email-card.unread:hover {
+    background: #F1F5FF;
+    border-left-color: #6366F1;
 }
 
 .email-card:hover .email-star,
@@ -1993,8 +2000,8 @@ body::before {
 
 .email-subject {
     font-size: 14px;
-    font-weight: 500;
-    color: var(--text-primary);
+    font-weight: 400;
+    color: #1F2937;
     margin: 0;
     line-height: 1.4;
     display: flex;
@@ -2009,6 +2016,7 @@ body::before {
 
 .email-card.unread .email-subject {
     font-weight: 600;
+    color: #111827;
 }
 
 .email-subject > span:first-child {
@@ -2030,7 +2038,7 @@ body::before {
 }
 
 .email-snippet {
-    color: #666666;
+    color: #6B7280;
     font-size: 13px;
     line-height: 1.4;
     overflow: hidden;
@@ -2040,6 +2048,10 @@ body::before {
     flex: 1;
     min-width: 0;
     max-width: 100%;
+}
+
+.email-card.unread .email-snippet {
+    color: #374151;
     margin-left: 8px;
 }
 
@@ -2128,9 +2140,9 @@ body::before {
 }
 
 .email-sender-name {
-    color: var(--text-primary);
+    color: #1F2937;
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 400;
     min-width: 200px;
     max-width: 200px;
     width: 200px;
@@ -2138,6 +2150,9 @@ body::before {
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.4;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding-top: 0;
     display: flex;
     align-items: baseline;
@@ -2145,8 +2160,8 @@ body::before {
 }
 
 .email-card.unread .email-sender-name {
-    font-weight: 600;
-    color: var(--text-primary);
+    font-weight: 500;
+    color: #111827;
 }
 
 .email-sender-name > span {
@@ -2170,7 +2185,7 @@ body::before {
 }
 
 .email-date {
-    color: #666666;
+    color: #6B7280;
     font-size: 12px;
     font-weight: 400;
     white-space: nowrap;
@@ -2180,6 +2195,48 @@ body::before {
     padding-top: 0;
     line-height: 1.4;
     align-self: center;
+}
+
+.email-card.unread .email-date {
+    color: #111827;
+    font-weight: 500;
+}
+
+/* Unread indicator dot (Superhuman style) */
+.unread-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #6366F1;
+    flex-shrink: 0;
+    display: inline-block;
+}
+
+.unread-dot-placeholder {
+    width: 7px;
+    height: 7px;
+    flex-shrink: 0;
+    display: inline-block;
+    visibility: hidden;
+}
+
+/* Sidebar unread count badges (Superhuman style) */
+.sidebar-unread-count {
+    margin-left: auto;
+    background: #EEF2FF;
+    color: #4338CA;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    line-height: 1.5;
+    min-width: 20px;
+    text-align: center;
+}
+
+.sidebar-item.active .sidebar-unread-count {
+    background: #E0E7FF;
+    color: #3730A3;
 }
 
 /* Badges and Tags - Smaller, less saturated */
