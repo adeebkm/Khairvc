@@ -752,14 +752,17 @@ class GmailClient:
         """
         Fetch only changes since start_history_id using Gmail History API.
         This is MUCH faster and uses far fewer API calls than full sync.
-        Returns dict with new_emails, deleted_ids, and history_id.
+        Returns dict with new_emails, deleted_ids, label_changes, and history_id.
+        
+        label_changes: dict mapping message_id -> {'is_read': bool, 'label_ids': list}
         """
         try:
-            # Single API call to get all changes since last sync (additions AND deletions)
+            # Single API call to get all changes since last sync
+            # Track messages, deletions, AND label changes (for read/unread sync)
             history_response = self.service.users().history().list(
                 userId='me',
                 startHistoryId=start_history_id,
-                historyTypes=['messageAdded', 'messageDeleted'],  # Track both additions and deletions
+                historyTypes=['messageAdded', 'messageDeleted', 'labelsAdded', 'labelsRemoved'],  # Track label changes too!
                 labelId='INBOX'  # Only inbox messages
             ).execute()
             
@@ -771,12 +774,14 @@ class GmailClient:
                 return {
                     'new_emails': [],
                     'deleted_ids': [],
+                    'label_changes': {},
                     'history_id': new_history_id
                 }
             
-            # Extract message IDs from history changes (both additions and deletions)
+            # Extract message IDs from history changes
             message_ids = set()
             deleted_message_ids = set()
+            label_changes = {}  # message_id -> {'label_ids': [...], 'is_read': bool}
             
             for change in changes:
                 # Track deletions
@@ -785,6 +790,40 @@ class GmailClient:
                         message = msg_deleted.get('message', {})
                         deleted_message_ids.add(message['id'])
                         print(f"🗑️  Detected deleted message: {message['id'][:16]}...")
+                
+                # Track label additions (e.g., marking as unread in Gmail)
+                if 'labelsAdded' in change:
+                    for label_change in change['labelsAdded']:
+                        message = label_change.get('message', {})
+                        message_id = message.get('id')
+                        label_ids = message.get('labelIds', [])
+                        
+                        # Only care about UNREAD label changes
+                        if 'UNREAD' in label_change.get('labelIds', []):
+                            print(f"📧 [SYNC] Detected UNREAD label ADDED to {message_id[:16]} in Gmail")
+                            if message_id not in label_changes:
+                                label_changes[message_id] = {'label_ids': label_ids, 'is_read': False}
+                            else:
+                                label_changes[message_id]['is_read'] = False
+                                if 'UNREAD' not in label_changes[message_id]['label_ids']:
+                                    label_changes[message_id]['label_ids'].append('UNREAD')
+                
+                # Track label removals (e.g., marking as read in Gmail)
+                if 'labelsRemoved' in change:
+                    for label_change in change['labelsRemoved']:
+                        message = label_change.get('message', {})
+                        message_id = message.get('id')
+                        label_ids = message.get('labelIds', [])
+                        
+                        # Only care about UNREAD label changes
+                        if 'UNREAD' in label_change.get('labelIds', []):
+                            print(f"✅ [SYNC] Detected UNREAD label REMOVED from {message_id[:16]} in Gmail")
+                            if message_id not in label_changes:
+                                label_changes[message_id] = {'label_ids': label_ids, 'is_read': True}
+                            else:
+                                label_changes[message_id]['is_read'] = True
+                                if 'UNREAD' in label_changes[message_id]['label_ids']:
+                                    label_changes[message_id]['label_ids'].remove('UNREAD')
                 
                 # Track additions
                 if 'messagesAdded' in change:
@@ -799,16 +838,20 @@ class GmailClient:
                             if 'INBOX' in message.get('labelIds', []):
                                 message_ids.add(message['id'])
             
-            if not message_ids and not deleted_message_ids:
-                print(f"✅ Incremental sync: {len(changes)} changes but no new inbox messages or deletions. historyId: {new_history_id}")
+            if not message_ids and not deleted_message_ids and not label_changes:
+                print(f"✅ Incremental sync: {len(changes)} changes but no new inbox messages, deletions, or label changes. historyId: {new_history_id}")
                 return {
                     'new_emails': [],
                     'deleted_ids': [],
+                    'label_changes': {},
                     'history_id': new_history_id
                 }
             
             if deleted_message_ids:
                 print(f"🗑️  Found {len(deleted_message_ids)} deleted message(s)")
+            
+            if label_changes:
+                print(f"🏷️  Found {len(label_changes)} message(s) with label changes (read/unread sync)")
             
             print(f"🔄 Incremental sync: Found {len(message_ids)} new messages. Fetching details...")
             
@@ -879,9 +922,16 @@ class GmailClient:
             if errors:
                 print(f"⚠️  {len(errors)} errors encountered (some emails may be missing)")
             
+            # Log summary
+            if label_changes:
+                read_count = sum(1 for change in label_changes.values() if change['is_read'])
+                unread_count = len(label_changes) - read_count
+                print(f"🏷️  Label changes: {read_count} marked as read, {unread_count} marked as unread")
+            
             return {
                 'new_emails': emails,
                 'deleted_ids': list(deleted_message_ids),
+                'label_changes': label_changes,
                 'history_id': new_history_id
             }
             
@@ -894,6 +944,7 @@ class GmailClient:
                 return {
                     'new_emails': emails,
                     'deleted_ids': [],
+                    'label_changes': {},
                     'history_id': history_id
                 }
             else:

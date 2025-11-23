@@ -114,14 +114,53 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
             # For incremental sync, don't limit results - fetch ALL new emails
             # For full sync, respect max_emails limit
             deleted_message_ids = []
+            label_changes = {}
             if start_history_id:
-                # Incremental sync: fetch ALL new emails (no limit) and deletions
-                print(f"📧 [TASK] Incremental sync: Fetching ALL new emails and deletions since history_id={start_history_id}")
-                # Use the internal method to get the full result with deletions
+                # Incremental sync: fetch ALL new emails (no limit), deletions, and label changes
+                print(f"📧 [TASK] Incremental sync: Fetching ALL new emails, deletions, and label changes since history_id={start_history_id}")
+                # Use the internal method to get the full result with deletions and label changes
                 result = gmail._get_emails_incremental(start_history_id, unread_only=False)
                 emails = result['new_emails']
                 deleted_message_ids = result['deleted_ids']
+                label_changes = result.get('label_changes', {})  # NEW: Get label changes for read/unread sync
                 api_history_id = result['history_id']  # History ID from Gmail API response
+                
+                # Process label changes (read/unread sync from Gmail)
+                if label_changes:
+                    print(f"🏷️  [TASK] Processing {len(label_changes)} label changes (read/unread sync)...")
+                    
+                    # Store label changes for frontend to fetch (real-time sync)
+                    import time
+                    from app import pending_label_changes
+                    
+                    if user_id not in pending_label_changes:
+                        pending_label_changes[user_id] = {}
+                    
+                    for message_id, change_info in label_changes.items():
+                        is_read = change_info['is_read']
+                        label_ids = change_info.get('label_ids', [])
+                        
+                        # Store for frontend polling
+                        pending_label_changes[user_id][message_id] = {
+                            'is_read': is_read,
+                            'label_ids': label_ids,
+                            'timestamp': time.time()
+                        }
+                        
+                        # Update classification in database (if exists)
+                        classification = EmailClassification.query.filter_by(
+                            user_id=user_id,
+                            message_id=message_id
+                        ).first()
+                        
+                        if classification:
+                            # Note: EmailClassification doesn't have is_read field
+                            # Frontend will update UI cache when it polls for changes
+                            print(f"  {'✅' if is_read else '📧'} Message {message_id[:16]}: marked as {'read' if is_read else 'unread'} in Gmail")
+                        else:
+                            print(f"  ⚠️  Message {message_id[:16]}: label changed but not in database (may not be classified yet)")
+                    
+                    print(f"✅ [TASK] Processed {len(label_changes)} label changes, stored for frontend sync")
                 
                 # Process deletions from Gmail
                 if deleted_message_ids:

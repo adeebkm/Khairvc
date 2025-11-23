@@ -1237,6 +1237,9 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Initialize autosave listeners for composer
     initAutosaveListeners();
     
+    // Start polling for Gmail label changes (real-time bidirectional sync)
+    startLabelChangePolling();
+    
     // Check if setup is needed and auto-start
     const setupScreen = document.getElementById('setupScreen');
     const urlParams = new URLSearchParams(window.location.search);
@@ -4166,6 +4169,102 @@ function scheduleAutosave() {
     autosaveTimeout = setTimeout(() => {
         autosaveDraft();
     }, 2000); // 2 second debounce
+}
+
+// Real-time Gmail sync: Poll for label changes
+let labelChangePollInterval = null;
+
+function startLabelChangePolling() {
+    // Poll every 10 seconds for label changes from Gmail
+    if (labelChangePollInterval) {
+        clearInterval(labelChangePollInterval);
+    }
+    
+    labelChangePollInterval = setInterval(async () => {
+        try {
+            const response = await fetch('/api/sync/label-changes');
+            const data = await response.json();
+            
+            if (data.success && data.changes && Object.keys(data.changes).length > 0) {
+                console.log(`🔄 [SYNC] Received ${Object.keys(data.changes).length} label changes from Gmail`);
+                
+                // Process each label change
+                for (const [messageId, changeInfo] of Object.entries(data.changes)) {
+                    const isRead = changeInfo.is_read;
+                    const labelIds = changeInfo.label_ids || [];
+                    
+                    console.log(`  ${ isRead ? '✅' : '📧'} Message ${messageId.substring(0, 16)}: ${isRead ? 'read' : 'unread'} in Gmail`);
+                    
+                    // Update local caches with the new read status
+                    updateEmailReadStatusFromSync(messageId, isRead, labelIds);
+                }
+                
+                // Show toast notification
+                const changeCount = Object.keys(data.changes).length;
+                const readCount = Object.values(data.changes).filter(c => c.is_read).length;
+                const unreadCount = changeCount - readCount;
+                
+                let message = 'Synced with Gmail: ';
+                if (readCount > 0) message += `${readCount} marked as read`;
+                if (readCount > 0 && unreadCount > 0) message += ', ';
+                if (unreadCount > 0) message += `${unreadCount} marked as unread`;
+                
+                showToast(message, 'info');
+            }
+        } catch (error) {
+            console.error('Error polling for label changes:', error);
+        }
+    }, 10000); // Poll every 10 seconds
+    
+    console.log('🔄 Started polling for Gmail label changes (every 10 seconds)');
+}
+
+function stopLabelChangePolling() {
+    if (labelChangePollInterval) {
+        clearInterval(labelChangePollInterval);
+        labelChangePollInterval = null;
+        console.log('🛑 Stopped polling for Gmail label changes');
+    }
+}
+
+// Update email read status from Gmail sync (similar to updateEmailReadStatus but for external changes)
+function updateEmailReadStatusFromSync(messageId, isRead, labelIds) {
+    console.log(`🔄 [SYNC] Updating email ${messageId.substring(0, 16)} to ${isRead ? 'read' : 'unread'} from Gmail sync`);
+    
+    let updatedCount = 0;
+    
+    // Helper function to update email object
+    const updateEmail = (email) => {
+        if (email.id === messageId || email.message_id === messageId) {
+            email.is_read = isRead;
+            email.label_ids = labelIds;
+            updatedCount++;
+            return true;
+        }
+        return false;
+    };
+    
+    // Update in allEmails
+    allEmails.forEach(updateEmail);
+    
+    // Update in emailCache
+    if (emailCache && emailCache.data) {
+        emailCache.data.forEach(updateEmail);
+        saveEmailCacheToStorage();
+    }
+    
+    // Update in filteredEmails
+    filteredEmails.forEach(updateEmail);
+    
+    if (updatedCount > 0) {
+        console.log(`✅ [SYNC] Updated ${updatedCount} instance(s) of email ${messageId.substring(0, 16)}`);
+        
+        // Refresh display to show updated read/unread styling
+        displayEmails(filteredEmails);
+        
+        // Update unread counts
+        updateSidebarUnreadCounts();
+    }
 }
 
 // Initialize autosave listeners for composer

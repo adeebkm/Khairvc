@@ -3033,6 +3033,27 @@ def mark_email_read(message_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# In-memory cache for pending label changes (for real-time sync)
+# Format: {user_id: {message_id: {'is_read': bool, 'label_ids': [...], 'timestamp': float}}}
+pending_label_changes = {}
+
+@app.route('/api/sync/label-changes', methods=['GET'])
+@login_required
+def get_label_changes():
+    """Get pending label changes for the current user (for real-time Gmail sync)"""
+    user_id = current_user.id
+    
+    # Get and clear pending changes for this user
+    changes = pending_label_changes.pop(user_id, {})
+    
+    if changes:
+        print(f"🔄 [SYNC] Sending {len(changes)} label changes to user {user_id}")
+    
+    return jsonify({
+        'success': True,
+        'changes': changes
+    })
+
 @app.route('/api/email/<message_id>/mark-unread', methods=['POST'])
 @login_required
 def mark_email_unread(message_id):
