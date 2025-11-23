@@ -4965,10 +4965,11 @@ function switchSettingsTab(tabName) {
     // Hide all tab contents
     document.querySelectorAll('.settings-tab-content').forEach(content => {
         content.classList.remove('active');
+        content.style.display = 'none';
     });
     
-    // Remove active class from all tabs
-    document.querySelectorAll('.settings-tab').forEach(tab => {
+    // Remove active class from all tabs (using correct selector)
+    document.querySelectorAll('.modern-tab').forEach(tab => {
         tab.classList.remove('active');
     });
     
@@ -4976,6 +4977,7 @@ function switchSettingsTab(tabName) {
     const content = document.getElementById(`settings-${tabName}`);
     if (content) {
         content.classList.add('active');
+        content.style.display = 'block';
     }
     
     // Activate selected tab
