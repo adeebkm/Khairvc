@@ -1135,10 +1135,18 @@ def process_pubsub_notification(self, user_id, history_id):
             
             # IMPORTANT: Add a delay before syncing to allow Gmail to fully process the email
             # Pub/Sub notifications can arrive before Gmail has finished processing the email
-            # Wait 3 seconds to ensure the email is available in Gmail's History API
+            # Wait 5 seconds to ensure the email is available in Gmail's History API
             import time
-            print(f"⏳ [PUB/SUB] Waiting 3 seconds for Gmail to process email before syncing...")
-            time.sleep(3)
+            print(f"⏳ [PUB/SUB] Waiting 5 seconds for Gmail to process email before syncing...")
+            print(f"📊 [PUB/SUB] Will query from history_id {old_history_id} to {history_id}")
+            time.sleep(5)
+            
+            # CRITICAL: Ensure we use the OLD history_id for querying
+            # Temporarily set it back if it was already updated (defensive programming)
+            if user.gmail_token and user.gmail_token.history_id != old_history_id:
+                print(f"⚠️  [PUB/SUB] History_id was already updated to {user.gmail_token.history_id}, resetting to {old_history_id} for query")
+                user.gmail_token.history_id = old_history_id
+                db.session.commit()
             
             # Trigger incremental sync using the OLD history_id (so it queries from old to new)
             # Pass the new history_id as a parameter so we can update it after sync
@@ -1152,7 +1160,7 @@ def process_pubsub_notification(self, user_id, history_id):
                     'new_history_id': str(history_id)  # New history_id to update after sync
                 },
                 queue='email_sync',  # Route to email_sync queue
-                countdown=2  # Additional 2 second delay before task starts
+                countdown=3  # Additional 3 second delay before task starts (total 8 seconds)
             )
             
             print(f"✅ [PUB/SUB] Queued incremental sync task {sync_task.id} for user {user_id}")
