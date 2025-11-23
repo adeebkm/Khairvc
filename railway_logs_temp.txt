@@ -1,0 +1,141 @@
+Starting Container
+[2025-11-23 07:25:42 +0000] [1] [INFO] Starting gunicorn 21.2.0
+[2025-11-23 07:25:42 +0000] [1] [INFO] Listening at: http://0.0.0.0:8080 (1)
+[2025-11-23 07:25:42 +0000] [1] [INFO] Using worker: gthread
+[2025-11-23 07:25:42 +0000] [4] [INFO] Booting worker with pid: 4
+[2025-11-23 07:25:42 +0000] [5] [INFO] Booting worker with pid: 5
+[2025-11-23 07:25:42 +0000] [6] [INFO] Booting worker with pid: 6
+[2025-11-23 07:25:42 +0000] [7] [INFO] Booting worker with pid: 7
+✓ Lambda client module imported successfully
+✅ Tasks module imported successfully
+✅ Celery configured with broker: redis.railway.internal:6379
+📧 Email sending: ENABLED (SEND_EMAILS=true)
+🔒 Privacy mode: ENABLED (metadata logging disabled)
+✓ Lambda client module imported successfully
+🔒 Privacy mode: ENABLED (metadata logging disabled)
+✅ App initialized (database connection and migrations will happen on first request)
+✅ Celery configured with broker: redis.railway.internal:6379
+📧 Email sending: ENABLED (SEND_EMAILS=true)
+✅ Tasks module imported successfully
+✅ App initialized (database connection and migrations will happen on first request)
+✓ Lambda client module imported successfully
+✓ Lambda client module imported successfully
+✅ Tasks module imported successfully
+✅ Celery configured with broker: redis.railway.internal:6379
+📧 Email sending: ENABLED (SEND_EMAILS=true)
+🔒 Privacy mode: ENABLED (metadata logging disabled)
+✅ Tasks module imported successfully
+✅ Celery configured with broker: redis.railway.internal:6379
+📧 Email sending: ENABLED (SEND_EMAILS=true)
+🔒 Privacy mode: ENABLED (metadata logging disabled)
+✅ App initialized (database connection and migrations will happen on first request)
+✅ App initialized (database connection and migrations will happen on first request)
+✅ Lazy migrations completed
+✅ Successfully created Gmail client for user 42
+✅ Lazy migrations completed
+✅ Lazy migrations completed
+✅ Lazy migrations completed
+✅ Successfully created Gmail client for user 42
+🔄 Incremental sync: Fetching all new emails (no limit)
+🔄 Using incremental sync from history ID: 955357 (fetching ALL new emails, no limit)
+✅ Incremental sync: No changes since last sync. historyId: 955360
+💾 Stored new historyId: 955360
+🔄 Incremental sync found no new emails. Checking if history_id is stale...
+⚠️  History_id is stale! Stored: 955357, Current: 955360
+   Updating history_id and triggering background sync to fetch new emails...
+✅ Background sync triggered with updated history_id: a3ee6582-9148-4b26-8838-028da0ab64f7
+✓ Moonshot (Kimi) client initialized
+✓ Lambda client initialized
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 115 emails from Gmail
+✅ Returning 200 emails from database
+✅ Successfully created Gmail client for user 42
+🔄 Incremental sync: Fetching all new emails (no limit)
+🔄 Using incremental sync from history ID: 955360 (fetching ALL new emails, no limit)
+✅ Incremental sync: No changes since last sync. historyId: 955360
+💾 Stored new historyId: 955360
+🔄 Incremental sync found no new emails. Checking if history_id is stale...
+✅ History_id is current (955360). No new emails.
+✓ Moonshot (Kimi) client initialized
+✓ Lambda client initialized
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+✅ Successfully created Gmail client for user 42
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+   Loading all emails from database
+⭐ Fetched star status for 179 emails from Gmail
+✅ Returning 200 emails from database
+✅ Successfully created Gmail client for user 42
+   ⚠️  Could not retrieve from Secrets Manager: An error occurred (AccessDeniedException) when calling the GetSecretValue operation: User: arn:aws:i
+   🔑 Using Moonshot API key from environment variables (key starts with: sk-JBMWmry...)
+📄 Using Moonshot to extract PDF content: Route - Pitch Deck_251123_022014.pdf
+   📤 Uploading PDF to Moonshot...
+✅ Successfully created Gmail client for user 42
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+   📥 Extracting content from Moonshot...
+   ✅ Successfully extracted 11603 characters from PDF using Moonshot
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+✅ Successfully created Gmail client for user 42
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+✅ Successfully created Gmail client for user 42
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+✅ Successfully created Gmail client for user 42
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+✅ Successfully created Gmail client for user 42
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+✅ Successfully created Gmail client for user 42
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+✅ Successfully created Gmail client for user 42
+   ⚠️  Could not retrieve from Secrets Manager: An error occurred (AccessDeniedException) when calling the GetSecretValue operation: User: arn:aws:i
+   🔑 Using Moonshot API key from environment variables (key starts with: sk-JBMWmry...)
+📄 Using Moonshot to extract PDF content: Pitch_Deck Bidaal_Tech_Seed (1)_251122_164425.pdf
+   📤 Uploading PDF to Moonshot...
+✅ Successfully created Gmail client for user 42
+   ⚠️  Could not retrieve from Secrets Manager: An error occurred (AccessDeniedException) when calling the GetSecretValue operation: User: arn:aws:i
+   🔑 Using Moonshot API key from environment variables (key starts with: sk-JBMWmry...)
+📄 Using Moonshot to extract PDF content: Sumosave_Pitchdeck_capitalCORN_251122_170344.pdf
+   📤 Uploading PDF to Moonshot...
+   📥 Extracting content from Moonshot...
+   ✅ Successfully extracted 6665 characters from PDF using Moonshot
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+   📥 Extracting content from Moonshot...
+   ✅ Successfully extracted 11339 characters from PDF using Moonshot
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+✅ Successfully created Gmail client for user 42
+   ⚠️  Could not retrieve from Secrets Manager: An error occurred (AccessDeniedException) when calling the GetSecretValue operation: User: arn:aws:i
+   🔑 Using Moonshot API key from environment variables (key starts with: sk-JBMWmry...)
+📄 Using Moonshot to extract PDF content: Route - Pitch Deck_251123_022014.pdf
+   📤 Uploading PDF to Moonshot...
+✅ Successfully created Gmail client for user 42
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+   📥 Extracting content from Moonshot...
+   ✅ Successfully extracted 11603 characters from PDF using Moonshot
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+✅ Successfully created Gmail client for user 42
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+✅ Successfully created Gmail client for user 42
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+✅ Successfully created Gmail client for user 42
+   ⚠️  Could not retrieve from Secrets Manager: An error occurred (AccessDeniedException) when calling the GetSecretValue operation: User: arn:aws:i
+   🔑 Using Moonshot API key from environment variables (key starts with: sk-JBMWmry...)
+📄 Using Moonshot to extract PDF content: Route - Pitch Deck_251123_022014.pdf
+   📤 Uploading PDF to Moonshot...
+✅ Successfully created Gmail client for user 42
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+   ✅ Successfully extracted 11603 characters from PDF using Moonshot
+✅ Fetched 1 messages from thread with 1 API call (no extra calls)
+   📥 Extracting content from Moonshot...
+✅ Successfully created Gmail client for user 42
+🔄 Incremental sync: Fetching all new emails (no limit)
+🔄 Using incremental sync from history ID: 955360 (fetching ALL new emails, no limit)
+🔄 Incremental sync: Found 1 new messages. Fetching details...
+✅ Incremental sync: Fetched 1 new emails, 0 deleted with 2 API calls. historyId: 955414
+💾 Stored new historyId: 955414
+✓ Lambda client initialized
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 115 emails from Gmail
+✅ Returning 201 emails from database

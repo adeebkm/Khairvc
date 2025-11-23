@@ -1,0 +1,100 @@
+⭐ Fetched star status for 171 emails from Gmail
+✅ Returning 201 emails from database
+✅ Successfully created Gmail client for user 42
+📂 Loading emails from database only (skipping Gmail API)...
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 136 emails from Gmail
+✅ Returning 201 emails from database
+✅ Successfully created Gmail client for user 42
+📂 Loading emails from database only (skipping Gmail API)...
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 133 emails from Gmail
+✅ Returning 201 emails from database
+✅ Successfully created Gmail client for user 42
+📂 Loading emails from database only (skipping Gmail API)...
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 181 emails from Gmail
+✅ Returning 201 emails from database
+✅ Successfully created Gmail client for user 42
+📂 Loading emails from database only (skipping Gmail API)...
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 106 emails from Gmail
+✅ Returning 201 emails from database
+✅ Successfully created Gmail client for user 42
+📂 Loading emails from database only (skipping Gmail API)...
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 130 emails from Gmail
+✅ Returning 201 emails from database
+✅ Successfully created Gmail client for user 42
+📂 Loading emails from database only (skipping Gmail API)...
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 141 emails from Gmail
+✅ Returning 201 emails from database
+✅ Successfully created Gmail client for user 42
+📂 Loading emails from database only (skipping Gmail API)...
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 133 emails from Gmail
+✅ Returning 201 emails from database
+✅ Successfully created Gmail client for user 42
+📂 Loading emails from database only (skipping Gmail API)...
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 135 emails from Gmail
+✅ Returning 201 emails from database
+✅ Successfully created Gmail client for user 42
+📂 Loading emails from database only (skipping Gmail API)...
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 145 emails from Gmail
+✅ Returning 201 emails from database
+✅ Successfully created Gmail client for user 42
+📂 Loading emails from database only (skipping Gmail API)...
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 100 emails from Gmail
+✅ Returning 201 emails from database
+✅ Successfully created Gmail client for user 42
+📂 Loading emails from database only (skipping Gmail API)...
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 120 emails from Gmail
+✅ Returning 201 emails from database
+✅ Successfully created Gmail client for user 42
+📂 Loading emails from database only (skipping Gmail API)...
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 150 emails from Gmail
+✅ Returning 201 emails from database
+✅ Successfully created Gmail client for user 42
+📂 Loading emails from database only (skipping Gmail API)...
+📂 Loading all classified emails from database...
+   (Ignoring 'unread_only' filter - database doesn't track read status)
+   Loading all emails from database
+⭐ Fetched star status for 161 emails from Gmail
+✅ Returning 201 emails from database
+[2025-11-23 09:09:12 +0000] [1] [INFO] Handling signal: term
+[2025-11-23 09:09:13 +0000] [6] [INFO] Worker exiting (pid: 6)
+[2025-11-23 09:09:13 +0000] [4] [INFO] Worker exiting (pid: 4)
+[2025-11-23 09:09:13 +0000] [7] [INFO] Worker exiting (pid: 7)
+[2025-11-23 09:09:13 +0000] [5] [INFO] Worker exiting (pid: 5)
+[2025-11-23 09:09:14 +0000] [1] [INFO] Shutting down: Master
+Stopping Container

@@ -1095,6 +1095,9 @@ function updatePagination() {
     
     // Insert pagination after email list
     emailList.appendChild(pagination);
+    
+    // Pre-fetch threads for visible emails on this page (instant cache access)
+    prefetchVisibleThreads();
 }
 
 // ==================== BACKGROUND FETCHING ====================
@@ -1516,6 +1519,49 @@ async function toggleStar(emailId, currentlyStarred, emailIndex) {
 let sentEmailsCache = [];
 let starredEmailsCache = [];
 let draftsCache = [];
+
+// In-memory thread cache for instant access (populated from IndexedDB)
+let threadCacheMemory = new Map();
+
+// Pre-fetch threads for visible emails
+async function prefetchVisibleThreads() {
+    const visibleEmails = filteredEmails.slice((currentPage - 1) * EMAILS_PER_PAGE, currentPage * EMAILS_PER_PAGE);
+    
+    // Pre-fetch threads for all visible emails in parallel
+    const prefetchPromises = visibleEmails.map(async (email) => {
+        if (!email.thread_id) return;
+        
+        // Check memory cache first
+        if (threadCacheMemory.has(email.thread_id)) {
+            return; // Already in memory
+        }
+        
+        // Check IndexedDB cache
+        try {
+            const cached = await getCachedThread(email.thread_id);
+            if (cached && cached.emails && cached.emails.length > 0) {
+                // Store in memory for instant access
+                threadCacheMemory.set(email.thread_id, cached);
+            } else {
+                // Pre-fetch from API in background
+                fetch(`/api/thread/${email.thread_id}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success && data.emails) {
+                            cacheThread(email.thread_id, data);
+                            threadCacheMemory.set(email.thread_id, data);
+                        }
+                    })
+                    .catch(err => console.warn('Prefetch error:', err));
+            }
+        } catch (err) {
+            console.warn('Cache check error:', err);
+        }
+    });
+    
+    // Don't await - let it run in background
+    Promise.all(prefetchPromises).catch(() => {});
+}
 
 // Load starred emails cache from localStorage on init
 function loadStarredCacheFromStorage() {
@@ -2703,7 +2749,11 @@ function displayEmails(emails) {
     }
     
     // Emails are already sorted when passed to displayEmails
-    emailList.innerHTML = emails.map((email, index) => {
+    // Calculate the start index for the current page to get correct global index
+    const startIndex = (currentPage - 1) * EMAILS_PER_PAGE;
+    emailList.innerHTML = emails.map((email, localIndex) => {
+        // Calculate global index in filteredEmails array
+        const globalIndex = startIndex + localIndex;
         const classification = email.classification || {};
         const category = classification.category || 'UNKNOWN';
         const tags = classification.tags || [];
@@ -2800,12 +2850,12 @@ function displayEmails(emails) {
         
         return `
             <div class="email-card ${unreadClass} ${attachmentClass}" 
-                 onclick="openEmail(${index})" 
-                 oncontextmenu="event.preventDefault(); showContextMenu(event, ${index});"
-                 data-email-index="${index}"
+                 onclick="openEmail(${globalIndex})" 
+                 oncontextmenu="event.preventDefault(); showContextMenu(event, ${globalIndex});"
+                 data-email-index="${globalIndex}"
                  data-thread-id="${escapeHtml(email.thread_id || '')}">
                 <div class="email-row">
-                    <div class="email-star" onclick="event.stopPropagation(); toggleStar('${email.id}', ${isStarred}, ${index})" title="${isStarred ? 'Unstar' : 'Star'}">
+                    <div class="email-star" onclick="event.stopPropagation(); toggleStar('${email.id}', ${isStarred}, ${globalIndex})" title="${isStarred ? 'Unstar' : 'Star'}">
                         <span class="star-icon ${starClass}">★</span>
                     </div>
                     <div class="email-sender-name">
@@ -2828,6 +2878,9 @@ function displayEmails(emails) {
             </div>
         `;
     }).join('');
+    
+    // Pre-fetch threads for visible emails immediately (0ms instant access)
+    prefetchVisibleThreads();
     
     // Start observing new emails for pre-fetching
     setTimeout(() => observeEmailsForPrefetch(), 100);
@@ -3308,43 +3361,73 @@ function enhanceHtmlEmails(emails) {
 
 // Open email in modal - fetch and display full thread
 async function openEmail(indexOrEmail) {
+    // CRITICAL: Clear all previous email data FIRST to prevent showing wrong email
+    const threadContainer = document.getElementById('threadContainer');
+    const emailModal = document.getElementById('emailModal');
+    
+    // Clear thread container immediately
+    if (threadContainer) {
+        threadContainer.innerHTML = '';
+    }
+    
+    // Clear composer fields
+    clearComposerFields();
+    
     // Accept either an index (from email list) or an email object directly (from deals table)
+    let clickedEmail = null;
     if (typeof indexOrEmail === 'object' && indexOrEmail !== null) {
         // Email object passed directly
-        currentEmail = indexOrEmail;
+        clickedEmail = indexOrEmail;
     } else {
-        // Index passed - use filteredEmails instead of allEmails to get the correct email
-        // This ensures we open the email that's actually displayed in the current tab
-        const index = indexOrEmail;
-        if (index >= 0 && index < filteredEmails.length) {
-            currentEmail = filteredEmails[index];
+        // Index passed - this is now a GLOBAL index in filteredEmails (not page-relative)
+        const globalIndex = indexOrEmail;
+        
+        // Use global index to get email directly from filteredEmails
+        if (globalIndex >= 0 && globalIndex < filteredEmails.length) {
+            clickedEmail = filteredEmails[globalIndex];
+        } else if (globalIndex >= 0 && globalIndex < allEmails.length) {
+            // Fallback to allEmails if not in filteredEmails
+            clickedEmail = allEmails[globalIndex];
         } else {
-            // Fallback: try to find by allEmails index
-            currentEmail = allEmails[index];
+            console.error(`Invalid email index: ${globalIndex} (filteredEmails: ${filteredEmails.length}, allEmails: ${allEmails.length})`);
         }
     }
-    currentReply = null;
     
-    if (!currentEmail || !currentEmail.thread_id) {
+    if (!clickedEmail || !clickedEmail.thread_id) {
         showAlert('error', 'Unable to load email thread');
         return;
     }
     
-    // Set modal header with initial subject (will be updated from thread if available)
+    // Set currentEmail to the clicked email IMMEDIATELY
+    currentEmail = clickedEmail;
+    currentReply = null;
+    
+    const threadId = currentEmail.thread_id;
+    
+    // Show modal immediately with correct email data
+    if (emailModal) {
+        emailModal.style.display = 'flex';
+    }
+    
+    // Set modal header with clicked email's data IMMEDIATELY
     const subjectEl = document.getElementById('modalSubject');
     const initialSubject = currentEmail.subject && currentEmail.subject.trim() && currentEmail.subject !== 'No Subject' 
         ? decodeHtmlEntities(currentEmail.subject) 
-        : 'Loading...';
-    subjectEl.textContent = initialSubject;
-    subjectEl.style.display = 'block';
+        : 'No Subject';
+    if (subjectEl) {
+        subjectEl.textContent = initialSubject;
+        subjectEl.style.display = 'block';
+    }
     
-    // Set initial sender/recipient info (from first email)
-    // For sent emails, show "To:" instead of "From:"
+    // Set initial sender/recipient info from clicked email
     const isSent = currentEmail.is_sent || currentEmail.classification?.category === 'SENT';
     const field = isSent ? (currentEmail.to || currentEmail.from || '') : (currentEmail.from || '');
     const { senderName, senderEmail } = parseSender(field);
-    document.getElementById('modalFrom').textContent = senderName;
-    document.getElementById('modalFromEmail').textContent = senderEmail;
+    
+    const modalFrom = document.getElementById('modalFrom');
+    const modalFromEmail = document.getElementById('modalFromEmail');
+    if (modalFrom) modalFrom.textContent = senderName;
+    if (modalFromEmail) modalFromEmail.textContent = senderEmail;
     
     // Update label in modal header
     const modalFromSection = document.querySelector('.modal-from-section');
@@ -3359,43 +3442,60 @@ async function openEmail(indexOrEmail) {
     }
     
     const avatarLetter = (senderName || senderEmail).charAt(0).toUpperCase();
-    document.getElementById('modalAvatar').textContent = avatarLetter;
+    const modalAvatar = document.getElementById('modalAvatar');
+    if (modalAvatar) modalAvatar.textContent = avatarLetter;
     
     // Set date
-    document.getElementById('modalDate').textContent = formatDate(currentEmail.date);
+    const modalDate = document.getElementById('modalDate');
+    if (modalDate) modalDate.textContent = formatDate(currentEmail.date);
     
     // Display tags
     const classification = currentEmail.classification || {};
     const tags = classification.tags || [];
     const tagsHtml = tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('');
-    document.getElementById('modalTags').innerHTML = tagsHtml || '';
-    
-    // Deal scores section removed
+    const modalTags = document.getElementById('modalTags');
+    if (modalTags) modalTags.innerHTML = tagsHtml || '';
     
     // Hide single email section, show thread container
-    document.getElementById('singleEmailSection').style.display = 'none';
-    const threadContainer = document.getElementById('threadContainer');
+    const singleEmailSection = document.getElementById('singleEmailSection');
+    if (singleEmailSection) singleEmailSection.style.display = 'none';
     
-    // Show modal immediately
-    document.getElementById('emailModal').style.display = 'flex';
-    
-    const threadId = currentEmail.thread_id;
-    
-    // Clear thread container first to prevent showing wrong email
-    threadContainer.innerHTML = '';
-    
-    // ALWAYS show email from list immediately (no "Loading thread..." delay)
-    if (currentEmail.body || currentEmail.combined_text) {
+    // ALWAYS show clicked email from list IMMEDIATELY (0ms - no delay)
+    if (threadContainer && (currentEmail.body || currentEmail.combined_text)) {
         threadContainer.innerHTML = renderThreadMessage(currentEmail, true);
         enhanceHtmlEmails([currentEmail]);
     }
     
-    // Check IndexedDB cache for full thread - ONLY if thread_id matches
-    const cached = await getCachedThread(threadId);
+    // INSTANT: Check in-memory cache first (0ms access) - but ONLY if thread_id matches
+    let cached = threadCacheMemory.get(threadId);
+    
+    // Validate cached thread matches clicked email's thread_id BEFORE using it
     if (cached && cached.emails && cached.emails.length > 0) {
-        // Validate that cached thread matches the current email's thread_id
         const cachedThreadId = cached.emails[0]?.thread_id || cached.thread_id;
-        if (cachedThreadId === threadId) {
+        if (cachedThreadId !== threadId) {
+            // Wrong thread in cache - clear it
+            cached = null;
+            threadCacheMemory.delete(threadId);
+        }
+    }
+    
+    // If not in memory or invalid, check IndexedDB (async but should be fast if pre-fetched)
+    if (!cached) {
+        const indexedDBCache = await getCachedThread(threadId);
+        if (indexedDBCache && indexedDBCache.emails && indexedDBCache.emails.length > 0) {
+            const cachedThreadId = indexedDBCache.emails[0]?.thread_id || indexedDBCache.thread_id;
+            if (cachedThreadId === threadId) {
+                cached = indexedDBCache;
+                // Store in memory for next time
+                threadCacheMemory.set(threadId, cached);
+            }
+        }
+    }
+    
+    // Only use cache if it matches the clicked email's thread_id
+    if (cached && cached.emails && cached.emails.length > 0) {
+        const cachedThreadId = cached.emails[0]?.thread_id || cached.thread_id;
+        if (cachedThreadId === threadId && currentEmail && currentEmail.thread_id === threadId) {
             console.log(`⚡ Loading thread ${threadId} from cache (instant)`);
             
             // Display cached thread data immediately (replace single email with full thread)
@@ -3403,26 +3503,47 @@ async function openEmail(indexOrEmail) {
             cached.emails.forEach((email, idx) => {
                 threadHtml += renderThreadMessage(email, idx === 0);
             });
-            threadContainer.innerHTML = threadHtml;
-            enhanceHtmlEmails(cached.emails);
+            if (threadContainer) {
+                threadContainer.innerHTML = threadHtml;
+                enhanceHtmlEmails(cached.emails);
+            }
             
             // Show subtle "refreshing" indicator
             showCacheRefreshIndicator();
         } else {
-            console.log(`⚠️  Cached thread ID mismatch (expected ${threadId}, got ${cachedThreadId}), ignoring cache`);
-            // Invalid cache - keep showing the current email from list
+            console.log(`⚠️  Cache validation failed - keeping clicked email visible`);
+            // Keep showing the clicked email - don't replace with wrong cache
         }
     }
     
     // Always fetch fresh data in background (even if cache exists)
+    // BUT only update if we're still viewing the same email
     (async () => {
+        // Store the threadId and emailId we're fetching for - CRITICAL for validation
+        const fetchThreadId = threadId;
+        const fetchEmailId = currentEmail.id || currentEmail.message_id;
+        
         try {
-            const response = await fetch(`/api/thread/${currentEmail.thread_id}`);
+            const response = await fetch(`/api/thread/${fetchThreadId}`);
             const data = await response.json();
             
+            // CRITICAL: Validate we're still viewing the same email before ANY updates
+            if (!currentEmail || currentEmail.thread_id !== fetchThreadId) {
+                console.log(`⚠️  Email changed while fetching (expected ${fetchThreadId}, current ${currentEmail?.thread_id}), ignoring update`);
+                return;
+            }
+            
             if (data.success && data.emails && data.emails.length > 0) {
-                // Cache the fresh data
-                await cacheThread(threadId, data);
+                // Validate fetched thread matches
+                const fetchedThreadId = data.emails[0]?.thread_id || fetchThreadId;
+                if (fetchedThreadId !== fetchThreadId) {
+                    console.log(`⚠️  Fetched thread ID mismatch (expected ${fetchThreadId}, got ${fetchedThreadId}), ignoring`);
+                    return;
+                }
+                
+                // Cache the fresh data (both IndexedDB and memory)
+                await cacheThread(fetchThreadId, data);
+                threadCacheMemory.set(fetchThreadId, data); // Store in memory for instant access
                 
                 // Find the first email with a valid subject
                 let subjectToUse = null;
@@ -3433,8 +3554,8 @@ async function openEmail(indexOrEmail) {
                     }
                 }
                 
-                // Update subject if we found one
-                if (subjectToUse) {
+                // Update subject if we found one AND we're still viewing the same email
+                if (subjectToUse && currentEmail && currentEmail.thread_id === fetchThreadId) {
                     const decodedSubject = decodeHtmlEntities(subjectToUse);
                     const subjectEl = document.getElementById('modalSubject');
                     if (subjectEl) {
@@ -3442,9 +3563,8 @@ async function openEmail(indexOrEmail) {
                     }
                 }
                 
-                // Update UI if cache was shown (or display if no cache)
-                // Only update if we're still viewing the same thread
-                if (currentEmail && currentEmail.thread_id === threadId) {
+                // Update UI ONLY if we're still viewing the same thread
+                if (currentEmail && currentEmail.thread_id === fetchThreadId && threadContainer) {
                     if (cached) {
                         // Check if thread changed (new messages arrived)
                         if (data.emails.length !== cached.emails.length || 
@@ -3468,17 +3588,19 @@ async function openEmail(indexOrEmail) {
                         enhanceHtmlEmails(data.emails);
                     }
                 } else {
-                    console.log(`⚠️  Thread changed while loading (expected ${threadId}, current ${currentEmail?.thread_id}), ignoring update`);
+                    console.log(`⚠️  Thread changed while loading (expected ${fetchThreadId}, current ${currentEmail?.thread_id}), ignoring update`);
                 }
                 
                 hideCacheRefreshIndicator();
                 
-                // Use the latest email for reply generation, but preserve original email fields
-                const latestEmail = data.emails[data.emails.length - 1];
-                // Merge with original email to preserve all fields (especially combined_text, attachments, etc.)
-                currentEmail = {
-                    ...currentEmail,  // Keep original email data
-                    ...latestEmail,    // Override with latest thread message data
+                // Only update currentEmail if we're still viewing the same thread
+                if (currentEmail && currentEmail.thread_id === fetchThreadId) {
+                    // Use the latest email for reply generation, but preserve original email fields
+                    const latestEmail = data.emails[data.emails.length - 1];
+                    // Merge with original email to preserve all fields (especially combined_text, attachments, etc.)
+                    currentEmail = {
+                        ...currentEmail,  // Keep original email data
+                        ...latestEmail,    // Override with latest thread message data
                     // Ensure critical fields are preserved
                     subject: currentEmail.subject || latestEmail.subject || 'No Subject',
                     from: currentEmail.from || latestEmail.from || '',
@@ -3489,6 +3611,7 @@ async function openEmail(indexOrEmail) {
                     thread_id: currentEmail.thread_id || latestEmail.thread_id,
                     id: latestEmail.id || currentEmail.id
                 };
+                }
             } else if (!currentEmail.body && !currentEmail.combined_text) {
                 // Only show empty state if we didn't have cached data
                 threadContainer.innerHTML = '<div class="empty-state"><p>No messages found in thread</p></div>';
@@ -4898,11 +5021,13 @@ async function openSettingsModal() {
             const statusBadge = document.getElementById('whatsappStatusBadge');
             if (statusBadge) {
                 if (data.whatsapp_enabled && data.whatsapp_number) {
-                    statusBadge.textContent = `✅ Enabled (${data.whatsapp_number})`;
+                    statusBadge.textContent = `Enabled (${data.whatsapp_number})`;
                     statusBadge.style.color = '#10b981';
+                    statusBadge.parentElement.style.background = '#ECFDF5';
                 } else {
                     statusBadge.textContent = 'Not configured';
                     statusBadge.style.color = '#6B7280';
+                    statusBadge.parentElement.style.background = '#F3F4F6';
                 }
             }
         }
@@ -5093,11 +5218,13 @@ async function saveWhatsAppSettings() {
             const statusBadge = document.getElementById('whatsappStatusBadge');
             if (statusBadge) {
                 if (enabled && number) {
-                    statusBadge.textContent = `✅ Enabled (${number})`;
+                    statusBadge.textContent = `Enabled (${number})`;
                     statusBadge.style.color = '#10b981';
+                    statusBadge.parentElement.style.background = '#ECFDF5';
                 } else {
                     statusBadge.textContent = 'Not configured';
                     statusBadge.style.color = '#6B7280';
+                    statusBadge.parentElement.style.background = '#F3F4F6';
                 }
             }
             
