@@ -184,7 +184,14 @@
                     <div class="setup-loading"></div>
                     <div class="setup-icon" id="setupIcon" style="display: none;">🚀</div>
                     <h2>Setting up your inbox...</h2>
-                    <p>We're fetching and classifying your first 60 emails. This will just take a moment.</p>
+                    <div class="setup-timer-container">
+                        <div class="timer-display" id="timerDisplay">
+                            <span class="timer-minutes" id="timerMinutes">5</span>
+                            <span class="timer-separator">:</span>
+                            <span class="timer-seconds" id="timerSeconds">00</span>
+                        </div>
+                        <p class="motivational-quote" id="motivationalQuote">Good things take time...</p>
+                    </div>
                     <div class="setup-progress" id="setupProgress">
                         <div class="progress-bar-container">
                             <div class="progress-bar" id="setupProgressBar"></div>

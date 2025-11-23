@@ -571,8 +571,49 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
         }, randomInterval * 1000);
     };
     
+    // Motivational quotes
+    const quotes = [
+        "Good things take time...",
+        "Excellence is not a skill, it's an attitude...",
+        "Patience is the key to success...",
+        "Great things never come from comfort zones...",
+        "Progress, not perfection...",
+        "Quality takes time...",
+        "Building something amazing...",
+        "The best is yet to come...",
+        "Excellence requires patience...",
+        "Good things come to those who wait..."
+    ];
+    let currentQuoteIndex = 0;
+    
+    // Update timer display (MM:SS format)
+    const updateTimerDisplay = () => {
+        const timerMinutesEl = document.getElementById('timerMinutes');
+        const timerSecondsEl = document.getElementById('timerSeconds');
+        
+        if (timerMinutesEl && timerSecondsEl) {
+            const minutes = Math.floor(remainingSeconds / 60);
+            const seconds = remainingSeconds % 60;
+            timerMinutesEl.textContent = String(minutes).padStart(2, '0');
+            timerSecondsEl.textContent = String(seconds).padStart(2, '0');
+        }
+    };
+    
+    // Rotate motivational quotes every 8 seconds
+    const rotateQuote = () => {
+        const quoteEl = document.getElementById('motivationalQuote');
+        if (quoteEl) {
+            currentQuoteIndex = (currentQuoteIndex + 1) % quotes.length;
+            quoteEl.textContent = quotes[currentQuoteIndex];
+        }
+    };
+    let quoteInterval = setInterval(rotateQuote, 8000); // Rotate every 8 seconds
+    
     // Update display text
     const updateDisplay = () => {
+        // Update timer display
+        updateTimerDisplay();
+        
         if (!progressText) return;
         
         if (remainingSeconds >= 60) {
@@ -602,6 +643,7 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
     // Initial display
     updateDisplay();
     updateProgress();
+    updateTimerDisplay(); // Initial timer display
     
     // Start progressive email loading
     let emailLoadInterval = null;
@@ -639,6 +681,7 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
     const timerInterval = setInterval(() => {
         remainingSeconds--;
         updateProgress();
+        updateTimerDisplay(); // Update timer display every second
         
         // Update display at different intervals based on time remaining
         if (remainingSeconds >= 60) {
@@ -671,6 +714,9 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
             }
             if (secondsUpdateTimeout) {
                 clearTimeout(secondsUpdateTimeout);
+            }
+            if (quoteInterval) {
+                clearInterval(quoteInterval);
             }
             
             // Clear timer state from localStorage

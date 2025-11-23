@@ -409,6 +409,54 @@ body::before {
     line-height: 1.6;
 }
 
+/* Timer Display */
+.setup-timer-container {
+    margin: 32px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+}
+
+.timer-display {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    font-size: 48px;
+    font-weight: 700;
+    color: var(--primary-color);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 2px;
+    text-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
+}
+
+.timer-minutes,
+.timer-seconds {
+    min-width: 50px;
+    text-align: center;
+}
+
+.timer-separator {
+    color: var(--text-light);
+    animation: blink 1s infinite;
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0.3; }
+}
+
+.motivational-quote {
+    font-size: 16px;
+    color: var(--text-secondary);
+    font-style: italic;
+    margin: 0;
+    min-height: 24px;
+    transition: opacity 0.5s ease;
+    text-align: center;
+}
+
 .setup-progress {
     margin: 32px 0;
 }
