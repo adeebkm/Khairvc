@@ -2494,6 +2494,160 @@ def get_drafts():
         }), 500
 
 
+@app.route('/api/drafts/create', methods=['POST'])
+@login_required
+def create_draft():
+    """Create a new draft email"""
+    if not current_user.gmail_token:
+        return jsonify({
+            'success': False,
+            'error': 'Gmail not connected. Please connect your Gmail account.'
+        }), 401
+    
+    try:
+        gmail = get_user_gmail_client(current_user)
+        if not gmail:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to connect to Gmail'
+            }), 500
+        
+        data = request.json
+        to = data.get('to')
+        subject = data.get('subject', '')
+        body = data.get('body', '')
+        thread_id = data.get('thread_id')
+        cc = data.get('cc')
+        bcc = data.get('bcc')
+        
+        if not to:
+            return jsonify({
+                'success': False,
+                'error': 'Recipient email is required'
+            }), 400
+        
+        # Create draft via Gmail API
+        draft_info = gmail.create_draft(to, subject, body, thread_id, cc, bcc)
+        
+        if draft_info:
+            return jsonify({
+                'success': True,
+                'draft': draft_info
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to create draft'
+            }), 500
+    
+    except Exception as e:
+        print(f"Error creating draft: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/drafts/<draft_id>/update', methods=['PUT'])
+@login_required
+def update_draft(draft_id):
+    """Update an existing draft"""
+    if not current_user.gmail_token:
+        return jsonify({
+            'success': False,
+            'error': 'Gmail not connected. Please connect your Gmail account.'
+        }), 401
+    
+    try:
+        gmail = get_user_gmail_client(current_user)
+        if not gmail:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to connect to Gmail'
+            }), 500
+        
+        data = request.json
+        to = data.get('to')
+        subject = data.get('subject', '')
+        body = data.get('body', '')
+        thread_id = data.get('thread_id')
+        cc = data.get('cc')
+        bcc = data.get('bcc')
+        
+        if not to:
+            return jsonify({
+                'success': False,
+                'error': 'Recipient email is required'
+            }), 400
+        
+        # Update draft via Gmail API
+        draft_info = gmail.update_draft(draft_id, to, subject, body, thread_id, cc, bcc)
+        
+        if draft_info:
+            return jsonify({
+                'success': True,
+                'draft': draft_info
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to update draft'
+            }), 500
+    
+    except Exception as e:
+        print(f"Error updating draft: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/drafts/<draft_id>', methods=['DELETE'])
+@login_required
+def delete_draft(draft_id):
+    """Delete a draft"""
+    if not current_user.gmail_token:
+        return jsonify({
+            'success': False,
+            'error': 'Gmail not connected. Please connect your Gmail account.'
+        }), 401
+    
+    try:
+        gmail = get_user_gmail_client(current_user)
+        if not gmail:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to connect to Gmail'
+            }), 500
+        
+        # Delete draft via Gmail API
+        success = gmail.delete_draft(draft_id)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Draft deleted successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to delete draft'
+            }), 500
+    
+    except Exception as e:
+        print(f"Error deleting draft: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/reclassify-email', methods=['POST'])
 @login_required
 def reclassify_email():

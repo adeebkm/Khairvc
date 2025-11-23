@@ -274,6 +274,150 @@ class GmailClient:
             traceback.print_exc()
             return []
     
+    def create_draft(self, to, subject, body, thread_id=None, cc=None, bcc=None):
+        """
+        Create a draft email in Gmail
+        
+        Args:
+            to: Recipient email address
+            subject: Email subject
+            body: Email body (HTML or plain text)
+            thread_id: Thread ID to reply to (optional)
+            cc: CC recipients (optional)
+            bcc: BCC recipients (optional)
+        
+        Returns:
+            dict: Draft info with draft_id and message_id, or None if failed
+        """
+        if not self.service:
+            return None
+        
+        try:
+            from email.mime.text import MIMEText
+            import base64
+            
+            # Create message
+            message = MIMEText(body, 'html')
+            message['to'] = to
+            message['subject'] = subject
+            if cc:
+                message['cc'] = cc
+            if bcc:
+                message['bcc'] = bcc
+            
+            # Encode message
+            raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+            
+            # Create draft body
+            draft_body = {'message': {'raw': raw}}
+            if thread_id:
+                draft_body['message']['threadId'] = thread_id
+            
+            # Create draft via Gmail API
+            draft = self.service.users().drafts().create(
+                userId='me',
+                body=draft_body
+            ).execute()
+            
+            print(f"✅ Created draft: {draft['id']}")
+            return {
+                'draft_id': draft['id'],
+                'message_id': draft['message']['id'],
+                'thread_id': draft['message'].get('threadId')
+            }
+            
+        except Exception as e:
+            print(f"❌ Error creating draft: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def update_draft(self, draft_id, to, subject, body, thread_id=None, cc=None, bcc=None):
+        """
+        Update an existing draft in Gmail
+        
+        Args:
+            draft_id: ID of the draft to update
+            to: Recipient email address
+            subject: Email subject
+            body: Email body (HTML or plain text)
+            thread_id: Thread ID to reply to (optional)
+            cc: CC recipients (optional)
+            bcc: BCC recipients (optional)
+        
+        Returns:
+            dict: Draft info with draft_id and message_id, or None if failed
+        """
+        if not self.service:
+            return None
+        
+        try:
+            from email.mime.text import MIMEText
+            import base64
+            
+            # Create message
+            message = MIMEText(body, 'html')
+            message['to'] = to
+            message['subject'] = subject
+            if cc:
+                message['cc'] = cc
+            if bcc:
+                message['bcc'] = bcc
+            
+            # Encode message
+            raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+            
+            # Create draft body
+            draft_body = {'message': {'raw': raw}}
+            if thread_id:
+                draft_body['message']['threadId'] = thread_id
+            
+            # Update draft via Gmail API
+            draft = self.service.users().drafts().update(
+                userId='me',
+                id=draft_id,
+                body=draft_body
+            ).execute()
+            
+            print(f"✅ Updated draft: {draft['id']}")
+            return {
+                'draft_id': draft['id'],
+                'message_id': draft['message']['id'],
+                'thread_id': draft['message'].get('threadId')
+            }
+            
+        except Exception as e:
+            print(f"❌ Error updating draft: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def delete_draft(self, draft_id):
+        """
+        Delete a draft from Gmail
+        
+        Args:
+            draft_id: ID of the draft to delete
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.service:
+            return False
+        
+        try:
+            self.service.users().drafts().delete(
+                userId='me',
+                id=draft_id
+            ).execute()
+            
+            print(f"✅ Deleted draft: {draft_id}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error deleting draft: {str(e)}")
+            return False
+    
     def get_emails(self, max_results=10, unread_only=False, start_history_id=None):
         """
         Get emails from inbox using batch requests (optimized to reduce API calls).

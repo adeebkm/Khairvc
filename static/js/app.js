@@ -1234,6 +1234,9 @@ document.addEventListener('DOMContentLoaded', async function() {
     initSidebar();
     loadConfig();
     
+    // Initialize autosave listeners for composer
+    initAutosaveListeners();
+    
     // Check if setup is needed and auto-start
     const setupScreen = document.getElementById('setupScreen');
     const urlParams = new URLSearchParams(window.location.search);
@@ -4046,12 +4049,168 @@ async function markAsUnread() {
 // Composer state
 let composerMode = 'reply'; // 'reply', 'reply-all', or 'forward'
 let composerAttachments = [];
+let currentDraftId = null; // Track the current draft ID for updates
+let autosaveTimeout = null; // Debounce autosave
+let quotedTextStartMarker = '\n\n'; // Marker to identify where quoted text starts
+
+// Extract new content from composer (excluding quoted text)
+function getNewComposerContent() {
+    const composerBody = document.getElementById('composerBody');
+    if (!composerBody) return '';
+    
+    const fullBody = composerBody.value || '';
+    
+    // Find where quoted text starts
+    const quotedIndex = fullBody.indexOf(quotedTextStartMarker + 'On ');
+    if (quotedIndex === -1) {
+        // No quoted text found, return full body
+        return fullBody.trim();
+    }
+    
+    // Return only the new content before quoted text
+    return fullBody.substring(0, quotedIndex).trim();
+}
+
+// Check if composer has meaningful new content
+function hasNewContent() {
+    const newContent = getNewComposerContent();
+    return newContent.length > 0;
+}
+
+// Autosave draft to Gmail
+async function autosaveDraft() {
+    // Clear any pending autosave
+    if (autosaveTimeout) {
+        clearTimeout(autosaveTimeout);
+        autosaveTimeout = null;
+    }
+    
+    // Check if there's new content to save
+    if (!hasNewContent()) {
+        console.log('💾 Skipping autosave: no new content (only quoted text)');
+        return;
+    }
+    
+    const composerTo = document.getElementById('composerTo');
+    const composerCc = document.getElementById('composerCc');
+    const composerBcc = document.getElementById('composerBcc');
+    const composerSubject = document.getElementById('composerSubject');
+    const composerBody = document.getElementById('composerBody');
+    
+    if (!composerTo || !composerSubject || !composerBody) return;
+    
+    const to = composerTo.value.trim();
+    const cc = composerCc && composerCc.value.trim();
+    const bcc = composerBcc && composerBcc.value.trim();
+    const subject = composerSubject.value.trim();
+    const body = composerBody.value; // Keep full body with quoted text for display
+    
+    if (!to) {
+        console.log('💾 Skipping autosave: no recipient');
+        return;
+    }
+    
+    try {
+        const thread_id = currentEmail ? currentEmail.thread_id : null;
+        
+        if (currentDraftId) {
+            // Update existing draft
+            console.log(`💾 Updating draft: ${currentDraftId}`);
+            const response = await fetch(`/api/drafts/${currentDraftId}/update`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ to, cc, bcc, subject, body, thread_id })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                console.log(`✅ Draft updated: ${currentDraftId}`);
+                showToast('Draft saved', 'info');
+            } else {
+                console.error('Failed to update draft:', data.error);
+            }
+        } else {
+            // Create new draft
+            console.log('💾 Creating new draft');
+            const response = await fetch('/api/drafts/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ to, cc, bcc, subject, body, thread_id })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                currentDraftId = data.draft.draft_id;
+                console.log(`✅ Draft created: ${currentDraftId}`);
+                showToast('Draft saved', 'info');
+            } else {
+                console.error('Failed to create draft:', data.error);
+            }
+        }
+    } catch (error) {
+        console.error('Error autosaving draft:', error);
+    }
+}
+
+// Schedule autosave with debounce (saves 2 seconds after user stops typing)
+function scheduleAutosave() {
+    if (autosaveTimeout) {
+        clearTimeout(autosaveTimeout);
+    }
+    
+    autosaveTimeout = setTimeout(() => {
+        autosaveDraft();
+    }, 2000); // 2 second debounce
+}
+
+// Initialize autosave listeners for composer
+function initAutosaveListeners() {
+    const composerBody = document.getElementById('composerBody');
+    const composerTo = document.getElementById('composerTo');
+    const composerSubject = document.getElementById('composerSubject');
+    
+    if (composerBody) {
+        // Autosave on input (debounced)
+        composerBody.addEventListener('input', scheduleAutosave);
+        
+        // Autosave when leaving the composer
+        composerBody.addEventListener('blur', () => {
+            if (hasNewContent()) {
+                autosaveDraft();
+            }
+        });
+    }
+    
+    if (composerTo) {
+        composerTo.addEventListener('blur', () => {
+            if (hasNewContent()) {
+                autosaveDraft();
+            }
+        });
+    }
+    
+    if (composerSubject) {
+        composerSubject.addEventListener('input', scheduleAutosave);
+    }
+}
+
+// Clear draft state (call when sending or canceling)
+function clearDraftState() {
+    currentDraftId = null;
+    if (autosaveTimeout) {
+        clearTimeout(autosaveTimeout);
+        autosaveTimeout = null;
+    }
+}
 
 function openReplyComposer() {
     if (!currentEmail) {
         showAlert('error', 'No email selected');
         return;
     }
+    
+    // Clear draft state for new compose
+    clearDraftState();
     
     composerMode = 'reply';
     const composerSection = document.getElementById('composerSection');
@@ -4093,6 +4252,9 @@ function openReplyAllComposer() {
         showAlert('error', 'No email selected');
         return;
     }
+    
+    // Clear draft state for new compose
+    clearDraftState();
     
     composerMode = 'reply-all';
     const composerSection = document.getElementById('composerSection');
@@ -4145,7 +4307,10 @@ function openForwardComposer() {
         showAlert('error', 'No email selected');
         return;
     }
-    
+
+    // Clear draft state for new compose
+    clearDraftState();
+
     composerMode = 'forward';
     const composerSection = document.getElementById('composerSection');
     const composerTitle = document.getElementById('composerTitle');
@@ -4239,6 +4404,8 @@ function closeComposer() {
     composerAttachments = [];
     // Clear composer fields when closing
     clearComposerFields();
+    // Clear draft state (don't delete draft, user might want to continue later)
+    clearDraftState();
 }
 
 function clearComposer() {
@@ -4413,6 +4580,18 @@ async function sendComposedEmail() {
         
         if (data.success) {
             showAlert('success', '✉️ Email sent successfully!');
+            
+            // Delete the draft if it exists
+            if (currentDraftId) {
+                try {
+                    await fetch(`/api/drafts/${currentDraftId}`, { method: 'DELETE' });
+                    console.log(`🗑️  Deleted draft ${currentDraftId} after sending`);
+                } catch (error) {
+                    console.error('Error deleting draft:', error);
+                    // Don't fail the send operation if draft deletion fails
+                }
+            }
+            
             closeComposer();
             closeModal();
         } else {
