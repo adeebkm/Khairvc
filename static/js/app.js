@@ -2870,8 +2870,8 @@ function displayEmails(emails) {
                     </div>
                     ${hasAttachments ? '<div class="email-attachment" title="Has attachments">📎</div>' : ''}
                     <div class="email-hover-actions">
-                        <button class="email-action-btn" onclick="event.stopPropagation(); archiveEmail('${email.id}', ${index})" title="Archive">📦</button>
-                        <button class="email-action-btn" onclick="event.stopPropagation(); deleteEmail('${email.id}', ${index})" title="Delete">🗑️</button>
+                        <button class="email-action-btn" onclick="event.stopPropagation(); archiveEmail('${email.id}', ${globalIndex})" title="Archive">📦</button>
+                        <button class="email-action-btn" onclick="event.stopPropagation(); deleteEmail('${email.id}', ${globalIndex})" title="Delete">🗑️</button>
                     </div>
                     ${dateText ? `<div class="email-date">${dateText}</div>` : ''}
                 </div>
