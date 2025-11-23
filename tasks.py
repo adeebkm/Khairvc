@@ -18,7 +18,7 @@ if os.getcwd() not in sys.path:
 
 
 @celery.task(bind=True, name='tasks.sync_user_emails', time_limit=1800, soft_time_limit=1700)  # 30 min hard, 28.3 min soft
-def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
+def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_history_id=None):
     """
     Background task to sync and classify emails for a user
     
@@ -26,6 +26,7 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
         user_id: User ID to sync emails for
         max_emails: Maximum number of emails to fetch
         force_full_sync: Force full sync (ignore history_id)
+        new_history_id: Optional new history_id from Pub/Sub notification to update after sync
     
     Returns:
         dict: Status and results
@@ -120,7 +121,7 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                 result = gmail._get_emails_incremental(start_history_id, unread_only=False)
                 emails = result['new_emails']
                 deleted_message_ids = result['deleted_ids']
-                new_history_id = result['history_id']
+                api_history_id = result['history_id']  # History ID from Gmail API response
                 
                 # Process deletions from Gmail
                 if deleted_message_ids:
@@ -134,7 +135,7 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
             else:
                 # Full sync: respect max_emails limit
                 print(f"📧 [TASK] Full sync: Fetching up to {max_emails} emails...")
-                emails, new_history_id = gmail.get_emails(
+                emails, api_history_id = gmail.get_emails(
                     max_results=max_emails,
                     unread_only=False,
                     start_history_id=None
@@ -585,11 +586,20 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                     continue
             
             # Update history_id
-            if new_history_id:
+            # Priority: Use new_history_id from Pub/Sub notification if provided, otherwise use the one from Gmail API response
+            final_history_id = None
+            if new_history_id:  # From Pub/Sub notification parameter (passed in)
+                final_history_id = new_history_id
+                print(f"📊 [TASK] Using history_id from Pub/Sub notification: {final_history_id}")
+            elif 'api_history_id' in locals() and api_history_id:  # From Gmail API response
+                final_history_id = api_history_id
+                print(f"📊 [TASK] Using history_id from Gmail API response: {final_history_id}")
+            
+            if final_history_id:
                 if gmail_token:
-                    gmail_token.history_id = new_history_id
+                    gmail_token.history_id = final_history_id
                 else:
-                    gmail_token = GmailToken(user_id=user_id, history_id=new_history_id)
+                    gmail_token = GmailToken(user_id=user_id, history_id=final_history_id)
                     db.session.add(gmail_token)
                 # Commit with retry on connection errors
                 max_commit_retries = 3
@@ -1117,19 +1127,32 @@ def process_pubsub_notification(self, user_id, history_id):
             if not user.gmail_token:
                 return {'status': 'error', 'error': 'Gmail not connected'}
             
-            # Update history_id in database
-            if user.gmail_token:
-                user.gmail_token.history_id = str(history_id)
-                db.session.commit()
+            # IMPORTANT: Don't update history_id yet! We need to use the OLD history_id to query for changes
+            # The notification gives us the NEW history_id (955507), but we need to query FROM the OLD one
+            # Store the old history_id for the sync, then update to new one after sync completes
+            old_history_id = user.gmail_token.history_id if user.gmail_token else None
+            print(f"📊 [PUB/SUB] Current stored history_id: {old_history_id}, Notification history_id: {history_id}")
             
-            # Trigger incremental sync using the updated history_id
-            # Use sync_user_emails with force_full_sync=False to use history_id from database
+            # IMPORTANT: Add a delay before syncing to allow Gmail to fully process the email
+            # Pub/Sub notifications can arrive before Gmail has finished processing the email
+            # Wait 3 seconds to ensure the email is available in Gmail's History API
+            import time
+            print(f"⏳ [PUB/SUB] Waiting 3 seconds for Gmail to process email before syncing...")
+            time.sleep(3)
+            
+            # Trigger incremental sync using the OLD history_id (so it queries from old to new)
+            # Pass the new history_id as a parameter so we can update it after sync
             from tasks import sync_user_emails
             # Queue sync task on email_sync queue (not pubsub queue - keep pubsub queue for notifications only)
+            # Pass new_history_id so sync can update it after processing
             sync_task = sync_user_emails.apply_async(
                 args=[user_id, 10000],  # High limit for incremental sync
-                kwargs={'force_full_sync': False},  # Use incremental sync with history_id
-                queue='email_sync'  # Route to email_sync queue
+                kwargs={
+                    'force_full_sync': False,  # Use incremental sync with history_id
+                    'new_history_id': str(history_id)  # New history_id to update after sync
+                },
+                queue='email_sync',  # Route to email_sync queue
+                countdown=2  # Additional 2 second delay before task starts
             )
             
             print(f"✅ [PUB/SUB] Queued incremental sync task {sync_task.id} for user {user_id}")
