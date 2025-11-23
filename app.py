@@ -3853,10 +3853,9 @@ def pubsub_webhook():
             print(f"⚠️  Could not get Gmail client for user {user.id}")
             return jsonify({'status': 'gmail_client_error'}), 200
         
-        # Update history_id in database
-        if user.gmail_token:
-            user.gmail_token.history_id = str(history_id)
-            db.session.commit()
+        # DON'T update history_id here! The Pub/Sub task needs the OLD history_id to query for changes
+        # The task will update it after successfully syncing emails
+        # If we update it here, the task will query from new_history_id to new_history_id (no changes found)
         
         # Trigger instant Pub/Sub processing task (if Celery is available)
         # This uses a dedicated high-priority queue with a dedicated worker for instant processing
