@@ -5116,6 +5116,18 @@ async function saveUserProfile() {
     
     const fullName = fullNameInput.value.trim();
     const statusDiv = document.getElementById('userStatus');
+    const saveBtn = document.getElementById('saveSettingsBtn');
+    
+    // Show loading state
+    let originalText = 'Save Settings';
+    if (saveBtn) {
+        originalText = saveBtn.textContent;
+        saveBtn.textContent = 'Saving...';
+        saveBtn.disabled = true;
+    }
+    if (statusDiv) {
+        statusDiv.style.display = 'none';
+    }
     
     try {
         const response = await fetch('/api/user/profile', {
@@ -5160,6 +5172,11 @@ async function saveUserProfile() {
             statusDiv.style.border = '1px solid #fcc';
             statusDiv.textContent = '❌ Error updating profile. Please try again.';
         }
+    } finally {
+        if (saveBtn) {
+            saveBtn.textContent = originalText;
+            saveBtn.disabled = false;
+        }
     }
 }
 
@@ -5174,35 +5191,44 @@ async function saveWhatsAppSettings() {
     const enabled = document.getElementById('whatsappEnabled').checked;
     const number = document.getElementById('whatsappNumber').value.trim();
     const statusDiv = document.getElementById('whatsappStatus');
+    const saveBtn = document.getElementById('saveSettingsBtn');
     
     // Validate phone number if enabled
     if (enabled && number) {
         if (!number.startsWith('+')) {
-            statusDiv.style.display = 'block';
-            statusDiv.style.background = '#fee';
-            statusDiv.style.color = '#c33';
-            statusDiv.style.border = '1px solid #fcc';
-            statusDiv.textContent = '❌ Phone number must start with + (e.g., +1234567890)';
+            if (statusDiv) {
+                statusDiv.style.display = 'block';
+                statusDiv.style.background = '#fee';
+                statusDiv.style.color = '#c33';
+                statusDiv.style.border = '1px solid #fcc';
+                statusDiv.textContent = '❌ Phone number must start with + (e.g., +1234567890)';
+            }
             return;
         }
         
         // Basic validation: + followed by 10-15 digits
         if (!/^\+[1-9]\d{9,14}$/.test(number)) {
-            statusDiv.style.display = 'block';
-            statusDiv.style.background = '#fee';
-            statusDiv.style.color = '#c33';
-            statusDiv.style.border = '1px solid #fcc';
-            statusDiv.textContent = '❌ Invalid phone number format. Use: +1234567890';
+            if (statusDiv) {
+                statusDiv.style.display = 'block';
+                statusDiv.style.background = '#fee';
+                statusDiv.style.color = '#c33';
+                statusDiv.style.border = '1px solid #fcc';
+                statusDiv.textContent = '❌ Invalid phone number format. Use: +1234567890';
+            }
             return;
         }
     }
     
     // Show loading state
-    const saveBtn = event.target;
-    const originalText = saveBtn.textContent;
-    saveBtn.textContent = 'Saving...';
-    saveBtn.disabled = true;
-    statusDiv.style.display = 'none';
+    let originalText = 'Save Settings';
+    if (saveBtn) {
+        originalText = saveBtn.textContent;
+        saveBtn.textContent = 'Saving...';
+        saveBtn.disabled = true;
+    }
+    if (statusDiv) {
+        statusDiv.style.display = 'none';
+    }
     
     try {
         const response = await fetch('/api/whatsapp/settings', {
@@ -5246,22 +5272,28 @@ async function saveWhatsAppSettings() {
                 closeSettingsModal();
             }, 2000);
         } else {
+            if (statusDiv) {
+                statusDiv.style.display = 'block';
+                statusDiv.style.background = '#fee';
+                statusDiv.style.color = '#c33';
+                statusDiv.style.border = '1px solid #fcc';
+                statusDiv.textContent = '❌ ' + (data.error || 'Failed to save settings');
+            }
+        }
+    } catch (error) {
+        console.error('Error saving WhatsApp settings:', error);
+        if (statusDiv) {
             statusDiv.style.display = 'block';
             statusDiv.style.background = '#fee';
             statusDiv.style.color = '#c33';
             statusDiv.style.border = '1px solid #fcc';
-            statusDiv.textContent = '❌ ' + (data.error || 'Failed to save settings');
+            statusDiv.textContent = '❌ Error saving settings. Please try again.';
         }
-    } catch (error) {
-        console.error('Error saving WhatsApp settings:', error);
-        statusDiv.style.display = 'block';
-        statusDiv.style.background = '#fee';
-        statusDiv.style.color = '#c33';
-        statusDiv.style.border = '1px solid #fcc';
-        statusDiv.textContent = '❌ Error saving settings. Please try again.';
     } finally {
-        saveBtn.textContent = originalText;
-        saveBtn.disabled = false;
+        if (saveBtn) {
+            saveBtn.textContent = originalText;
+            saveBtn.disabled = false;
+        }
     }
 }
 
