@@ -3446,13 +3446,16 @@ function enhanceHtmlEmails(emails) {
             node.innerHTML = '';
             const iframe = document.createElement('iframe');
             iframe.className = 'email-html-frame';
-            iframe.setAttribute('sandbox', 'allow-same-origin'); // no scripts, but allow styles
+            // Security: Block scripts but allow styles and same-origin
+            // This causes expected console warnings about blocked scripts - these are SAFE to ignore
+            iframe.setAttribute('sandbox', 'allow-same-origin');
             iframe.style.width = '100%';
             iframe.style.border = 'none';
             iframe.style.minHeight = '400px';
             
             node.appendChild(iframe);
             
+            // Sanitize HTML to remove any dangerous content before rendering
             const safeHtml = sanitizeEmailHtml(htmlBody);
             iframe.srcdoc = safeHtml;
             
