@@ -1364,6 +1364,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         console.error('Error loading emails from database:', error);
         // On error, try loading cache as fallback
         loadEmailCacheFromStorage();
+        loadStarredCacheFromStorage(); // Load starred emails cache
         if (emailCache.data.length > 0 && emailCache.timestamp) {
             const cacheAge = Date.now() - emailCache.timestamp;
             const isFresh = cacheAge < emailCache.maxAge;
@@ -1473,10 +1474,12 @@ async function toggleStar(emailId, currentlyStarred, emailIndex) {
                 const email = allEmails.find(e => e.id === emailId);
                 if (email && !starredEmailsCache.find(e => e.id === emailId)) {
                     starredEmailsCache.push({...email, is_starred: true, classification: { category: 'STARRED' }});
+                    saveStarredCacheToStorage(); // Persist to localStorage
                 }
             } else {
                 // Remove from starred cache
                 starredEmailsCache = starredEmailsCache.filter(e => e.id !== emailId);
+                saveStarredCacheToStorage(); // Persist to localStorage
             }
             
             // Re-render the email list to show updated star status
@@ -1513,6 +1516,36 @@ async function toggleStar(emailId, currentlyStarred, emailIndex) {
 let sentEmailsCache = [];
 let starredEmailsCache = [];
 let draftsCache = [];
+
+// Load starred emails cache from localStorage on init
+function loadStarredCacheFromStorage() {
+    try {
+        const cacheKey = 'starredEmailsCache';
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed.data && Array.isArray(parsed.data)) {
+                starredEmailsCache = parsed.data;
+                console.log(`📦 Loaded ${starredEmailsCache.length} starred emails from localStorage cache`);
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to load starred cache from localStorage:', e);
+    }
+}
+
+// Save starred emails cache to localStorage
+function saveStarredCacheToStorage() {
+    try {
+        const cacheKey = 'starredEmailsCache';
+        localStorage.setItem(cacheKey, JSON.stringify({
+            data: starredEmailsCache,
+            timestamp: Date.now()
+        }));
+    } catch (e) {
+        console.warn('Failed to save starred cache to localStorage:', e);
+    }
+}
 
 // Switch between tabs
 function switchTab(tabName) {
@@ -1558,8 +1591,25 @@ function switchTab(tabName) {
         emailList.style.display = 'block';
         dealFlowTable.style.display = 'none';
         
-        // Show cached data immediately if available
-        if (starredEmailsCache.length > 0) {
+        // INSTANT: Filter starred emails from local email cache (no API call needed)
+        const starredFromCache = (emailCache.data || allEmails || []).filter(email => {
+            return email.is_starred === true || 
+                   email.starred === true || 
+                   (email.label_ids && email.label_ids.includes('STARRED'));
+        });
+        
+        if (starredFromCache.length > 0) {
+            console.log(`⚡ Showing ${starredFromCache.length} starred emails from local cache (instant)`);
+            allEmails = starredFromCache;
+            starredEmailsCache = starredFromCache; // Update in-memory cache
+            applyFilters();
+            const emailCountEl = document.getElementById('emailCount');
+            if (emailCountEl) {
+                const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                emailCountEl.textContent = `${starredFromCache.length} starred email${starredFromCache.length !== 1 ? 's' : ''} (local)${searchText}`;
+            }
+        } else if (starredEmailsCache.length > 0) {
+            // Fallback to in-memory cache if available
             allEmails = starredEmailsCache;
             applyFilters();
             const emailCountEl = document.getElementById('emailCount');
@@ -1570,9 +1620,13 @@ function switchTab(tabName) {
         } else {
             // Show empty state immediately
             displayEmails([]);
+            const emailCountEl = document.getElementById('emailCount');
+            if (emailCountEl) {
+                emailCountEl.textContent = 'Loading starred emails...';
+            }
         }
         
-        // Fetch fresh data in background
+        // Fetch fresh data in background (non-blocking)
         fetchStarredEmails();
     } else if (tabName === 'drafts') {
         emailList.style.display = 'block';
@@ -1636,8 +1690,9 @@ async function fetchStarredEmails() {
                 };
             });
             
-            // Update cache
+            // Update cache (both in-memory and localStorage)
             starredEmailsCache = starredEmails;
+            saveStarredCacheToStorage(); // Persist to localStorage
             
             // Only update UI if we're still on the starred tab
             if (currentTab === 'starred') {
@@ -3326,27 +3381,37 @@ async function openEmail(indexOrEmail) {
     
     const threadId = currentEmail.thread_id;
     
+    // Clear thread container first to prevent showing wrong email
+    threadContainer.innerHTML = '';
+    
     // ALWAYS show email from list immediately (no "Loading thread..." delay)
     if (currentEmail.body || currentEmail.combined_text) {
         threadContainer.innerHTML = renderThreadMessage(currentEmail, true);
         enhanceHtmlEmails([currentEmail]);
     }
     
-    // Check IndexedDB cache for full thread
+    // Check IndexedDB cache for full thread - ONLY if thread_id matches
     const cached = await getCachedThread(threadId);
     if (cached && cached.emails && cached.emails.length > 0) {
-        console.log(`⚡ Loading thread ${threadId} from cache (instant)`);
-        
-        // Display cached thread data immediately (replace single email with full thread)
-        let threadHtml = '';
-        cached.emails.forEach((email, idx) => {
-            threadHtml += renderThreadMessage(email, idx === 0);
-        });
-        threadContainer.innerHTML = threadHtml;
-        enhanceHtmlEmails(cached.emails);
-        
-        // Show subtle "refreshing" indicator
-        showCacheRefreshIndicator();
+        // Validate that cached thread matches the current email's thread_id
+        const cachedThreadId = cached.emails[0]?.thread_id || cached.thread_id;
+        if (cachedThreadId === threadId) {
+            console.log(`⚡ Loading thread ${threadId} from cache (instant)`);
+            
+            // Display cached thread data immediately (replace single email with full thread)
+            let threadHtml = '';
+            cached.emails.forEach((email, idx) => {
+                threadHtml += renderThreadMessage(email, idx === 0);
+            });
+            threadContainer.innerHTML = threadHtml;
+            enhanceHtmlEmails(cached.emails);
+            
+            // Show subtle "refreshing" indicator
+            showCacheRefreshIndicator();
+        } else {
+            console.log(`⚠️  Cached thread ID mismatch (expected ${threadId}, got ${cachedThreadId}), ignoring cache`);
+            // Invalid cache - keep showing the current email from list
+        }
     }
     
     // Always fetch fresh data in background (even if cache exists)
@@ -3378,26 +3443,32 @@ async function openEmail(indexOrEmail) {
                 }
                 
                 // Update UI if cache was shown (or display if no cache)
-                if (cached) {
-                    // Check if thread changed (new messages arrived)
-                    if (data.emails.length !== cached.emails.length) {
-                        // Render all messages in thread
+                // Only update if we're still viewing the same thread
+                if (currentEmail && currentEmail.thread_id === threadId) {
+                    if (cached) {
+                        // Check if thread changed (new messages arrived)
+                        if (data.emails.length !== cached.emails.length || 
+                            JSON.stringify(data.emails.map(e => e.id)) !== JSON.stringify(cached.emails.map(e => e.id))) {
+                            // Render all messages in thread
+                            let threadHtml = '';
+                            data.emails.forEach((email, idx) => {
+                                threadHtml += renderThreadMessage(email, idx === 0);
+                            });
+                            threadContainer.innerHTML = threadHtml;
+                            enhanceHtmlEmails(data.emails);
+                            showAlert('info', 'Thread updated');
+                        }
+                    } else {
+                        // First time viewing - render fresh data
                         let threadHtml = '';
                         data.emails.forEach((email, idx) => {
                             threadHtml += renderThreadMessage(email, idx === 0);
                         });
                         threadContainer.innerHTML = threadHtml;
                         enhanceHtmlEmails(data.emails);
-                        showAlert('info', 'Thread updated');
                     }
                 } else {
-                    // First time viewing - render fresh data
-                    let threadHtml = '';
-                    data.emails.forEach((email, idx) => {
-                        threadHtml += renderThreadMessage(email, idx === 0);
-                    });
-                    threadContainer.innerHTML = threadHtml;
-                    enhanceHtmlEmails(data.emails);
+                    console.log(`⚠️  Thread changed while loading (expected ${threadId}, current ${currentEmail?.thread_id}), ignoring update`);
                 }
                 
                 hideCacheRefreshIndicator();
@@ -4395,18 +4466,46 @@ let currentContextEmailIndex = null;
 
 function showContextMenu(event, emailIndex) {
     event.preventDefault();
+    event.stopPropagation();
+    
+    // Hide any existing context menu first
+    hideContextMenu();
+    
     currentContextEmailIndex = emailIndex;
     const contextMenu = document.getElementById('contextMenu');
-    if (!contextMenu) return;
+    if (!contextMenu) {
+        console.error('Context menu element not found');
+        return;
+    }
     
+    // Position the menu
     contextMenu.style.display = 'block';
     contextMenu.style.left = event.pageX + 'px';
     contextMenu.style.top = event.pageY + 'px';
     
-    // Close on click outside
+    // Prevent the menu from being positioned off-screen
+    const menuRect = contextMenu.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    
+    if (menuRect.right > viewportWidth) {
+        contextMenu.style.left = (viewportWidth - menuRect.width - 10) + 'px';
+    }
+    if (menuRect.bottom > viewportHeight) {
+        contextMenu.style.top = (viewportHeight - menuRect.height - 10) + 'px';
+    }
+    
+    // Close on click outside (with a small delay to prevent immediate closing)
     setTimeout(() => {
-        document.addEventListener('click', hideContextMenu, { once: true });
-    }, 0);
+        const clickHandler = (e) => {
+            // Don't close if clicking inside the context menu
+            if (!contextMenu.contains(e.target)) {
+                hideContextMenu();
+                document.removeEventListener('click', clickHandler);
+            }
+        };
+        document.addEventListener('click', clickHandler, { once: true });
+    }, 100);
 }
 
 function hideContextMenu() {
@@ -4414,7 +4513,8 @@ function hideContextMenu() {
     if (contextMenu) {
         contextMenu.style.display = 'none';
     }
-    currentContextEmailIndex = null;
+    // Don't clear currentContextEmailIndex immediately - keep it for menu actions
+    // It will be cleared when an action is performed
 }
 
 function contextMenuReply() {
@@ -4422,8 +4522,7 @@ function contextMenuReply() {
     if (currentContextEmailIndex !== null) {
         openEmail(currentContextEmailIndex);
         setTimeout(() => {
-            const replyBtn = document.querySelector('.reply-btn');
-            if (replyBtn) replyBtn.click();
+            openReplyComposer();
         }, 300);
     }
 }
@@ -4433,30 +4532,33 @@ function contextMenuForward() {
     if (currentContextEmailIndex !== null) {
         openEmail(currentContextEmailIndex);
         setTimeout(() => {
-            const forwardBtn = document.querySelector('.forward-btn');
-            if (forwardBtn) forwardBtn.click();
+            openForwardComposer();
         }, 300);
     }
 }
 
 function contextMenuArchive() {
-    hideContextMenu();
     if (currentContextEmailIndex !== null) {
-        const email = allEmails[currentContextEmailIndex];
+        // Use filteredEmails to match the displayed email list
+        const email = filteredEmails[currentContextEmailIndex] || allEmails[currentContextEmailIndex];
         if (email) {
-            archiveEmail(email.id, currentContextEmailIndex);
+            hideContextMenu();
+            archiveEmail(email.id, email.message_id || email.id);
         }
     }
+    currentContextEmailIndex = null;
 }
 
 function contextMenuDelete() {
-    hideContextMenu();
     if (currentContextEmailIndex !== null) {
-        const email = allEmails[currentContextEmailIndex];
+        // Use filteredEmails to match the displayed email list
+        const email = filteredEmails[currentContextEmailIndex] || allEmails[currentContextEmailIndex];
         if (email) {
-            deleteEmail(email.id, currentContextEmailIndex);
+            hideContextMenu();
+            deleteEmail(email.id, email.thread_id);
         }
     }
+    currentContextEmailIndex = null;
 }
 
 // Email Actions
