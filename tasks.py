@@ -1071,10 +1071,19 @@ def send_whatsapp_followups():
     Runs periodically via Celery Beat
     """
     try:
-        from app import app
-        from models import db, Deal, User
-        from whatsapp_service import WhatsAppService
-        
+        from app import app, db
+    except ImportError:
+        import sys
+        import os
+        # Add the parent directory to the path
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, current_dir)
+        from app import app, db
+    
+    from models import Deal, User
+    from whatsapp_service import WhatsAppService
+    
+    try:
         with app.app_context():
             whatsapp = WhatsAppService()
             six_hours_ago = datetime.utcnow() - timedelta(hours=6)

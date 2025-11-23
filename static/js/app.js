@@ -4491,6 +4491,43 @@ function showAlert(type, message) {
     }, 5000);
 }
 
+// Modern toast notification (Superhuman style) - shows for 2 seconds
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = `modern-toast modern-toast-${type}`;
+    
+    // Add icon based on type
+    let icon = '';
+    if (type === 'success') {
+        icon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>';
+    } else if (type === 'error') {
+        icon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>';
+    } else if (type === 'info') {
+        icon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
+    }
+    
+    toast.innerHTML = `
+        <div class="toast-icon">${icon}</div>
+        <div class="toast-message">${message}</div>
+    `;
+    
+    document.body.appendChild(toast);
+    
+    // Trigger animation
+    setTimeout(() => toast.classList.add('show'), 10);
+    
+    // Remove after 2 seconds
+    setTimeout(() => {
+        toast.classList.remove('show');
+        toast.classList.add('hide');
+        setTimeout(() => {
+            if (document.body.contains(toast)) {
+                document.body.removeChild(toast);
+            }
+        }, 300);
+    }, 2000);
+}
+
 // Add animations
 const style = document.createElement('style');
 style.textContent = `
@@ -5195,35 +5232,15 @@ async function saveUserProfile() {
         const data = await response.json();
         
         if (data.success) {
-            if (statusDiv) {
-                statusDiv.style.display = 'block';
-                statusDiv.style.background = '#efe';
-                statusDiv.style.color = '#3c3';
-                statusDiv.style.border = '1px solid #cfc';
-                statusDiv.textContent = '✅ Profile updated successfully!';
-            }
-            
-            setTimeout(() => {
-                if (statusDiv) statusDiv.style.display = 'none';
-            }, 2000);
+            showToast('Profile updated successfully', 'success');
+            console.log('✅ Profile updated successfully');
         } else {
-            if (statusDiv) {
-                statusDiv.style.display = 'block';
-                statusDiv.style.background = '#fee';
-                statusDiv.style.color = '#c33';
-                statusDiv.style.border = '1px solid #fcc';
-                statusDiv.textContent = '❌ ' + (data.error || 'Failed to update profile');
-            }
+            showToast(data.error || 'Failed to update profile', 'error');
+            console.error('❌ Failed to update profile:', data.error);
         }
     } catch (error) {
         console.error('Error saving user profile:', error);
-        if (statusDiv) {
-            statusDiv.style.display = 'block';
-            statusDiv.style.background = '#fee';
-            statusDiv.style.color = '#c33';
-            statusDiv.style.border = '1px solid #fcc';
-            statusDiv.textContent = '❌ Error updating profile. Please try again.';
-        }
+        showToast('Error updating profile. Please try again.', 'error');
     } finally {
         if (saveBtn) {
             saveBtn.textContent = originalText;
@@ -5282,6 +5299,8 @@ async function saveWhatsAppSettings() {
         statusDiv.style.display = 'none';
     }
     
+    console.log('💾 Saving WhatsApp settings:', { enabled, number: number ? number.substring(0, 8) + '...' : 'none' });
+    
     try {
         const response = await fetch('/api/whatsapp/settings', {
             method: 'POST',
@@ -5294,16 +5313,13 @@ async function saveWhatsAppSettings() {
             })
         });
         
+        console.log('📡 Response status:', response.status);
         const data = await response.json();
+        console.log('📦 Response data:', data);
         
         if (data.success) {
-            if (statusDiv) {
-                statusDiv.style.display = 'block';
-                statusDiv.style.background = '#efe';
-                statusDiv.style.color = '#3c3';
-                statusDiv.style.border = '1px solid #cfc';
-                statusDiv.textContent = '✅ Settings saved successfully!';
-            }
+            // Show modern toast notification
+            showToast('WhatsApp settings saved successfully', 'success');
             
             // Update WhatsApp status badge
             const statusBadge = document.getElementById('whatsappStatusBadge');
@@ -5319,28 +5335,19 @@ async function saveWhatsAppSettings() {
                 }
             }
             
-            // Auto-close after 2 seconds
+            console.log('✅ WhatsApp settings saved successfully');
+            
+            // Auto-close after 1.5 seconds
             setTimeout(() => {
                 closeSettingsModal();
-            }, 2000);
+            }, 1500);
         } else {
-            if (statusDiv) {
-                statusDiv.style.display = 'block';
-                statusDiv.style.background = '#fee';
-                statusDiv.style.color = '#c33';
-                statusDiv.style.border = '1px solid #fcc';
-                statusDiv.textContent = '❌ ' + (data.error || 'Failed to save settings');
-            }
+            console.error('❌ Failed to save:', data.error);
+            showToast(data.error || 'Failed to save settings', 'error');
         }
     } catch (error) {
-        console.error('Error saving WhatsApp settings:', error);
-        if (statusDiv) {
-            statusDiv.style.display = 'block';
-            statusDiv.style.background = '#fee';
-            statusDiv.style.color = '#c33';
-            statusDiv.style.border = '1px solid #fcc';
-            statusDiv.textContent = '❌ Error saving settings. Please try again.';
-        }
+        console.error('❌ Error saving WhatsApp settings:', error);
+        showToast('Error saving settings. Please try again.', 'error');
     } finally {
         if (saveBtn) {
             saveBtn.textContent = originalText;
