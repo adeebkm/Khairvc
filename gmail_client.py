@@ -41,10 +41,12 @@ except ImportError:
 
 
 # Gmail API scopes
+# Note: Google automatically adds 'openid' scope when requesting userinfo scopes
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/gmail.settings.basic',  # For fetching signatures
     'https://www.googleapis.com/auth/pubsub',  # For Pub/Sub push notifications (test environment)
+    'openid',  # Explicitly include openid (Google adds it automatically anyway)
     'https://www.googleapis.com/auth/userinfo.profile',  # For user profile (name, picture)
     'https://www.googleapis.com/auth/userinfo.email'  # For user email
 ]
@@ -69,7 +71,28 @@ class GmailClient:
         """Authenticate using stored token JSON"""
         try:
             token_data = json.loads(token_json)
-            creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+            
+            # Get scopes from token if available, otherwise use current SCOPES
+            # This prevents 'invalid_scope' errors when tokens were created with different scopes
+            token_scopes = token_data.get('scopes')
+            
+            # If token has scopes stored, use them (handles old tokens without 'openid')
+            # Otherwise, try with current SCOPES (for new tokens)
+            if token_scopes and isinstance(token_scopes, list) and len(token_scopes) > 0:
+                # Use token's original scopes to avoid scope mismatch errors
+                creds = Credentials.from_authorized_user_info(token_data, token_scopes)
+            else:
+                # Token doesn't have scopes - try with current SCOPES
+                # If that fails, try without scopes parameter (let token use its own)
+                try:
+                    creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+                except Exception as scope_error:
+                    if 'scope' in str(scope_error).lower() or 'invalid_scope' in str(scope_error).lower():
+                        print(f"⚠️  Scope mismatch detected, using token's original scopes...")
+                        # Don't specify scopes - let Google use the token's stored scopes
+                        creds = Credentials.from_authorized_user_info(token_data)
+                    else:
+                        raise
             
             # Refresh if expired
             if creds.expired and creds.refresh_token:

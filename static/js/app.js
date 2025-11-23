@@ -4766,7 +4766,9 @@ function switchSettingsTab(tabName) {
     // Show/hide save button based on tab
     const saveBtn = document.getElementById('saveSettingsBtn');
     if (saveBtn) {
-        saveBtn.style.display = (tabName === 'whatsapp') ? 'block' : 'none';
+        // Show save button for WhatsApp and User tabs (editable)
+        const editableTabs = ['whatsapp', 'user'];
+        saveBtn.style.display = editableTabs.includes(tabName) ? 'block' : 'none';
     }
 }
 
@@ -4789,10 +4791,37 @@ async function openSettingsModal() {
             const numberInput = document.getElementById('whatsappNumber');
             if (enabledCheckbox) enabledCheckbox.checked = data.whatsapp_enabled || false;
             if (numberInput) numberInput.value = data.whatsapp_number || '';
+            
+            // Update WhatsApp status badge
+            const statusBadge = document.getElementById('whatsappStatusBadge');
+            if (statusBadge) {
+                if (data.whatsapp_enabled && data.whatsapp_number) {
+                    statusBadge.textContent = `✅ Enabled (${data.whatsapp_number})`;
+                    statusBadge.style.color = '#10b981';
+                } else {
+                    statusBadge.textContent = 'Not configured';
+                    statusBadge.style.color = '#6B7280';
+                }
+            }
         }
     } catch (error) {
         console.error('Error loading WhatsApp settings:', error);
         showAlert('error', 'Failed to load settings');
+    }
+    
+    // Load user profile
+    try {
+        const profileResponse = await fetch('/api/user/profile');
+        const profileData = await profileResponse.json();
+        
+        if (profileData.success) {
+            const fullNameInput = document.getElementById('userFullName');
+            if (fullNameInput && profileData.full_name) {
+                fullNameInput.value = profileData.full_name;
+            }
+        }
+    } catch (error) {
+        console.error('Error loading user profile:', error);
     }
 }
 
@@ -4828,9 +4857,70 @@ function disconnectGmail() {
     }
 }
 
-function saveAllSettings() {
-    // Currently only WhatsApp settings are editable
-    saveWhatsAppSettings();
+async function saveAllSettings() {
+    const activeTab = document.querySelector('.settings-tab.active');
+    if (!activeTab) return;
+    
+    const tabName = activeTab.id.replace('tab-', '');
+    
+    if (tabName === 'whatsapp') {
+        saveWhatsAppSettings();
+    } else if (tabName === 'user') {
+        await saveUserProfile();
+    }
+}
+
+async function saveUserProfile() {
+    const fullNameInput = document.getElementById('userFullName');
+    if (!fullNameInput) return;
+    
+    const fullName = fullNameInput.value.trim();
+    const statusDiv = document.getElementById('userStatus');
+    
+    try {
+        const response = await fetch('/api/user/profile', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                full_name: fullName
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            if (statusDiv) {
+                statusDiv.style.display = 'block';
+                statusDiv.style.background = '#efe';
+                statusDiv.style.color = '#3c3';
+                statusDiv.style.border = '1px solid #cfc';
+                statusDiv.textContent = '✅ Profile updated successfully!';
+            }
+            
+            setTimeout(() => {
+                if (statusDiv) statusDiv.style.display = 'none';
+            }, 2000);
+        } else {
+            if (statusDiv) {
+                statusDiv.style.display = 'block';
+                statusDiv.style.background = '#fee';
+                statusDiv.style.color = '#c33';
+                statusDiv.style.border = '1px solid #fcc';
+                statusDiv.textContent = '❌ ' + (data.error || 'Failed to update profile');
+            }
+        }
+    } catch (error) {
+        console.error('Error saving user profile:', error);
+        if (statusDiv) {
+            statusDiv.style.display = 'block';
+            statusDiv.style.background = '#fee';
+            statusDiv.style.color = '#c33';
+            statusDiv.style.border = '1px solid #fcc';
+            statusDiv.textContent = '❌ Error updating profile. Please try again.';
+        }
+    }
 }
 
 function closeSettingsModal() {
@@ -4889,11 +4979,25 @@ async function saveWhatsAppSettings() {
         const data = await response.json();
         
         if (data.success) {
-            statusDiv.style.display = 'block';
-            statusDiv.style.background = '#efe';
-            statusDiv.style.color = '#3c3';
-            statusDiv.style.border = '1px solid #cfc';
-            statusDiv.textContent = '✅ Settings saved successfully!';
+            if (statusDiv) {
+                statusDiv.style.display = 'block';
+                statusDiv.style.background = '#efe';
+                statusDiv.style.color = '#3c3';
+                statusDiv.style.border = '1px solid #cfc';
+                statusDiv.textContent = '✅ Settings saved successfully!';
+            }
+            
+            // Update WhatsApp status badge
+            const statusBadge = document.getElementById('whatsappStatusBadge');
+            if (statusBadge) {
+                if (enabled && number) {
+                    statusBadge.textContent = `✅ Enabled (${number})`;
+                    statusBadge.style.color = '#10b981';
+                } else {
+                    statusBadge.textContent = 'Not configured';
+                    statusBadge.style.color = '#6B7280';
+                }
+            }
             
             // Auto-close after 2 seconds
             setTimeout(() => {

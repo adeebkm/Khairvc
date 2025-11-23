@@ -1,12 +1,45 @@
 # Database Migration Instructions
 
-## Problem
+## Current Migration: Google User Columns
+
+### Problem
+The `google_id`, `full_name`, and `profile_picture` columns were added to the `User` model but don't exist in the production database yet, causing the error:
+```
+column users.google_id does not exist
+```
+
+### Solution
+Run the migration script `add_google_user_columns.py` to add these columns to the database.
+
+**Using Railway CLI:**
+```bash
+railway run python add_google_user_columns.py
+```
+
+**Using Railway Dashboard Terminal:**
+```bash
+python add_google_user_columns.py
+```
+
+**Manual SQL:**
+```sql
+ALTER TABLE users ADD COLUMN google_id VARCHAR(255) UNIQUE;
+ALTER TABLE users ADD COLUMN full_name VARCHAR(200);
+ALTER TABLE users ADD COLUMN profile_picture VARCHAR(500);
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+```
+
+---
+
+## Previous Migration: Processed Column
+
+### Problem
 The `processed` column was added to the `EmailClassification` model but doesn't exist in the production database yet, causing the error:
 ```
 column email_classifications.processed does not exist
 ```
 
-## Solution
+### Solution
 Run the migration script to add the `processed` column to the database.
 
 ## Option 1: Run Migration on Railway (Recommended)

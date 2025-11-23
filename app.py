@@ -5,6 +5,7 @@ Each user manages their own Gmail account with complete privacy
 """
 import os
 import json
+import requests
 from threading import Semaphore
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session, send_file, Response, stream_with_context
 from werkzeug.utils import secure_filename
@@ -919,8 +920,64 @@ def oauth2callback():
             callback_url = callback_url.replace('http://', 'https://', 1)
         
         # Fetch token
-        flow.fetch_token(authorization_response=callback_url)
-        creds = flow.credentials
+        # Note: Google automatically adds 'openid' scope when requesting userinfo scopes
+        # The google_auth_oauthlib library is strict about scope matching, so we need to handle this
+        try:
+            flow.fetch_token(authorization_response=callback_url)
+        except Exception as token_error:
+            error_str = str(token_error)
+            # Handle scope mismatch - Google may add 'openid' automatically
+            if 'scope' in error_str.lower() or 'Scope' in error_str:
+                print(f"⚠️  Scope mismatch detected: {error_str}")
+                print(f"   Google automatically added 'openid' scope. Handling gracefully...")
+                
+                # Extract authorization code from callback URL
+                from urllib.parse import urlparse, parse_qs
+                parsed = urlparse(callback_url)
+                params = parse_qs(parsed.query)
+                auth_code = params.get('code', [None])[0]
+                
+                if auth_code:
+                    # Manually exchange code for token to bypass strict scope validation
+                    # credentials_data is already loaded above in this function
+                    client_id = credentials_data['installed']['client_id']
+                    client_secret = credentials_data['installed']['client_secret']
+                    
+                    token_url = 'https://oauth2.googleapis.com/token'
+                    token_data = {
+                        'code': auth_code,
+                        'client_id': client_id,
+                        'client_secret': client_secret,
+                        'redirect_uri': redirect_uri,
+                        'grant_type': 'authorization_code'
+                    }
+                    
+                    response = requests.post(token_url, data=token_data)
+                    token_response = response.json()
+                    
+                    if 'error' in token_response:
+                        raise Exception(f"Token exchange failed: {token_response.get('error_description', token_response.get('error'))}")
+                    
+                    # Create credentials from token response
+                    from google.oauth2.credentials import Credentials
+                    creds = Credentials(
+                        token=token_response['access_token'],
+                        refresh_token=token_response.get('refresh_token'),
+                        token_uri='https://oauth2.googleapis.com/token',
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        scopes=token_response.get('scope', '').split() if 'scope' in token_response else SCOPES
+                    )
+                    print(f"✅ Successfully obtained token (handled scope change)")
+                else:
+                    raise Exception(f"Could not extract authorization code from callback URL")
+            else:
+                # Re-raise if it's not a scope error
+                raise
+        
+        # If we didn't create creds in the exception handler, get them from flow
+        if 'creds' not in locals():
+            creds = flow.credentials
         
         # Check if this is a signup flow (user not logged in yet)
         is_signup = session.get('oauth_signup', False)
@@ -4198,6 +4255,53 @@ def whatsapp_settings():
             'success': True,
             'message': 'WhatsApp settings updated'
         })
+
+
+@app.route('/api/user/profile', methods=['GET', 'POST'])
+@login_required
+def user_profile():
+    """Get or update user profile information"""
+    if request.method == 'GET':
+        return jsonify({
+            'success': True,
+            'username': current_user.username,
+            'email': current_user.email,
+            'full_name': current_user.full_name,
+            'profile_picture': current_user.profile_picture,
+            'google_id': current_user.google_id,
+            'created_at': current_user.created_at.isoformat() if current_user.created_at else None
+        })
+    
+    # POST - Update profile
+    try:
+        data = request.json
+        full_name = data.get('full_name', '').strip()
+        
+        # Only allow updating full_name if not from Google OAuth
+        if not current_user.google_id and full_name:
+            current_user.full_name = full_name
+            db.session.commit()
+            return jsonify({
+                'success': True,
+                'message': 'Profile updated successfully'
+            })
+        elif current_user.google_id:
+            return jsonify({
+                'success': False,
+                'error': 'Profile information is synced from Google and cannot be manually edited'
+            }), 400
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid data'
+            }), 400
+            
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 if __name__ == '__main__':
     print("=" * 60)
