@@ -222,6 +222,22 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                         'error': f'Failed to initialize AI client: {error_msg}'
                     }
             
+            # Check for unprocessed emails BEFORE processing new ones
+            # This allows bidirectional classification to work on existing unprocessed emails
+            unprocessed_count_before = EmailClassification.query.filter_by(
+                user_id=user_id,
+                processed=False
+            ).count()
+            
+            print(f"📊 [TASK] Unprocessed emails before processing: {unprocessed_count_before}")
+            
+            # If there are many unprocessed emails, trigger bidirectional classification
+            # and let it handle both old and new emails (after we insert new ones)
+            should_use_bidirectional = unprocessed_count_before > 50
+            
+            if should_use_bidirectional:
+                print(f"🚀 [TASK] Many unprocessed emails ({unprocessed_count_before}) detected. Will trigger bidirectional classification after inserting new emails.")
+            
             # EmailClassifier initializes LambdaClient internally, don't pass it
             classifier = EmailClassifier(openai_client)
             
@@ -299,6 +315,31 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                         )
                         print(f"📧 [TASK] Progress: {idx + 1}/{len(emails)} emails processed, {emails_classified} classified, {emails_skipped_duplicate} skipped (duplicate)")
                     
+                    # If using bidirectional classification, skip inline classification
+                    # Just insert the email with processed=False and let bidirectional workers handle it
+                    if should_use_bidirectional:
+                        # Insert email without classification (bidirectional workers will classify it)
+                        new_classification = EmailClassification(
+                            user_id=user_id,
+                            thread_id=email.get('thread_id', ''),
+                            message_id=email.get('id', ''),
+                            sender=email.get('from', 'Unknown'),
+                            email_date=email.get('date'),
+                            category='GENERAL',  # Temporary category, will be updated by bidirectional workers
+                            tags='',
+                            confidence=0.0,
+                            processed=False,  # Not processed yet - bidirectional workers will handle it
+                            extracted_links=json.dumps([])
+                        )
+                        # Use encrypted field setters
+                        new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
+                        new_classification.set_snippet_encrypted(email.get('snippet', ''))
+                        db.session.add(new_classification)
+                        emails_processed += 1
+                        print(f"📝 [TASK] Email {idx + 1}/{len(emails)}: Inserted with processed=False (will be classified by bidirectional workers)")
+                        continue  # Skip to next email
+                    
+                    # Normal inline classification flow
                     # Extract email data (only if not already processed)
                     headers = email.get('headers', {})
                     # Use combined_text if available (includes attachment content, limited to 1500 chars)
@@ -385,12 +426,14 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                 db.session.commit()
                                 commit_success = True
                                 # Mark all classifications in this batch as processed (prevents re-processing)
-                                for classification in classifications_to_mark_processed:
-                                    if not classification.processed:
-                                        classification.processed = True
-                                # Commit the processed flags
-                                if any(not c.processed for c in classifications_to_mark_processed):
-                                    db.session.commit()
+                                # But only if not using bidirectional classification
+                                if not should_use_bidirectional:
+                                    for classification in classifications_to_mark_processed:
+                                        if not classification.processed:
+                                            classification.processed = True
+                                    # Commit the processed flags
+                                    if any(not c.processed for c in classifications_to_mark_processed):
+                                        db.session.commit()
                                 # Clear the list after successful commit
                                 classifications_to_mark_processed = []
                                 break
@@ -627,9 +670,10 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                 processed=False
             ).count()
             
-            print(f"📊 [TASK] Unprocessed emails: {unprocessed_count}")
+            print(f"📊 [TASK] Unprocessed emails after processing: {unprocessed_count}")
             
             # Trigger bidirectional classification if there are many unprocessed emails
+            # This includes both existing unprocessed emails and newly inserted ones (if should_use_bidirectional was True)
             if unprocessed_count > 50:
                 print(f"🚀 [TASK] Triggering bidirectional classification for {unprocessed_count} unprocessed emails")
                 try:
@@ -879,8 +923,10 @@ def fetch_older_emails(self, user_id, max_emails=200):
                             db.session.commit()
                             commit_success = True
                             # Mark as processed after successful classification (prevents re-processing)
-                            new_classification.processed = True
-                            db.session.commit()
+                            # But only if not using bidirectional classification
+                            if not should_use_bidirectional:
+                                new_classification.processed = True
+                                db.session.commit()
                             break
                         except Exception as commit_error:
                             error_str = str(commit_error)
