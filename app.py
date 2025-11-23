@@ -1464,6 +1464,7 @@ def get_emails():
                 'snippet': classification.get_snippet_decrypted() or '',
                 'date': classification.email_date or (int(classification.classified_at.timestamp() * 1000) if classification.classified_at else None),
                 'is_starred': star_info['is_starred'],
+                'is_read': 'UNREAD' not in star_info['label_ids'],
                 'label_ids': star_info['label_ids'],
                 'classification': {
                     'category': classification.category,

@@ -2897,7 +2897,8 @@ function displayEmails(emails) {
         const isStarred = email.is_starred || email.label_ids?.includes('STARRED') || false;
         const starClass = isStarred ? 'starred' : '';
         const hasAttachments = email.has_attachments || false;
-        const isUnread = !email.is_read || false;
+        // Check if email is unread: explicitly false OR has UNREAD label
+        const isUnread = (email.is_read === false) || (email.label_ids && email.label_ids.includes('UNREAD'));
         const unreadClass = isUnread ? 'unread' : '';
         const attachmentClass = hasAttachments ? 'has-attachment' : '';
         
@@ -2958,11 +2959,14 @@ function updateSidebarUnreadCounts() {
     };
     
     emailCache.data.forEach(email => {
-        if (!email.is_read) {
+        // Check if email is unread: explicitly false OR has UNREAD label
+        const isUnread = (email.is_read === false) || (email.label_ids && email.label_ids.includes('UNREAD'));
+        
+        if (isUnread) {
             counts['all']++;
             
             // Count by category
-            const category = email.category;
+            const category = email.classification?.category || email.category;
             if (category === 'DEAL_FLOW') {
                 counts['deal-flow']++;
             } else if (category === 'NETWORKING') {
@@ -4600,29 +4604,68 @@ async function markEmailAsUnread(messageId, threadId) {
 
 // Update email read status in local cache
 function updateEmailReadStatus(messageId, threadId, isRead) {
-    // Update in allEmails
-    const emailIndex = allEmails.findIndex(e => e.id === messageId || e.thread_id === threadId);
-    if (emailIndex >= 0) {
-        allEmails[emailIndex].is_read = isRead;
-    }
+    console.log(`🔄 Updating email read status: messageId=${messageId}, threadId=${threadId}, isRead=${isRead}`);
+    
+    let updatedCount = 0;
+    
+    // Helper function to update email object
+    const updateEmail = (email) => {
+        email.is_read = isRead;
+        
+        // Also update label_ids to match
+        if (email.label_ids) {
+            if (isRead) {
+                // Remove UNREAD label
+                email.label_ids = email.label_ids.filter(label => label !== 'UNREAD');
+            } else {
+                // Add UNREAD label if not present
+                if (!email.label_ids.includes('UNREAD')) {
+                    email.label_ids.push('UNREAD');
+                }
+            }
+        } else if (!isRead) {
+            // If no label_ids array exists and marking as unread, create one
+            email.label_ids = ['UNREAD'];
+        }
+    };
+    
+    // Update in allEmails (search by both messageId and threadId)
+    allEmails.forEach(email => {
+        if (email.id === messageId || email.message_id === messageId || email.thread_id === threadId) {
+            updateEmail(email);
+            updatedCount++;
+            console.log(`  ✓ Updated in allEmails: ${email.subject?.substring(0, 50)}`);
+        }
+    });
     
     // Update in emailCache
     if (emailCache && emailCache.data) {
-        const cacheIndex = emailCache.data.findIndex(e => e.id === messageId || e.thread_id === threadId);
-        if (cacheIndex >= 0) {
-            emailCache.data[cacheIndex].is_read = isRead;
-            saveEmailCacheToStorage();
-        }
+        emailCache.data.forEach(email => {
+            if (email.id === messageId || email.message_id === messageId || email.thread_id === threadId) {
+                updateEmail(email);
+                updatedCount++;
+                console.log(`  ✓ Updated in emailCache: ${email.subject?.substring(0, 50)}`);
+            }
+        });
+        saveEmailCacheToStorage();
     }
     
-    // Update in filteredEmails if present
-    const filteredIndex = filteredEmails.findIndex(e => e.id === messageId || e.thread_id === threadId);
-    if (filteredIndex >= 0) {
-        filteredEmails[filteredIndex].is_read = isRead;
-    }
+    // Update in filteredEmails
+    filteredEmails.forEach(email => {
+        if (email.id === messageId || email.message_id === messageId || email.thread_id === threadId) {
+            updateEmail(email);
+            updatedCount++;
+            console.log(`  ✓ Updated in filteredEmails: ${email.subject?.substring(0, 50)}`);
+        }
+    });
+    
+    console.log(`✅ Updated ${updatedCount} email(s) to ${isRead ? 'read' : 'unread'}`);
     
     // Refresh display to show updated read/unread styling
-    applyFilters();
+    displayEmails(filteredEmails);
+    
+    // Update unread counts
+    updateSidebarUnreadCounts();
 }
 
 // Modern toast notification (Superhuman style) - shows for 2 seconds
