@@ -314,7 +314,7 @@ async function startSetup() {
         if (data.success && data.already_complete) {
             console.log(`✅ Setup already complete: ${data.email_count} emails found`);
             if (progressBar) progressBar.style.width = '90%';
-            if (progressText) progressText.textContent = `Loading ${data.email_count} emails...`;
+            if (progressText) progressText.textContent = `Loading emails...`;
             
             // Mark as complete first
             await fetch('/api/setup/complete', { method: 'POST' });
@@ -498,10 +498,9 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
         remainingSeconds = remaining;
         startTime = timerState.startTime;
     } else {
-        // Generate random time between 7-10 minutes (420-600 seconds)
-        const minMinutes = 7;
-        const maxMinutes = 10;
-        totalSeconds = Math.floor(Math.random() * (maxMinutes - minMinutes + 1) * 60) + (minMinutes * 60);
+        // Fixed 5-minute timer (300 seconds)
+        const minMinutes = 5;
+        totalSeconds = minMinutes * 60;  // 300 seconds
         remainingSeconds = totalSeconds;
         startTime = Date.now();
         
@@ -515,7 +514,7 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
             console.warn('Error saving timer state to localStorage:', error);
         }
         
-        console.log(`⏱️ Starting new hardcoded timer: ${Math.floor(totalSeconds / 60)} minutes (${totalSeconds} seconds)`);
+        console.log(`⏱️ Starting new 5-minute timer: ${Math.floor(totalSeconds / 60)} minutes (${totalSeconds} seconds)`);
     }
     let lastUpdateTime = Date.now();
     let secondsUpdateTimeout = null;
@@ -581,6 +580,38 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
     updateDisplay();
     updateProgress();
     
+    // Start progressive email loading
+    let emailLoadInterval = null;
+    let lastEmailCount = 0;
+    const startProgressiveLoading = async () => {
+        // Load emails immediately
+        try {
+            const response = await fetch(`/api/emails?max=200&show_spam=true`);
+            const data = await response.json();
+            if (data.success && data.emails) {
+                lastEmailCount = data.emails.length;
+                console.log(`📧 Progressive loading: ${lastEmailCount} emails classified so far`);
+                
+                // Update progress text with email count
+                if (progressText && remainingSeconds > 0) {
+                    const minutes = Math.ceil(remainingSeconds / 60);
+                    const timeText = remainingSeconds >= 60 ? 
+                        `${minutes} minute${minutes !== 1 ? 's' : ''}` : 
+                        `${remainingSeconds} second${remainingSeconds !== 1 ? 's' : ''}`;
+                    progressText.textContent = `Classified ${lastEmailCount} emails... ${timeText} remaining`;
+                }
+            }
+        } catch (error) {
+            console.error('Error in progressive loading:', error);
+        }
+    };
+    
+    // Start progressive loading immediately
+    startProgressiveLoading();
+    
+    // Poll every 15 seconds for new classified emails
+    emailLoadInterval = setInterval(startProgressiveLoading, 15000);
+    
     // Countdown timer
     const timerInterval = setInterval(() => {
         remainingSeconds--;
@@ -612,6 +643,9 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
         // Timer complete
         if (remainingSeconds <= 0) {
             clearInterval(timerInterval);
+            if (emailLoadInterval) {
+                clearInterval(emailLoadInterval);
+            }
             if (secondsUpdateTimeout) {
                 clearTimeout(secondsUpdateTimeout);
             }
@@ -631,24 +665,39 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
 async function completeSetupAfterTimer(progressBar, progressText, setupScreen) {
     // Load emails and show inbox
     console.log('⏱️ Timer complete, loading emails and showing inbox...');
-    if (progressText) progressText.textContent = 'Setup complete! Loading your inbox...';
-    if (progressBar) progressBar.style.width = '100%';
+    if (progressText) progressText.textContent = 'Loading your inbox...';
+    if (progressBar) progressBar.style.width = '95%';
     
-    // Hide setup screen and show inbox FIRST (before loading emails)
-    // This ensures emailList element exists when loadEmailsFromDatabase() runs
-    if (setupScreen) setupScreen.style.display = 'none';
-    const compactHeader = document.querySelector('.main-content > .compact-header');
-    if (compactHeader) compactHeader.style.display = 'block';
-    const emailListEl = document.getElementById('emailList');
-    if (emailListEl) emailListEl.style.display = 'block';
-    
-    // Wait for DOM to update before loading emails
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
+    // DON'T hide setup screen yet - load emails FIRST
     // Load emails from database
     try {
+        console.log('📧 Loading emails from database (setup screen still visible)...');
         await loadEmailsFromDatabase();
         console.log(`📧 Loaded ${allEmails.length} emails after timer`);
+        
+        // If no emails loaded, wait and try again
+        if (allEmails.length === 0) {
+            console.warn('⚠️ No emails loaded yet, waiting 2 seconds...');
+            if (progressText) progressText.textContent = 'Waiting for emails to be classified...';
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            await loadEmailsFromDatabase();
+            console.log(`📧 Second attempt: Loaded ${allEmails.length} emails`);
+        }
+        
+        // Now that emails are loaded, hide setup screen and show inbox
+        if (progressText) progressText.textContent = 'Setup complete!';
+        if (progressBar) progressBar.style.width = '100%';
+        
+        if (setupScreen) setupScreen.style.display = 'none';
+        const compactHeader = document.querySelector('.main-content > .compact-header');
+        if (compactHeader) compactHeader.style.display = 'block';
+        const emailListEl = document.getElementById('emailList');
+        if (emailListEl) emailListEl.style.display = 'block';
+        
+        // Wait for DOM to update
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        console.log(`📧 Now displaying ${allEmails.length} emails`);
         
         // Ensure all emails have category
         allEmails.forEach(email => {
@@ -3600,15 +3649,48 @@ async function markAsUnread() {
 }
 
 // Open reply composer (to be implemented with full features)
+// Composer state
+let composerMode = 'reply'; // 'reply', 'reply-all', or 'forward'
+let composerAttachments = [];
+
 function openReplyComposer() {
     if (!currentEmail) {
         showAlert('error', 'No email selected');
         return;
     }
-    // Show reply section
-    document.getElementById('replySection').style.display = 'block';
-    // Generate reply
-    generateReply();
+    
+    composerMode = 'reply';
+    const composerSection = document.getElementById('composerSection');
+    const composerTitle = document.getElementById('composerTitle');
+    const composerTo = document.getElementById('composerTo');
+    const composerSubject = document.getElementById('composerSubject');
+    const composerBody = document.getElementById('composerBody');
+    
+    // Set title
+    composerTitle.textContent = 'Reply';
+    
+    // Extract email from sender
+    const senderEmail = extractEmail(currentEmail.from || '');
+    composerTo.value = senderEmail;
+    
+    // Set subject
+    const subject = currentEmail.subject || 'No Subject';
+    composerSubject.value = subject.startsWith('Re:') ? subject : `Re: ${subject}`;
+    
+    // Set body with quoted text
+    const quotedText = formatQuotedText(currentEmail);
+    composerBody.value = `\n\n${quotedText}`;
+    
+    // Clear attachments
+    composerAttachments = [];
+    updateAttachmentPreview();
+    
+    // Hide reply section, show composer
+    document.getElementById('replySection').style.display = 'none';
+    composerSection.style.display = 'block';
+    
+    // Focus on body
+    composerBody.focus();
 }
 
 // Open reply all composer
@@ -3617,8 +3699,50 @@ function openReplyAllComposer() {
         showAlert('error', 'No email selected');
         return;
     }
-    // TODO: Implement reply all functionality
-    showAlert('info', 'Reply All functionality coming soon');
+    
+    composerMode = 'reply-all';
+    const composerSection = document.getElementById('composerSection');
+    const composerTitle = document.getElementById('composerTitle');
+    const composerTo = document.getElementById('composerTo');
+    const composerCc = document.getElementById('composerCc');
+    const composerSubject = document.getElementById('composerSubject');
+    const composerBody = document.getElementById('composerBody');
+    const ccBccFields = document.getElementById('ccBccFields');
+    
+    // Set title
+    composerTitle.textContent = 'Reply All';
+    
+    // Extract email from sender
+    const senderEmail = extractEmail(currentEmail.from || '');
+    composerTo.value = senderEmail;
+    
+    // Show CC/BCC fields
+    ccBccFields.style.display = 'flex';
+    
+    // Extract all recipients for CC (excluding current user)
+    const toEmails = extractAllEmails(currentEmail.to || '');
+    const ccEmails = extractAllEmails(currentEmail.cc || '');
+    const allRecipients = [...toEmails, ...ccEmails].filter(email => email !== senderEmail);
+    composerCc.value = allRecipients.join(', ');
+    
+    // Set subject
+    const subject = currentEmail.subject || 'No Subject';
+    composerSubject.value = subject.startsWith('Re:') ? subject : `Re: ${subject}`;
+    
+    // Set body with quoted text
+    const quotedText = formatQuotedText(currentEmail);
+    composerBody.value = `\n\n${quotedText}`;
+    
+    // Clear attachments
+    composerAttachments = [];
+    updateAttachmentPreview();
+    
+    // Hide reply section, show composer
+    document.getElementById('replySection').style.display = 'none';
+    composerSection.style.display = 'block';
+    
+    // Focus on body
+    composerBody.focus();
 }
 
 // Open forward composer
@@ -3627,8 +3751,255 @@ function openForwardComposer() {
         showAlert('error', 'No email selected');
         return;
     }
-    // TODO: Implement forward functionality
-    showAlert('info', 'Forward functionality coming soon');
+    
+    composerMode = 'forward';
+    const composerSection = document.getElementById('composerSection');
+    const composerTitle = document.getElementById('composerTitle');
+    const composerTo = document.getElementById('composerTo');
+    const composerSubject = document.getElementById('composerSubject');
+    const composerBody = document.getElementById('composerBody');
+    
+    // Set title
+    composerTitle.textContent = 'Forward';
+    
+    // Clear recipient
+    composerTo.value = '';
+    
+    // Set subject
+    const subject = currentEmail.subject || 'No Subject';
+    composerSubject.value = subject.startsWith('Fwd:') ? subject : `Fwd: ${subject}`;
+    
+    // Set body with forwarded message
+    const forwardedText = formatForwardedMessage(currentEmail);
+    composerBody.value = `\n\n${forwardedText}`;
+    
+    // Include original attachments if any
+    composerAttachments = [];
+    if (currentEmail.attachments && currentEmail.attachments.length > 0) {
+        showAlert('info', 'Original attachments will be included automatically');
+    }
+    updateAttachmentPreview();
+    
+    // Hide reply section, show composer
+    document.getElementById('replySection').style.display = 'none';
+    composerSection.style.display = 'block';
+    
+    // Focus on TO field
+    composerTo.focus();
+}
+
+// Helper functions
+function extractEmail(emailString) {
+    if (!emailString) return '';
+    const match = emailString.match(/<(.+?)>/);
+    return match ? match[1] : emailString.split('@')[0].includes(' ') ? '' : emailString;
+}
+
+function extractAllEmails(emailString) {
+    if (!emailString) return [];
+    const emails = [];
+    const parts = emailString.split(',');
+    parts.forEach(part => {
+        const email = extractEmail(part.trim());
+        if (email) emails.push(email);
+    });
+    return emails;
+}
+
+function formatQuotedText(email) {
+    const sender = email.from || 'Unknown';
+    const date = email.date ? new Date(parseInt(email.date)).toLocaleString() : '';
+    const body = email.body || email.snippet || '';
+    
+    return `---------- Original Message ----------
+From: ${sender}
+Date: ${date}
+Subject: ${email.subject || 'No Subject'}
+
+${body}`;
+}
+
+function formatForwardedMessage(email) {
+    const sender = email.from || 'Unknown';
+    const date = email.date ? new Date(parseInt(email.date)).toLocaleString() : '';
+    const to = email.to || '';
+    const body = email.body || email.snippet || '';
+    
+    return `---------- Forwarded message ---------
+From: ${sender}
+Date: ${date}
+Subject: ${email.subject || 'No Subject'}
+To: ${to}
+
+${body}`;
+}
+
+function toggleCCBCC() {
+    const ccBccFields = document.getElementById('ccBccFields');
+    ccBccFields.style.display = ccBccFields.style.display === 'none' ? 'flex' : 'none';
+}
+
+function closeComposer() {
+    document.getElementById('composerSection').style.display = 'none';
+    document.getElementById('ccBccFields').style.display = 'none';
+    composerAttachments = [];
+}
+
+function applyFormatting(command) {
+    const textarea = document.getElementById('composerBody');
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = textarea.value.substring(start, end);
+    
+    if (!selectedText) {
+        showAlert('info', 'Please select text to format');
+        return;
+    }
+    
+    let formattedText = selectedText;
+    switch(command) {
+        case 'bold':
+            formattedText = `**${selectedText}**`;
+            break;
+        case 'italic':
+            formattedText = `*${selectedText}*`;
+            break;
+        case 'underline':
+            formattedText = `__${selectedText}__`;
+            break;
+    }
+    
+    textarea.value = textarea.value.substring(0, start) + formattedText + textarea.value.substring(end);
+    textarea.focus();
+    textarea.setSelectionRange(start, start + formattedText.length);
+}
+
+function handleAttachmentUpload(event) {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    
+    Array.from(files).forEach(file => {
+        // Convert file to base64
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            composerAttachments.push({
+                filename: file.name,
+                data: e.target.result.split(',')[1], // Remove data:mime;base64, prefix
+                size: file.size,
+                type: file.type
+            });
+            updateAttachmentPreview();
+        };
+        reader.readAsDataURL(file);
+    });
+    
+    // Clear input
+    event.target.value = '';
+}
+
+function updateAttachmentPreview() {
+    const previewList = document.getElementById('attachmentPreviewList');
+    if (composerAttachments.length === 0) {
+        previewList.innerHTML = '';
+        return;
+    }
+    
+    previewList.innerHTML = composerAttachments.map((att, index) => `
+        <div class="attachment-preview">
+            <div class="attachment-preview-icon">📎</div>
+            <div class="attachment-preview-info">
+                <div class="attachment-preview-name">${escapeHtml(att.filename)}</div>
+                <div class="attachment-preview-size">${formatFileSize(att.size)}</div>
+            </div>
+            <div class="attachment-preview-remove" onclick="removeAttachment(${index})">&times;</div>
+        </div>
+    `).join('');
+}
+
+function removeAttachment(index) {
+    composerAttachments.splice(index, 1);
+    updateAttachmentPreview();
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+async function sendComposedEmail() {
+    const to = document.getElementById('composerTo').value.trim();
+    const cc = document.getElementById('composerCc').value.trim();
+    const bcc = document.getElementById('composerBcc').value.trim();
+    const subject = document.getElementById('composerSubject').value.trim();
+    const body = document.getElementById('composerBody').value.trim();
+    
+    if (!to) {
+        showAlert('error', 'Please enter a recipient');
+        return;
+    }
+    
+    if (!body) {
+        showAlert('error', 'Please enter a message');
+        return;
+    }
+    
+    try {
+        let response;
+        
+        if (composerMode === 'forward') {
+            // Forward email
+            response = await fetch('/api/forward-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    to: to,
+                    subject: subject,
+                    body: body,
+                    original_message_id: currentEmail.id,
+                    include_attachments: true
+                })
+            });
+        } else {
+            // Reply or Reply All
+            const endpoint = composerAttachments.length > 0 ? 
+                '/api/send-reply-with-attachments' : '/api/send-reply';
+            
+            const payload = {
+                email_id: currentEmail.id,
+                to: to,
+                subject: subject,
+                body: body,
+                thread_id: currentEmail.thread_id
+            };
+            
+            if (composerAttachments.length > 0) {
+                payload.attachments = composerAttachments;
+            }
+            
+            if (cc) payload.cc = cc;
+            if (bcc) payload.bcc = bcc;
+            
+            response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        }
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showAlert('success', '✉️ Email sent successfully!');
+            closeComposer();
+            closeModal();
+        } else {
+            showAlert('error', data.error || 'Failed to send email');
+        }
+    } catch (error) {
+        console.error('Error sending email:', error);
+        showAlert('error', 'Failed to send email: ' + error.message);
+    }
 }
 
 // Send reply

@@ -611,6 +611,34 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                         else:
                             raise
             
+            # Check for unprocessed emails and trigger bidirectional classification if needed
+            unprocessed_count = EmailClassification.query.filter_by(
+                user_id=user_id,
+                processed=False
+            ).count()
+            
+            print(f"📊 [TASK] Unprocessed emails: {unprocessed_count}")
+            
+            # Trigger bidirectional classification if there are many unprocessed emails
+            if unprocessed_count > 50:
+                print(f"🚀 [TASK] Triggering bidirectional classification for {unprocessed_count} unprocessed emails")
+                try:
+                    # Start forward worker (oldest first)
+                    forward_task = classify_bidirectional.apply_async(
+                        args=[user_id, 50, 'forward'],
+                        queue='email_sync'
+                    )
+                    print(f"✅ [TASK] Started forward worker: {forward_task.id}")
+                    
+                    # Start backward worker (newest first)
+                    backward_task = classify_bidirectional.apply_async(
+                        args=[user_id, 50, 'backward'],
+                        queue='email_sync'
+                    )
+                    print(f"✅ [TASK] Started backward worker: {backward_task.id}")
+                except Exception as e:
+                    print(f"⚠️  [TASK] Failed to start bidirectional workers: {e}")
+            
             # Return results with detailed breakdown
             print(f"📊 [TASK] Classification complete:")
             print(f"   - Emails fetched from Gmail: {len(emails)}")
@@ -629,6 +657,7 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                 'emails_failed_classification': emails_failed_classification,
                 'emails_failed_commit': emails_failed_commit,
                 'total_fetched': len(emails),
+                'unprocessed_count': unprocessed_count,
                 'errors': errors[:10]  # Limit error list
             }
             
@@ -1118,3 +1147,137 @@ def process_pubsub_notification(self, user_id, history_id):
             import traceback
             traceback.print_exc()
             return {'status': 'error', 'error': error_msg}
+
+
+@celery.task(bind=True, name='tasks.classify_bidirectional')
+def classify_bidirectional(self, user_id, batch_size=50, direction='forward'):
+    """
+    Classify emails from either end (forward or backward)
+    Used for faster classification when there are many unprocessed emails
+    
+    Args:
+        user_id: User to classify for
+        batch_size: Number of emails to process in this batch
+        direction: 'forward' (oldest→newest) or 'backward' (newest→oldest)
+    """
+    from app import app
+    
+    with app.app_context():
+        try:
+            print(f"🔄 [BIDIRECTIONAL] Starting {direction} classification for user {user_id} (batch size: {batch_size})")
+            
+            # Get unprocessed emails in the specified order
+            query = EmailClassification.query.filter_by(
+                user_id=user_id,
+                processed=False
+            )
+            
+            if direction == 'forward':
+                query = query.order_by(EmailClassification.email_date.asc())
+            else:  # backward
+                query = query.order_by(EmailClassification.email_date.desc())
+            
+            emails = query.limit(batch_size).all()
+            
+            if not emails:
+                print(f"✅ [BIDIRECTIONAL] No more unprocessed emails for user {user_id} (direction: {direction})")
+                return {'status': 'complete', 'direction': direction, 'classified': 0}
+            
+            print(f"🔄 [BIDIRECTIONAL] Processing {len(emails)} emails (direction: {direction})")
+            
+            # Initialize classifier
+            try:
+                openai_client = OpenAIClient()
+                classifier = EmailClassifier(openai_client)
+            except Exception as e:
+                print(f"❌ [BIDIRECTIONAL] Failed to initialize classifier: {e}")
+                return {'status': 'error', 'error': str(e), 'direction': direction}
+            
+            classified_count = 0
+            skipped_count = 0
+            
+            for email in emails:
+                # Use SELECT FOR UPDATE to prevent race conditions
+                try:
+                    with db.session.begin_nested():
+                        email_locked = db.session.query(EmailClassification).filter_by(
+                            id=email.id
+                        ).with_for_update(nowait=True).first()
+                        
+                        if not email_locked or email_locked.processed:
+                            skipped_count += 1
+                            continue
+                        
+                        # Classify the email
+                        try:
+                            # Get email data for classification
+                            email_data = {
+                                'subject': email_locked.subject or '',
+                                'sender': email_locked.sender or '',
+                                'snippet': email_locked.snippet or '',
+                                'body': email_locked.snippet or ''  # Use snippet as body for classification
+                            }
+                            
+                            classification_result = classifier.classify_email(email_data)
+                            
+                            # Update classification
+                            email_locked.category = classification_result.get('category', 'GENERAL')
+                            tags = classification_result.get('tags', [])
+                            email_locked.tags = ','.join(tags) if isinstance(tags, list) else tags
+                            email_locked.confidence = classification_result.get('confidence', 1.0)
+                            email_locked.processed = True
+                            
+                            classified_count += 1
+                            
+                            if classified_count % 10 == 0:
+                                print(f"📊 [BIDIRECTIONAL] {direction}: {classified_count} classified, {skipped_count} skipped")
+                            
+                        except Exception as e:
+                            print(f"❌ [BIDIRECTIONAL] Error classifying email {email.message_id}: {e}")
+                            continue
+                    
+                    db.session.commit()
+                    
+                except Exception as e:
+                    if 'could not obtain lock' in str(e).lower() or 'nowait' in str(e).lower():
+                        # Another worker is processing this email, skip it
+                        skipped_count += 1
+                        db.session.rollback()
+                        continue
+                    else:
+                        print(f"❌ [BIDIRECTIONAL] Database error: {e}")
+                        db.session.rollback()
+                        continue
+            
+            # Check if there are more emails to process
+            remaining = EmailClassification.query.filter_by(
+                user_id=user_id,
+                processed=False
+            ).count()
+            
+            print(f"✅ [BIDIRECTIONAL] {direction} batch complete: {classified_count} classified, {skipped_count} skipped, {remaining} remaining")
+            
+            # Continue processing if there are more emails
+            if remaining > 0 and classified_count > 0:
+                # Queue next batch
+                classify_bidirectional.apply_async(
+                    args=[user_id, batch_size, direction],
+                    countdown=2,  # Wait 2 seconds before next batch
+                    queue='email_sync'
+                )
+                print(f"📋 [BIDIRECTIONAL] Queued next {direction} batch")
+            
+            return {
+                'status': 'processing' if remaining > 0 else 'complete',
+                'direction': direction,
+                'classified': classified_count,
+                'skipped': skipped_count,
+                'remaining': remaining
+            }
+            
+        except Exception as e:
+            error_msg = f"Bidirectional classification failed: {str(e)}"
+            print(f"❌ [BIDIRECTIONAL] {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return {'status': 'error', 'error': error_msg, 'direction': direction}

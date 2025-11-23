@@ -340,6 +340,56 @@
                     <div class="email-body" id="modalBody"></div>
                 </div>
                 
+                <!-- Rich Composer Section -->
+                <div class="composer-section" id="composerSection" style="display: none;">
+                    <h3 id="composerTitle">Reply</h3>
+                    <div class="composer-form">
+                        <div class="composer-field">
+                            <label>To:</label>
+                            <input type="email" id="composerTo" class="form-control" placeholder="recipient@example.com">
+                        </div>
+                        <div class="cc-bcc-toggle">
+                            <button class="btn btn-small btn-text" onclick="toggleCCBCC()">Cc/Bcc</button>
+                        </div>
+                        <div class="cc-bcc-fields" id="ccBccFields" style="display: none;">
+                            <div class="composer-field">
+                                <label>Cc:</label>
+                                <input type="email" id="composerCc" class="form-control" placeholder="cc@example.com">
+                            </div>
+                            <div class="composer-field">
+                                <label>Bcc:</label>
+                                <input type="email" id="composerBcc" class="form-control" placeholder="bcc@example.com">
+                            </div>
+                        </div>
+                        <div class="composer-field">
+                            <label>Subject:</label>
+                            <input type="text" id="composerSubject" class="form-control" placeholder="Email subject">
+                        </div>
+                        <div class="composer-toolbar">
+                            <button class="btn btn-small btn-icon" onclick="applyFormatting('bold')" title="Bold"><b>B</b></button>
+                            <button class="btn btn-small btn-icon" onclick="applyFormatting('italic')" title="Italic"><i>I</i></button>
+                            <button class="btn btn-small btn-icon" onclick="applyFormatting('underline')" title="Underline"><u>U</u></button>
+                            <span class="toolbar-divider"></span>
+                            <label class="btn btn-small btn-icon" title="Attach files">
+                                📎
+                                <input type="file" id="composerFileInput" multiple style="display: none;" onchange="handleAttachmentUpload(event)">
+                            </label>
+                        </div>
+                        <div class="composer-field">
+                            <textarea id="composerBody" class="form-control composer-textarea" rows="10" placeholder="Write your message..."></textarea>
+                        </div>
+                        <div class="attachment-preview-list" id="attachmentPreviewList"></div>
+                        <div class="composer-actions">
+                            <button class="btn btn-primary" onclick="sendComposedEmail()">
+                                ✉️ Send
+                            </button>
+                            <button class="btn btn-secondary" onclick="closeComposer()">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="reply-section" id="replySection" style="display: none;">
                     <h3>AI Generated Reply</h3>
                     <div class="reply-controls">
