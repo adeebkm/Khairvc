@@ -5562,15 +5562,23 @@ function disconnectGmail() {
 }
 
 async function saveAllSettings() {
-    const activeTab = document.querySelector('.settings-tab.active');
-    if (!activeTab) return;
+    // Fixed: use '.modern-tab.active' instead of '.settings-tab.active'
+    const activeTab = document.querySelector('.modern-tab.active');
+    
+    if (!activeTab) {
+        console.error('❌ No active tab found when saving settings');
+        return;
+    }
     
     const tabName = activeTab.id.replace('tab-', '');
+    console.log(`💾 Saving settings for tab: ${tabName}`);
     
     if (tabName === 'whatsapp') {
-        saveWhatsAppSettings();
+        await saveWhatsAppSettings();
     } else if (tabName === 'user') {
         await saveUserProfile();
+    } else if (tabName === 'gmail') {
+        console.log('ℹ️  Gmail tab has no saveable settings (connection managed separately)');
     }
 }
 

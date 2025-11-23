@@ -4505,22 +4505,55 @@ def whatsapp_settings():
         })
     
     elif request.method == 'POST':
+        print(f"💾 [WHATSAPP-SETTINGS] Saving WhatsApp settings for user {current_user.id}")
+        
         data = request.json
-        current_user.whatsapp_enabled = data.get('enabled', False)
-        current_user.whatsapp_number = data.get('number', '').strip()
+        print(f"📦 [WHATSAPP-SETTINGS] Request data: {data}")
+        
+        enabled = data.get('enabled', False)
+        number = data.get('number', '').strip()
+        
+        print(f"📝 [WHATSAPP-SETTINGS] Parsed: enabled={enabled}, number={number[:8] if number else 'None'}...")
         
         # Validate phone number format (basic check)
-        if current_user.whatsapp_number and not current_user.whatsapp_number.startswith('+'):
+        if number and not number.startswith('+'):
+            print(f"❌ [WHATSAPP-SETTINGS] Invalid number format (missing +)")
             return jsonify({
                 'success': False,
                 'error': 'Phone number must start with + (e.g., +1234567890)'
             }), 400
         
-        db.session.commit()
-        return jsonify({
-            'success': True,
-            'message': 'WhatsApp settings updated'
-        })
+        # Update user fields
+        print(f"📝 [WHATSAPP-SETTINGS] Before update: whatsapp_enabled={current_user.whatsapp_enabled}, whatsapp_number={current_user.whatsapp_number}")
+        
+        current_user.whatsapp_enabled = enabled
+        current_user.whatsapp_number = number
+        
+        print(f"📝 [WHATSAPP-SETTINGS] After update (before commit): whatsapp_enabled={current_user.whatsapp_enabled}, whatsapp_number={current_user.whatsapp_number}")
+        
+        try:
+            db.session.commit()
+            print(f"✅ [WHATSAPP-SETTINGS] Database commit successful")
+            
+            # Verify the changes were saved
+            db.session.refresh(current_user)
+            print(f"🔍 [WHATSAPP-SETTINGS] Verified in DB: whatsapp_enabled={current_user.whatsapp_enabled}, whatsapp_number={current_user.whatsapp_number}")
+            
+            return jsonify({
+                'success': True,
+                'message': 'WhatsApp settings updated',
+                'whatsapp_enabled': current_user.whatsapp_enabled,
+                'whatsapp_number': current_user.whatsapp_number
+            })
+        except Exception as e:
+            print(f"❌ [WHATSAPP-SETTINGS] Database commit failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            db.session.rollback()
+            return jsonify({
+                'success': False,
+                'error': f'Failed to save settings: {str(e)}'
+            }), 500
 
 
 @app.route('/api/user/profile', methods=['GET', 'POST'])
