@@ -44,7 +44,9 @@ except ImportError:
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/gmail.settings.basic',  # For fetching signatures
-    'https://www.googleapis.com/auth/pubsub'  # For Pub/Sub push notifications (test environment)
+    'https://www.googleapis.com/auth/pubsub',  # For Pub/Sub push notifications (test environment)
+    'https://www.googleapis.com/auth/userinfo.profile',  # For user profile (name, picture)
+    'https://www.googleapis.com/auth/userinfo.email'  # For user email
 ]
 
 

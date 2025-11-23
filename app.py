@@ -478,6 +478,55 @@ def login():
     return render_template('login.html')
 
 
+@app.route('/signup-google')
+def signup_google():
+    """Initiate Google OAuth signup flow"""
+    try:
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        import json
+        
+        # Get credentials
+        credentials_json = os.getenv('GOOGLE_CREDENTIALS_JSON')
+        if credentials_json:
+            try:
+                credentials_data = json.loads(credentials_json)
+            except json.JSONDecodeError:
+                import base64
+                credentials_data = json.loads(base64.b64decode(credentials_json).decode('utf-8'))
+        elif os.path.exists('credentials.json'):
+            with open('credentials.json', 'r') as f:
+                credentials_data = json.load(f)
+        else:
+            return jsonify({'error': 'Google OAuth credentials not found'}), 500
+        
+        # Create flow with userinfo scopes
+        flow = InstalledAppFlow.from_client_config(credentials_data, SCOPES)
+        
+        redirect_uri = os.getenv('OAUTH_REDIRECT_URI')
+        if redirect_uri:
+            flow.redirect_uri = redirect_uri
+            authorization_url, state = flow.authorization_url(
+                access_type='offline',
+                include_granted_scopes='true',
+                prompt='consent'
+            )
+            session['oauth_state'] = state
+            session['oauth_signup'] = True  # Mark this as a signup flow
+            session.permanent = True
+            session.modified = True
+            del flow
+            return redirect(authorization_url)
+        else:
+            # Local development
+            creds = flow.run_local_server(port=0, open_browser=True)
+            # Handle local signup (similar to callback)
+            return handle_google_signup_callback(creds)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return f"Error initiating Google signup: {str(e)}", 500
+
+
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
     """User registration"""
@@ -697,9 +746,98 @@ def connect_gmail():
         }), 500
 
 
+def handle_google_signup_callback(creds):
+    """Handle Google OAuth callback for signup - create account and connect Gmail"""
+    try:
+        from googleapiclient.discovery import build
+        
+        # Get user info from Google
+        userinfo_service = build('oauth2', 'v2', credentials=creds)
+        user_info = userinfo_service.userinfo().get().execute()
+        
+        google_id = user_info.get('id')
+        email = user_info.get('email')
+        full_name = user_info.get('name', '')
+        profile_picture = user_info.get('picture', '')
+        
+        # Check if user already exists
+        existing_user = User.query.filter_by(email=email).first()
+        if existing_user:
+            # User exists, log them in
+            login_user(existing_user)
+            session.permanent = True
+            session['user_id'] = existing_user.id
+            session['username'] = existing_user.username
+        else:
+            # Create new user from Google data
+            username = email.split('@')[0]  # Use email prefix as username
+            # Ensure username is unique
+            base_username = username
+            counter = 1
+            while User.query.filter_by(username=username).first():
+                username = f"{base_username}{counter}"
+                counter += 1
+            
+            new_user = User(
+                username=username,
+                email=email,
+                google_id=google_id,
+                full_name=full_name,
+                profile_picture=profile_picture,
+                password_hash=None  # No password for Google OAuth users
+            )
+            db.session.add(new_user)
+            db.session.commit()
+            
+            # Log in the new user
+            login_user(new_user)
+            session.permanent = True
+            session['user_id'] = new_user.id
+            session['username'] = new_user.username
+            print(f"✅ Created new user from Google: {username} ({email})")
+        
+        # Now connect Gmail (same as regular flow)
+        token_json = creds.to_json()
+        encrypted_token = encrypt_token(token_json)
+        
+        current_user_obj = User.query.get(session['user_id'])
+        gmail_token = GmailToken.query.filter_by(user_id=current_user_obj.id).first()
+        if gmail_token:
+            gmail_token.encrypted_token = encrypted_token
+        else:
+            gmail_token = GmailToken(user_id=current_user_obj.id, encrypted_token=encrypted_token)
+            db.session.add(gmail_token)
+        
+        db.session.commit()
+        
+        # Set up Pub/Sub if enabled
+        use_pubsub = os.getenv('USE_PUBSUB', 'false').lower() == 'true'
+        if use_pubsub:
+            try:
+                pubsub_topic = os.getenv('PUBSUB_TOPIC')
+                if pubsub_topic:
+                    gmail = get_user_gmail_client(current_user_obj)
+                    if gmail:
+                        watch_result = gmail.setup_pubsub_watch(pubsub_topic, user_id=current_user_obj.id)
+                        if watch_result:
+                            gmail_token.pubsub_topic = pubsub_topic
+                            gmail_token.watch_expiration = watch_result.get('expiration')
+                            if watch_result.get('history_id'):
+                                gmail_token.history_id = str(watch_result['history_id'])
+                            db.session.commit()
+            except Exception as pubsub_error:
+                print(f"⚠️  Pub/Sub auto-setup error (non-critical): {pubsub_error}")
+        
+        return redirect(url_for('dashboard') + '?auto_setup=true')
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return f"Error in Google signup: {str(e)}", 500
+
+
 @app.route('/oauth2callback')
-@login_required
 def oauth2callback():
+    """OAuth 2.0 callback handler for Railway/production - handles both signup and login"""
     """OAuth 2.0 callback handler for Railway/production"""
     try:
         # Clear any OAuth flow objects from session first (prevent serialization errors)
@@ -784,6 +922,18 @@ def oauth2callback():
         flow.fetch_token(authorization_response=callback_url)
         creds = flow.credentials
         
+        # Check if this is a signup flow (user not logged in yet)
+        is_signup = session.get('oauth_signup', False)
+        session.pop('oauth_signup', None)
+        
+        if is_signup:
+            # Handle Google signup - create account and connect Gmail
+            return handle_google_signup_callback(creds)
+        
+        # Regular flow - user is already logged in, just connecting Gmail
+        if not current_user.is_authenticated:
+            return redirect(url_for('login'))
+        
         # Get token JSON
         token_json = creds.to_json()
         
@@ -848,15 +998,27 @@ def oauth2callback():
 
 
 
-@app.route('/disconnect-gmail')
+@app.route('/disconnect-gmail', methods=['POST'])
 @login_required
 def disconnect_gmail():
     """Disconnect Gmail account"""
-    if current_user.gmail_token:
-        db.session.delete(current_user.gmail_token)
-        db.session.commit()
-    
-    return redirect(url_for('dashboard'))
+    try:
+        if current_user.gmail_token:
+            db.session.delete(current_user.gmail_token)
+            db.session.commit()
+            print(f"✅ Disconnected Gmail for user {current_user.id}")
+        
+        # Return JSON for API calls, redirect for form submissions
+        if request.is_json or request.headers.get('Content-Type') == 'application/json':
+            return jsonify({'success': True, 'message': 'Gmail disconnected successfully'})
+        else:
+            return redirect(url_for('dashboard'))
+    except Exception as e:
+        print(f"❌ Error disconnecting Gmail: {e}")
+        if request.is_json or request.headers.get('Content-Type') == 'application/json':
+            return jsonify({'success': False, 'error': str(e)}), 500
+        else:
+            return redirect(url_for('dashboard'))
 
 
 # ==================== API ENDPOINTS ====================

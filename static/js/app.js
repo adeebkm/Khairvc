@@ -4738,7 +4738,37 @@ function stopOlderEmailsFetch() {
 // Add button to trigger older email fetch (can be called from console or added to UI)
 // Example: startFetchOlderEmails(200)
 
-// ==================== WHATSAPP SETTINGS ====================
+// ==================== SETTINGS MODAL ====================
+
+function switchSettingsTab(tabName) {
+    // Hide all tab contents
+    document.querySelectorAll('.settings-tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    // Remove active class from all tabs
+    document.querySelectorAll('.settings-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Show selected tab content
+    const content = document.getElementById(`settings-${tabName}`);
+    if (content) {
+        content.classList.add('active');
+    }
+    
+    // Activate selected tab
+    const tab = document.getElementById(`tab-${tabName}`);
+    if (tab) {
+        tab.classList.add('active');
+    }
+    
+    // Show/hide save button based on tab
+    const saveBtn = document.getElementById('saveSettingsBtn');
+    if (saveBtn) {
+        saveBtn.style.display = (tabName === 'whatsapp') ? 'block' : 'none';
+    }
+}
 
 async function openSettingsModal() {
     const modal = document.getElementById('settingsModal');
@@ -4746,19 +4776,61 @@ async function openSettingsModal() {
     
     modal.style.display = 'flex';
     
+    // Reset to WhatsApp tab
+    switchSettingsTab('whatsapp');
+    
     // Load current WhatsApp settings
     try {
         const response = await fetch('/api/whatsapp/settings');
         const data = await response.json();
         
         if (data.success) {
-            document.getElementById('whatsappEnabled').checked = data.whatsapp_enabled || false;
-            document.getElementById('whatsappNumber').value = data.whatsapp_number || '';
+            const enabledCheckbox = document.getElementById('whatsappEnabled');
+            const numberInput = document.getElementById('whatsappNumber');
+            if (enabledCheckbox) enabledCheckbox.checked = data.whatsapp_enabled || false;
+            if (numberInput) numberInput.value = data.whatsapp_number || '';
         }
     } catch (error) {
         console.error('Error loading WhatsApp settings:', error);
         showAlert('error', 'Failed to load settings');
     }
+}
+
+function disconnectGmail() {
+    if (confirm('Are you sure you want to disconnect your Gmail account? This will stop all email processing.')) {
+        fetch('/disconnect-gmail', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => {
+            if (response.redirected) {
+                window.location.href = response.url;
+            } else {
+                return response.json();
+            }
+        })
+        .then(data => {
+            if (data && data.success) {
+                showAlert('success', 'Gmail disconnected successfully');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+            } else if (data) {
+                showAlert('error', data.error || 'Failed to disconnect Gmail');
+            }
+        })
+        .catch(error => {
+            console.error('Error disconnecting Gmail:', error);
+            showAlert('error', 'Error disconnecting Gmail');
+        });
+    }
+}
+
+function saveAllSettings() {
+    // Currently only WhatsApp settings are editable
+    saveWhatsAppSettings();
 }
 
 function closeSettingsModal() {

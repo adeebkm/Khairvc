@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Email Replier - Khair</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/sidebar.css') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -503,55 +504,184 @@
         </div>
     </div>
 
-    <!-- WhatsApp Settings Modal -->
+    <!-- Settings Modal with Tabs -->
     <div class="modal" id="settingsModal" style="display: none;">
-        <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-content" style="max-width: 600px;">
             <div class="modal-header">
                 <h2>⚙️ Settings</h2>
                 <button class="modal-close" onclick="closeSettingsModal()">&times;</button>
             </div>
+            
+            <!-- Settings Tabs -->
+            <div class="settings-tabs" style="display: flex; border-bottom: 2px solid var(--border-color); margin-bottom: 20px;">
+                <button class="settings-tab active" onclick="switchSettingsTab('whatsapp')" id="tab-whatsapp">
+                    📱 WhatsApp
+                </button>
+                <button class="settings-tab" onclick="switchSettingsTab('gmail')" id="tab-gmail">
+                    📧 Gmail
+                </button>
+                <button class="settings-tab" onclick="switchSettingsTab('user')" id="tab-user">
+                    👤 User
+                </button>
+            </div>
+            
             <div class="modal-body">
-                <!-- WhatsApp Settings Section -->
-                <div class="settings-section">
-                    <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 18px; font-weight: 600;">
-                        📱 WhatsApp Notifications
-                    </h3>
-                    <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;">
-                        Receive instant WhatsApp alerts when new deal flow emails arrive, and automatic follow-up reminders every 6 hours.
-                    </p>
-                    
-                    <div class="settings-item" style="margin-bottom: 20px;">
-                        <label class="checkbox-label" style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" id="whatsappEnabled" style="width: 18px; height: 18px; margin-right: 12px; cursor: pointer;">
-                            <span style="font-weight: 500;">Enable WhatsApp alerts for deal flow</span>
-                        </label>
-                        <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px; margin-left: 30px;">
-                            You'll receive alerts when new deals are detected and follow-ups every 6 hours
+                <!-- WhatsApp Settings Tab -->
+                <div class="settings-tab-content active" id="settings-whatsapp">
+                    <div class="settings-section">
+                        <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 18px; font-weight: 600;">
+                            📱 WhatsApp Notifications
+                        </h3>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;">
+                            Receive instant WhatsApp alerts when new deal flow emails arrive, and automatic follow-up reminders every 6 hours.
                         </p>
+                        
+                        <div class="settings-item" style="margin-bottom: 20px;">
+                            <label class="checkbox-label" style="display: flex; align-items: center; cursor: pointer;">
+                                <input type="checkbox" id="whatsappEnabled" style="width: 18px; height: 18px; margin-right: 12px; cursor: pointer;">
+                                <span style="font-weight: 500;">Enable WhatsApp alerts for deal flow</span>
+                            </label>
+                            <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px; margin-left: 30px;">
+                                You'll receive alerts when new deals are detected and follow-ups every 6 hours
+                            </p>
+                        </div>
+                        
+                        <div class="settings-item" style="margin-bottom: 20px;">
+                            <label style="display: block; font-weight: 500; margin-bottom: 8px;">
+                                WhatsApp Number
+                            </label>
+                            <input 
+                                type="tel" 
+                                id="whatsappNumber" 
+                                placeholder="+1234567890" 
+                                style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; background: var(--bg-primary); color: var(--text-primary);"
+                                pattern="^\+[1-9]\d{1,14}$"
+                            >
+                            <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">
+                                Include country code (e.g., +1234567890). Reply "STOP" to WhatsApp to disable follow-ups.
+                            </p>
+                        </div>
+                        
+                        <div id="whatsappStatus" style="margin-top: 16px; padding: 12px; border-radius: 8px; display: none;"></div>
                     </div>
-                    
-                    <div class="settings-item" style="margin-bottom: 20px;">
-                        <label style="display: block; font-weight: 500; margin-bottom: 8px;">
-                            WhatsApp Number
-                        </label>
-                        <input 
-                            type="tel" 
-                            id="whatsappNumber" 
-                            placeholder="+1234567890" 
-                            style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; background: var(--bg-primary); color: var(--text-primary);"
-                            pattern="^\+[1-9]\d{1,14}$"
-                        >
-                        <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">
-                            Include country code (e.g., +1234567890). Reply "STOP" to WhatsApp to disable follow-ups.
+                </div>
+                
+                <!-- Gmail Settings Tab -->
+                <div class="settings-tab-content" id="settings-gmail" style="display: none;">
+                    <div class="settings-section">
+                        <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 18px; font-weight: 600;">
+                            📧 Gmail Connection
+                        </h3>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;">
+                            Manage your Gmail account connection and settings.
                         </p>
+                        
+                        <div class="settings-item" style="margin-bottom: 20px;">
+                            <label style="display: block; font-weight: 500; margin-bottom: 8px;">
+                                Connected Email
+                            </label>
+                            <div style="padding: 12px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
+                                <span id="gmailEmail" style="font-weight: 500;">{{ gmail_email if gmail_email else 'Not connected' }}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-item" style="margin-bottom: 20px;">
+                            <label style="display: block; font-weight: 500; margin-bottom: 8px;">
+                                Connection Status
+                            </label>
+                            <div style="padding: 12px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
+                                <span id="gmailStatus" style="font-weight: 500; color: #10b981;">
+                                    {% if has_gmail %}✅ Connected{% else %}❌ Not Connected{% endif %}
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-item" style="margin-bottom: 20px;">
+                            {% if has_gmail %}
+                            <button class="btn btn-secondary" onclick="disconnectGmail()" style="width: 100%;">
+                                Disconnect Gmail
+                            </button>
+                            {% else %}
+                            <a href="{{ url_for('connect_gmail') }}" class="btn btn-primary" style="width: 100%; text-decoration: none; display: block; text-align: center;">
+                                Connect Gmail Account
+                            </a>
+                            {% endif %}
+                        </div>
+                        
+                        <div id="gmailStatus" style="margin-top: 16px; padding: 12px; border-radius: 8px; display: none;"></div>
                     </div>
-                    
-                    <div id="whatsappStatus" style="margin-top: 16px; padding: 12px; border-radius: 8px; display: none;"></div>
+                </div>
+                
+                <!-- User Settings Tab -->
+                <div class="settings-tab-content" id="settings-user" style="display: none;">
+                    <div class="settings-section">
+                        <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 18px; font-weight: 600;">
+                            👤 User Profile
+                        </h3>
+                        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;">
+                            Manage your account information and preferences.
+                        </p>
+                        
+                        <div class="settings-item" style="margin-bottom: 20px;">
+                            <label style="display: block; font-weight: 500; margin-bottom: 8px;">
+                                Username
+                            </label>
+                            <input 
+                                type="text" 
+                                id="userUsername" 
+                                value="{{ current_user.username }}" 
+                                style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; background: var(--bg-primary); color: var(--text-primary);"
+                                readonly
+                            >
+                            <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">
+                                Username cannot be changed
+                            </p>
+                        </div>
+                        
+                        <div class="settings-item" style="margin-bottom: 20px;">
+                            <label style="display: block; font-weight: 500; margin-bottom: 8px;">
+                                Email
+                            </label>
+                            <input 
+                                type="email" 
+                                id="userEmail" 
+                                value="{{ current_user.email }}" 
+                                style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; background: var(--bg-primary); color: var(--text-primary);"
+                                readonly
+                            >
+                            <p style="color: var(--text-secondary); font-size: 12px; margin-top: 4px;">
+                                Email cannot be changed
+                            </p>
+                        </div>
+                        
+                        {% if current_user.full_name %}
+                        <div class="settings-item" style="margin-bottom: 20px;">
+                            <label style="display: block; font-weight: 500; margin-bottom: 8px;">
+                                Full Name
+                            </label>
+                            <div style="padding: 12px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
+                                <span style="font-weight: 500;">{{ current_user.full_name }}</span>
+                            </div>
+                        </div>
+                        {% endif %}
+                        
+                        <div class="settings-item" style="margin-bottom: 20px;">
+                            <label style="display: block; font-weight: 500; margin-bottom: 8px;">
+                                Account Created
+                            </label>
+                            <div style="padding: 12px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
+                                <span>{{ current_user.created_at.strftime('%B %d, %Y') if current_user.created_at else 'Unknown' }}</span>
+                            </div>
+                        </div>
+                        
+                        <div id="userStatus" style="margin-top: 16px; padding: 12px; border-radius: 8px; display: none;"></div>
+                    </div>
                 </div>
             </div>
+            
             <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border-color);">
-                <button class="btn btn-secondary" onclick="closeSettingsModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="saveWhatsAppSettings()">Save Settings</button>
+                <button class="btn btn-secondary" onclick="closeSettingsModal()">Close</button>
+                <button class="btn btn-primary" onclick="saveAllSettings()" id="saveSettingsBtn" style="display: none;">Save Settings</button>
             </div>
         </div>
     </div>

@@ -28,10 +28,15 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(255), nullable=False)
+    password_hash = db.Column(db.String(255), nullable=True)  # Nullable for Google OAuth users
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     setup_completed = db.Column(db.Boolean, default=False)  # Track if first-time setup is complete
     initial_emails_fetched = db.Column(db.Integer, default=0)  # Track how many emails fetched during setup
+    
+    # Google OAuth user data
+    google_id = db.Column(db.String(255), unique=True, nullable=True)  # Google user ID
+    full_name = db.Column(db.String(200), nullable=True)  # User's full name from Google
+    profile_picture = db.Column(db.String(500), nullable=True)  # Profile picture URL
     
     # WhatsApp integration
     whatsapp_number = db.Column(db.String(20))  # User's WhatsApp number (format: +1234567890)
