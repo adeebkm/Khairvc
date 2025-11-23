@@ -2853,7 +2853,7 @@ def delete_email(message_id):
     
     try:
         gmail = get_user_gmail_client(current_user)
-        if not gmail:
+        if not gmail or not gmail.service:
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
         # Delete from Gmail (trash it)
@@ -3104,7 +3104,7 @@ def get_signatures():
     
     try:
         gmail = get_user_gmail_client(current_user)
-        if not gmail:
+        if not gmail or not gmail.service:
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
         # Get all send-as aliases
@@ -3275,7 +3275,7 @@ def get_deals():
             needs_attachment_check = not deal.deck_link or deal.deck_link == 'No deck'
             
             if not subject or subject == 'No Subject' or subject.strip() == '' or needs_attachment_check:
-                if gmail:
+                if gmail and gmail.service:
                     try:
                         # Get email details for this specific thread
                         # First try to get a message ID from the thread
@@ -3440,7 +3440,7 @@ def get_attachment(message_id, filename):
     
     try:
         gmail = get_user_gmail_client(current_user)
-        if not gmail:
+        if not gmail or not gmail.service:
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
         # Get the attachment data from Gmail

@@ -2043,7 +2043,7 @@ function displayDeals(deals) {
     const tbody = document.getElementById('dealFlowBody');
     
     if (deals.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No deals found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No deals found</td></tr>';
         return;
     }
     
@@ -2109,12 +2109,7 @@ function displayDeals(deals) {
                     ${deal.founder_linkedin ? `<div><a href="${escapeHtml(deal.founder_linkedin)}" target="_blank" class="linkedin-link">LinkedIn</a></div>` : ''}
                 </td>
                 <td>${escapeHtml(decodeHtmlEntities(deal.subject || 'No Subject'))}</td>
-                <td>${stateBadge}</td>
                 <td>${deckLink}</td>
-                <td class="basics">${basics}</td>
-                <td>
-                    <div class="overlap-info">${escapeHtml(overlapText)}</div>
-                </td>
                 <td>${new Date(deal.created_at).toLocaleDateString()}</td>
                 <td>
                     <button class="btn btn-small btn-primary" onclick="openDealThread('${deal.thread_id}')">
@@ -3530,6 +3525,7 @@ async function openEmail(indexOrEmail) {
             // CRITICAL: Validate we're still viewing the same email before ANY updates
             if (!currentEmail || currentEmail.thread_id !== fetchThreadId) {
                 console.log(`⚠️  Email changed while fetching (expected ${fetchThreadId}, current ${currentEmail?.thread_id}), ignoring update`);
+                hideCacheRefreshIndicator();
                 return;
             }
             
