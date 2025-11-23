@@ -3003,14 +3003,19 @@ def generate_reply():
 @login_required
 def mark_email_read(message_id):
     """Mark email as read in Gmail"""
+    print(f"📧 [MARK-READ] Request to mark email {message_id} as read for user {current_user.id}")
+    
     if not current_user.gmail_token:
+        print(f"❌ [MARK-READ] User {current_user.id} has no Gmail token")
         return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
     
     try:
         gmail = get_user_gmail_client(current_user)
         if not gmail or not gmail.service:
+            print(f"❌ [MARK-READ] Failed to get Gmail client for user {current_user.id}")
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
+        print(f"📧 [MARK-READ] Removing UNREAD label from message {message_id} in Gmail")
         # Mark as read in Gmail (remove UNREAD label)
         gmail.service.users().messages().modify(
             userId='me',
@@ -3018,9 +3023,11 @@ def mark_email_read(message_id):
             body={'removeLabelIds': ['UNREAD']}
         ).execute()
         
+        print(f"✅ [MARK-READ] Successfully marked email {message_id} as read in Gmail")
         return jsonify({'success': True, 'message': 'Email marked as read'})
     
     except Exception as e:
+        print(f"❌ [MARK-READ] Error marking email {message_id} as read: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3030,14 +3037,19 @@ def mark_email_read(message_id):
 @login_required
 def mark_email_unread(message_id):
     """Mark email as unread in Gmail"""
+    print(f"📧 [MARK-UNREAD] Request to mark email {message_id} as unread for user {current_user.id}")
+    
     if not current_user.gmail_token:
+        print(f"❌ [MARK-UNREAD] User {current_user.id} has no Gmail token")
         return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
     
     try:
         gmail = get_user_gmail_client(current_user)
         if not gmail or not gmail.service:
+            print(f"❌ [MARK-UNREAD] Failed to get Gmail client for user {current_user.id}")
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
+        print(f"📧 [MARK-UNREAD] Adding UNREAD label to message {message_id} in Gmail")
         # Mark as unread in Gmail (add UNREAD label)
         gmail.service.users().messages().modify(
             userId='me',
@@ -3045,6 +3057,7 @@ def mark_email_unread(message_id):
             body={'addLabelIds': ['UNREAD']}
         ).execute()
         
+        print(f"✅ [MARK-UNREAD] Successfully marked email {message_id} as unread in Gmail")
         return jsonify({'success': True, 'message': 'Email marked as unread'})
     
     except Exception as e:

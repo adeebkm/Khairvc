@@ -3670,7 +3670,12 @@ async function openEmail(indexOrEmail) {
                 }
                 
                 // Mark email as read automatically when opened
-                if (currentEmail && currentEmail.is_read === false) {
+                // Check if email is unread: is_read === false OR has UNREAD label
+                const isUnread = (currentEmail.is_read === false) || 
+                                 (currentEmail.label_ids && currentEmail.label_ids.includes('UNREAD'));
+                
+                if (currentEmail && isUnread) {
+                    console.log(`📧 Auto-marking email as read: ${currentEmail.id}`);
                     markEmailAsRead(currentEmail.id, currentEmail.thread_id);
                 }
                 
@@ -4740,7 +4745,7 @@ function showAlert(type, message) {
 // Mark email as read (sync with Gmail)
 async function markEmailAsRead(messageId, threadId) {
     try {
-        console.log(`📧 Marking email ${messageId} as read`);
+        console.log(`📧 Marking email ${messageId} as read (syncing with Gmail...)`);
         const response = await fetch(`/api/email/${messageId}/mark-read`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
@@ -4750,10 +4755,12 @@ async function markEmailAsRead(messageId, threadId) {
         if (data.success) {
             // Update local email state
             updateEmailReadStatus(messageId, threadId, true);
-            console.log('✅ Email marked as read');
+            console.log('✅ Email marked as read in Gmail and local cache');
+        } else {
+            console.error('❌ Failed to mark email as read in Gmail:', data.error);
         }
     } catch (error) {
-        console.error('Error marking email as read:', error);
+        console.error('❌ Error marking email as read:', error);
     }
 }
 
