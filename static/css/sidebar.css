@@ -5,6 +5,9 @@
     margin-top: 0;
     position: relative;
     overflow: hidden;
+    overflow-x: hidden; /* Prevent horizontal scrollbar */
+    width: 100%;
+    max-width: 100vw; /* Ensure it doesn't exceed viewport width */
 }
 
 .sidebar-toggle {
@@ -362,6 +365,9 @@
     flex-direction: column;
     height: calc(100vh - 80px);
     min-height: 0;
+    overflow-x: hidden; /* Prevent horizontal scrollbar */
+    width: 100%;
+    max-width: 100%; /* Ensure it doesn't exceed parent width */
 }
 
 .sidebar:not(.collapsed) ~ .main-content {
