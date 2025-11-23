@@ -3604,6 +3604,11 @@ async function openEmail(indexOrEmail) {
                     return;
                 }
                 
+                // Mark email as read automatically when opened
+                if (currentEmail && currentEmail.is_read === false) {
+                    markEmailAsRead(currentEmail.id, currentEmail.thread_id);
+                }
+                
                 // Cache the fresh data (both IndexedDB and memory)
                 await cacheThread(fetchThreadId, data);
                 threadCacheMemory.set(fetchThreadId, data); // Store in memory for instant access
@@ -4491,6 +4496,77 @@ function showAlert(type, message) {
     }, 5000);
 }
 
+// Mark email as read (sync with Gmail)
+async function markEmailAsRead(messageId, threadId) {
+    try {
+        console.log(`📧 Marking email ${messageId} as read`);
+        const response = await fetch(`/api/email/${messageId}/mark-read`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            // Update local email state
+            updateEmailReadStatus(messageId, threadId, true);
+            console.log('✅ Email marked as read');
+        }
+    } catch (error) {
+        console.error('Error marking email as read:', error);
+    }
+}
+
+// Mark email as unread (sync with Gmail)
+async function markEmailAsUnread(messageId, threadId) {
+    try {
+        console.log(`📧 Marking email ${messageId} as unread`);
+        const response = await fetch(`/api/email/${messageId}/mark-unread`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            // Update local email state
+            updateEmailReadStatus(messageId, threadId, false);
+            showToast('Marked as unread', 'success');
+            console.log('✅ Email marked as unread');
+        } else {
+            showToast('Failed to mark as unread', 'error');
+        }
+    } catch (error) {
+        console.error('Error marking email as unread:', error);
+        showToast('Error marking as unread', 'error');
+    }
+}
+
+// Update email read status in local cache
+function updateEmailReadStatus(messageId, threadId, isRead) {
+    // Update in allEmails
+    const emailIndex = allEmails.findIndex(e => e.id === messageId || e.thread_id === threadId);
+    if (emailIndex >= 0) {
+        allEmails[emailIndex].is_read = isRead;
+    }
+    
+    // Update in emailCache
+    if (emailCache && emailCache.data) {
+        const cacheIndex = emailCache.data.findIndex(e => e.id === messageId || e.thread_id === threadId);
+        if (cacheIndex >= 0) {
+            emailCache.data[cacheIndex].is_read = isRead;
+            saveEmailCacheToStorage();
+        }
+    }
+    
+    // Update in filteredEmails if present
+    const filteredIndex = filteredEmails.findIndex(e => e.id === messageId || e.thread_id === threadId);
+    if (filteredIndex >= 0) {
+        filteredEmails[filteredIndex].is_read = isRead;
+    }
+    
+    // Refresh display to show updated read/unread styling
+    applyFilters();
+}
+
 // Modern toast notification (Superhuman style) - shows for 2 seconds
 function showToast(message, type = 'success') {
     const toast = document.createElement('div');
@@ -4767,6 +4843,18 @@ function contextMenuArchive() {
         if (email) {
             hideContextMenu();
             archiveEmail(email.id, email.message_id || email.id);
+        }
+    }
+    currentContextEmailIndex = null;
+}
+
+function contextMenuMarkUnread() {
+    if (currentContextEmailIndex !== null) {
+        // Use filteredEmails to match the displayed email list
+        const email = filteredEmails[currentContextEmailIndex] || allEmails[currentContextEmailIndex];
+        if (email) {
+            hideContextMenu();
+            markEmailAsUnread(email.id, email.thread_id);
         }
     }
     currentContextEmailIndex = null;

@@ -2844,6 +2844,60 @@ def generate_reply():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/email/<message_id>/mark-read', methods=['POST'])
+@login_required
+def mark_email_read(message_id):
+    """Mark email as read in Gmail"""
+    if not current_user.gmail_token:
+        return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
+    
+    try:
+        gmail = get_user_gmail_client(current_user)
+        if not gmail or not gmail.service:
+            return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
+        
+        # Mark as read in Gmail (remove UNREAD label)
+        gmail.service.users().messages().modify(
+            userId='me',
+            id=message_id,
+            body={'removeLabelIds': ['UNREAD']}
+        ).execute()
+        
+        return jsonify({'success': True, 'message': 'Email marked as read'})
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/email/<message_id>/mark-unread', methods=['POST'])
+@login_required
+def mark_email_unread(message_id):
+    """Mark email as unread in Gmail"""
+    if not current_user.gmail_token:
+        return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
+    
+    try:
+        gmail = get_user_gmail_client(current_user)
+        if not gmail or not gmail.service:
+            return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
+        
+        # Mark as unread in Gmail (add UNREAD label)
+        gmail.service.users().messages().modify(
+            userId='me',
+            id=message_id,
+            body={'addLabelIds': ['UNREAD']}
+        ).execute()
+        
+        return jsonify({'success': True, 'message': 'Email marked as unread'})
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/email/<message_id>/delete', methods=['POST'])
 @login_required
 def delete_email(message_id):
