@@ -30,11 +30,14 @@ celery.conf.task_reject_on_worker_lost = True  # Re-queue if worker dies
 # Rate limiting: Max 10 concurrent tasks across all workers
 celery.conf.worker_concurrency = 10
 
-# Task routing: All email sync tasks go to 'email_sync' queue
+# Task routing: 
+# - Pub/Sub notifications go to 'pubsub_notifications' queue (high priority, instant processing)
+# - Regular email sync tasks go to 'email_sync' queue
 celery.conf.task_routes = {
     'tasks.sync_user_emails': {'queue': 'email_sync'},
     'tasks.classify_email_task': {'queue': 'email_sync'},
     'tasks.send_whatsapp_followups': {'queue': 'email_sync'},
+    'tasks.process_pubsub_notification': {'queue': 'pubsub_notifications'},
 }
 
 # Periodic tasks (Celery Beat schedule)

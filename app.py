@@ -798,7 +798,29 @@ def oauth2callback():
             gmail_token = GmailToken(user_id=current_user.id, encrypted_token=encrypted_token)
             db.session.add(gmail_token)
         
-        db.session.commit()
+            db.session.commit()
+        
+        # Set up Pub/Sub immediately when Gmail is connected (not waiting for setup completion)
+        use_pubsub = os.getenv('USE_PUBSUB', 'false').lower() == 'true'
+        if use_pubsub:
+            try:
+                pubsub_topic = os.getenv('PUBSUB_TOPIC')
+                if pubsub_topic:
+                    gmail = get_user_gmail_client(current_user)
+                    if gmail:
+                        print(f"📡 Setting up Pub/Sub immediately for user {current_user.id}...")
+                        watch_result = gmail.setup_pubsub_watch(pubsub_topic, user_id=current_user.id)
+                        if watch_result:
+                            gmail_token.pubsub_topic = pubsub_topic
+                            gmail_token.watch_expiration = watch_result.get('expiration')
+                            if watch_result.get('history_id'):
+                                gmail_token.history_id = str(watch_result['history_id'])
+                            db.session.commit()
+                            print(f"✅ Pub/Sub set up immediately for user {current_user.id}")
+                        else:
+                            print(f"⚠️  Pub/Sub setup failed for user {current_user.id} (non-critical)")
+            except Exception as pubsub_error:
+                print(f"⚠️  Pub/Sub auto-setup error (non-critical): {pubsub_error}")
         
         # CRITICAL: Delete flow object before returning (it's not JSON serializable)
         del flow
@@ -1145,7 +1167,113 @@ def get_emails():
         gmail = get_user_gmail_client(current_user)
         if not gmail:
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
-        
+    except Exception as e:
+        print(f"Error getting Gmail email: {str(e)}")
+        gmail = None
+
+    def respond_with_database_emails(log_message=None):
+        """Return emails from database (always authoritative source for UI)."""
+        if log_message:
+            print(log_message)
+        else:
+            print("📂 Loading all classified emails from database...")
+
+        print(f"   (Ignoring 'unread_only' filter - database doesn't track read status)")
+        query = EmailClassification.query.filter_by(user_id=current_user.id)
+
+        if category_filter:
+            query = query.filter_by(category=category_filter)
+
+        print(f"   Loading all emails from database" + (f" (category: {category_filter})" if category_filter else ""))
+        db_classifications = query.order_by(EmailClassification.classified_at.desc()).all()
+
+        classified_emails = []
+        message_ids = [c.message_id for c in db_classifications]
+        star_status_map = {}
+        if message_ids and gmail and getattr(gmail, 'service', None):
+            try:
+                from googleapiclient.http import BatchHttpRequest
+                star_status_results = {}
+
+                def star_callback(request_id, response, exception):
+                    if exception:
+                        return
+                    if response:
+                        msg_id = request_id.split('_', 2)[-1] if '_' in request_id else request_id
+                        label_ids = response.get('labelIds', [])
+                        star_status_results[msg_id] = {
+                            'is_starred': 'STARRED' in label_ids,
+                            'label_ids': label_ids if isinstance(label_ids, list) else []
+                        }
+
+                BATCH_SIZE = 100
+                message_ids_to_fetch = message_ids[:200]
+
+                for chunk_start in range(0, len(message_ids_to_fetch), BATCH_SIZE):
+                    chunk = message_ids_to_fetch[chunk_start:chunk_start + BATCH_SIZE]
+                    batch = gmail.service.new_batch_http_request(callback=star_callback)
+
+                    for idx, msg_id in enumerate(chunk):
+                        batch.add(gmail.service.users().messages().get(
+                            userId='me',
+                            id=msg_id,
+                            format='metadata'
+                        ), request_id=f"star_{chunk_start + idx}_{msg_id}")
+
+                    if chunk:
+                        batch.execute()
+
+                star_status_map = star_status_results
+                print(f"⭐ Fetched star status for {len(star_status_map)} emails from Gmail")
+            except Exception as e:
+                print(f"⚠️  Could not batch fetch star status: {str(e)}")
+
+        for classification in db_classifications:
+            if classification.category == CATEGORY_SPAM and not show_spam:
+                continue
+
+            if category_filter and classification.category != category_filter:
+                continue
+
+            star_info = star_status_map.get(classification.message_id, {'is_starred': False, 'label_ids': []})
+
+            email_data = {
+                'id': classification.message_id,
+                'thread_id': classification.thread_id,
+                'subject': classification.get_subject_decrypted() or 'No Subject',
+                'from': classification.sender or 'Unknown',
+                'snippet': classification.get_snippet_decrypted() or '',
+                'date': classification.email_date or (int(classification.classified_at.timestamp() * 1000) if classification.classified_at else None),
+                'is_starred': star_info['is_starred'],
+                'label_ids': star_info['label_ids'],
+                'classification': {
+                    'category': classification.category,
+                    'tags': classification.tags.split(',') if classification.tags else [],
+                    'confidence': classification.confidence,
+                    'reply_type': classification.reply_type,
+                    'deal_state': classification.deal_state,
+                    'deck_link': classification.deck_link
+                }
+            }
+
+            classified_emails.append(email_data)
+            if not MINIMAL_LOGGING:
+                print(f"📧 Loaded from DB: Category={classification.category}, Thread={classification.thread_id[:16]}")
+
+        print(f"✅ Returning {len(classified_emails)} emails from database")
+
+        return jsonify({
+            'success': True,
+            'count': len(classified_emails),
+            'emails': classified_emails
+        })
+
+    try:
+        # If Gmail failed earlier, gmail variable may be None
+        if not gmail and not db_only:
+            print("⚠️ Gmail client unavailable, falling back to database response.")
+            return respond_with_database_emails()
+
         # Get max_emails from query param for Gmail API fetching
         # For display, there's no limit - pagination handles it
         # For initial setup (full sync), limit to 200. For incremental sync, fetch all new emails.
@@ -1159,7 +1287,7 @@ def get_emails():
         # If db_only is requested, skip Gmail API and load directly from database
         if db_only:
             print("📂 Loading emails from database only (skipping Gmail API)...")
-            emails = []
+            return respond_with_database_emails()
         else:
             # Get stored history_id for incremental sync
             gmail_token = GmailToken.query.filter_by(user_id=current_user.id).first()
@@ -1266,118 +1394,6 @@ def get_emails():
                 # Other errors - fall back to database
                 print(f"⚠️  Error fetching from Gmail: {error_str}. Falling back to database...")
                 emails = []
-        
-        # If no emails from Gmail (or db_only requested), load from database instead
-        if len(emails) == 0:
-            print("📂 No new emails from Gmail. Loading all classified emails from database...")
-            print(f"   (Ignoring 'unread_only' filter - database doesn't track read status)")
-            
-            # Get all classified emails from database
-            # NOTE: We ignore unread_only filter here because database doesn't store read/unread status
-            query = EmailClassification.query.filter_by(user_id=current_user.id)
-            
-            # Apply category filter in SQL query (more efficient than filtering in Python)
-            if category_filter:
-                query = query.filter_by(category=category_filter)
-            
-            # No limit on database queries - pagination handles display
-            # Show all emails from database (pagination will handle large result sets)
-            print(f"   Loading all emails from database" + (f" (category: {category_filter})" if category_filter else ""))
-            db_classifications = query.order_by(EmailClassification.classified_at.desc()).all()
-            
-            classified_emails = []
-            # Batch fetch star status for all emails from database
-            message_ids = [c.message_id for c in db_classifications]
-            star_status_map = {}
-            if message_ids and gmail and gmail.service:
-                try:
-                    # Batch fetch labels for all messages to get star status
-                    # Gmail batch API limit is 100 requests per batch, so split into chunks
-                    from googleapiclient.http import BatchHttpRequest
-                    star_status_results = {}
-                    
-                    def star_callback(request_id, response, exception):
-                        if exception:
-                            return
-                        if response:
-                            # Extract message_id from request_id (format: "star_{idx}_{msg_id}")
-                            msg_id = request_id.split('_', 2)[-1] if '_' in request_id else request_id
-                            label_ids = response.get('labelIds', [])
-                            star_status_results[msg_id] = {
-                                'is_starred': 'STARRED' in label_ids,
-                                'label_ids': label_ids if isinstance(label_ids, list) else []
-                            }
-                    
-                    # Gmail batch API limit is 100 requests per batch
-                    BATCH_SIZE = 100
-                    message_ids_to_fetch = message_ids[:200]  # Limit to 200 to avoid rate limits
-                    
-                    # Process in chunks of 100
-                    for chunk_start in range(0, len(message_ids_to_fetch), BATCH_SIZE):
-                        chunk = message_ids_to_fetch[chunk_start:chunk_start + BATCH_SIZE]
-                        batch = gmail.service.new_batch_http_request(callback=star_callback)
-                        
-                        for idx, msg_id in enumerate(chunk):
-                            # Use index as request_id to avoid duplicates
-                            batch.add(gmail.service.users().messages().get(
-                                userId='me',
-                                id=msg_id,
-                                format='metadata'
-                            ), request_id=f"star_{chunk_start + idx}_{msg_id}")
-                        
-                        if chunk:
-                            batch.execute()
-                    
-                    star_status_map = star_status_results
-                    print(f"⭐ Fetched star status for {len(star_status_map)} emails from Gmail")
-                except Exception as e:
-                    print(f"⚠️  Could not batch fetch star status: {str(e)}")
-            
-            for classification in db_classifications:
-                # Filter spam if not requested
-                if classification.category == CATEGORY_SPAM and not show_spam:
-                    continue
-                
-                # Category filter already applied in SQL query, so no need to check here
-                # (Keeping this check as safety, but it should never trigger)
-                if category_filter and classification.category != category_filter:
-                    continue
-                
-                # Get star status from batch fetch or default to False
-                star_info = star_status_map.get(classification.message_id, {'is_starred': False, 'label_ids': []})
-                
-                # Build email object from classification (with stored metadata)
-                email_data = {
-                    'id': classification.message_id,
-                    'thread_id': classification.thread_id,
-                    # PRIORITY 2: Use decrypted getters for encrypted fields
-                    'subject': classification.get_subject_decrypted() or 'No Subject',
-                    'from': classification.sender or 'Unknown',
-                    'snippet': classification.get_snippet_decrypted() or '',
-                    'date': classification.email_date or (int(classification.classified_at.timestamp() * 1000) if classification.classified_at else None),
-                    'is_starred': star_info['is_starred'],  # Get actual status from Gmail
-                    'label_ids': star_info['label_ids'],  # Get actual labels from Gmail
-                    'classification': {
-                        'category': classification.category,
-                        'tags': classification.tags.split(',') if classification.tags else [],
-                        'confidence': classification.confidence,
-                        'reply_type': classification.reply_type,
-                        'deal_state': classification.deal_state,
-                        'deck_link': classification.deck_link
-                    }
-                }
-                
-                classified_emails.append(email_data)
-                if not MINIMAL_LOGGING:
-                    print(f"📧 Loaded from DB: Category={classification.category}, Thread={classification.thread_id[:16]}")
-            
-            print(f"✅ Returning {len(classified_emails)} emails from database")
-            
-            return jsonify({
-                'success': True,
-                'count': len(classified_emails),
-                'emails': classified_emails
-            })
         
         openai_client = get_openai_client()
         classifier = EmailClassifier(openai_client)
@@ -1563,6 +1579,10 @@ def get_emails():
                     ).first()
                     
                     if existing_classification:
+                        # If already processed, skip entirely (no re-classification, no PDF extraction)
+                        if existing_classification.processed:
+                            print(f"⏭️  Email {email['id']} already processed, skipping...")
+                            continue
                         # Update existing classification instead of creating duplicate
                         classification = existing_classification
                         classification.category = classification_result['category']
@@ -1743,6 +1763,9 @@ def get_emails():
                     # Commit with duplicate error handling (race condition protection)
                     try:
                         db.session.commit()
+                        # Mark as processed after successful commit (prevents re-processing)
+                        classification.processed = True
+                        db.session.commit()
                     except Exception as commit_error:
                         error_str = str(commit_error)
                         # Handle duplicate key errors (unique constraint violation)
@@ -1803,15 +1826,8 @@ def get_emails():
                 # Continue processing other emails
                 continue
         
-        # Note: Database accumulates emails over time (no deletion limit)
-        # Initial setup fetches 200 emails, but pub/sub can add more beyond that
-        print(f"✅ Returning {len(classified_emails)} emails to frontend")
-        
-        return jsonify({
-            'success': True,
-            'count': len(classified_emails),
-            'emails': classified_emails
-        })
+        # After Gmail processing, always respond with the latest snapshot from the database
+        return respond_with_database_emails()
     
     except Exception as e:
         import traceback
@@ -1983,6 +1999,9 @@ def stream_emails():
                         
                         # Commit with duplicate error handling
                         try:
+                            db.session.commit()
+                            # Mark as processed after successful commit (prevents re-processing)
+                            new_classification.processed = True
                             db.session.commit()
                         except Exception as commit_error:
                             error_str = str(commit_error)
@@ -2454,6 +2473,9 @@ def reclassify_email():
         
         db.session.add(new_classification)
         db.session.commit()
+        # Mark as processed after successful commit (prevents re-processing)
+        new_classification.processed = True
+        db.session.commit()
         
         return jsonify({
             'success': True,
@@ -2603,6 +2625,42 @@ def generate_reply():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/email/<message_id>/delete', methods=['POST'])
+@login_required
+def delete_email(message_id):
+    """Delete email from Gmail and database"""
+    if not current_user.gmail_token:
+        return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
+    
+    try:
+        gmail = get_user_gmail_client(current_user)
+        if not gmail:
+            return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
+        
+        # Delete from Gmail (trash it)
+        gmail.service.users().messages().trash(
+            userId='me',
+            id=message_id
+        ).execute()
+        
+        # Also remove from database classification
+        classification = EmailClassification.query.filter_by(
+            user_id=current_user.id,
+            message_id=message_id
+        ).first()
+        
+        if classification:
+            # Delete associated deals first (to avoid foreign key constraints)
+            Deal.query.filter_by(classification_id=classification.id).delete()
+            db.session.delete(classification)
+            db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Email deleted successfully'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/send-reply', methods=['POST'])
 @login_required
 def send_reply():
@@ -2655,6 +2713,110 @@ def send_reply():
         return jsonify({
             'success': success,
             'message': 'Reply sent successfully' if success else 'Failed to send reply'
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/send-reply-with-attachments', methods=['POST'])
+@login_required
+def send_reply_with_attachments():
+    """Send a reply email with attachments"""
+    if not current_user.gmail_token:
+        return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
+    
+    send_emails = os.getenv('SEND_EMAILS', 'false').lower() == 'true'
+    
+    if not send_emails:
+        return jsonify({'success': False, 'error': 'Email sending is disabled'}), 403
+    
+    try:
+        gmail = get_user_gmail_client(current_user)
+        if not gmail:
+            return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
+        
+        data = request.json
+        to_email = data.get('to')
+        subject = data.get('subject')
+        body = data.get('body')
+        thread_id = data.get('thread_id')
+        attachments = data.get('attachments', [])
+        cc = data.get('cc')
+        bcc = data.get('bcc')
+        
+        if not all([to_email, subject, body]):
+            return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+        
+        # Extract email address
+        if '<' in to_email and '>' in to_email:
+            to_email = to_email.split('<')[1].split('>')[0]
+        
+        # Get selected signature email preference
+        selected_email = current_user.gmail_token.selected_signature_email if current_user.gmail_token else None
+        
+        # Send reply with attachments
+        success = gmail.send_reply_with_attachments(
+            to_email, subject, body, thread_id, 
+            attachments=attachments, 
+            send_as_email=selected_email,
+            cc=cc, 
+            bcc=bcc
+        )
+        
+        return jsonify({
+            'success': success,
+            'message': 'Reply sent successfully' if success else 'Failed to send reply'
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/forward-email', methods=['POST'])
+@login_required
+def forward_email():
+    """Forward an email"""
+    if not current_user.gmail_token:
+        return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
+    
+    send_emails = os.getenv('SEND_EMAILS', 'false').lower() == 'true'
+    
+    if not send_emails:
+        return jsonify({'success': False, 'error': 'Email sending is disabled'}), 403
+    
+    try:
+        gmail = get_user_gmail_client(current_user)
+        if not gmail:
+            return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
+        
+        data = request.json
+        to_email = data.get('to')
+        subject = data.get('subject')
+        body = data.get('body', '')
+        original_message_id = data.get('original_message_id')
+        include_attachments = data.get('include_attachments', False)
+        
+        if not all([to_email, subject, original_message_id]):
+            return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+        
+        # Extract email address
+        if '<' in to_email and '>' in to_email:
+            to_email = to_email.split('<')[1].split('>')[0]
+        
+        # Get selected signature email preference
+        selected_email = current_user.gmail_token.selected_signature_email if current_user.gmail_token else None
+        
+        # Forward email
+        success = gmail.forward_email(
+            to_email, subject, body, original_message_id, 
+            include_attachments=include_attachments,
+            send_as_email=selected_email
+        )
+        
+        return jsonify({
+            'success': success,
+            'message': 'Email forwarded successfully' if success else 'Failed to forward email'
         })
     
     except Exception as e:
@@ -3696,24 +3858,22 @@ def pubsub_webhook():
             user.gmail_token.history_id = str(history_id)
             db.session.commit()
         
-        # Trigger email sync in background (if Celery is available)
-        # Use incremental sync - the task will use the updated history_id from database
+        # Trigger instant Pub/Sub processing task (if Celery is available)
+        # This uses a dedicated high-priority queue with a dedicated worker for instant processing
         # NO email count restrictions - Pub/Sub works for all users regardless of email count
         if CELERY_AVAILABLE:
             try:
-                from tasks import sync_user_emails
-                # Use incremental sync (force_full_sync=False) - it will use history_id from database
-                # This will fetch ALL new emails since last history_id (no 200 limit)
-                task = sync_user_emails.delay(
+                from tasks import process_pubsub_notification
+                # Use dedicated Pub/Sub task on pubsub_notifications queue (instant processing)
+                task = process_pubsub_notification.delay(
                     user_id=user.id,
-                    max_emails=200,  # This will be ignored for incremental sync
-                    force_full_sync=False  # Use incremental sync with history_id from database
+                    history_id=history_id
                 )
-                print(f"✅ [PUB/SUB] Background sync task queued: {task.id}")
+                print(f"✅ [PUB/SUB] Instant notification task queued: {task.id}")
                 print(f"   User: {user.id}, Gmail: {email_address}, HistoryId: {history_id}")
-                print(f"   Using incremental sync (no email count restrictions)")
+                print(f"   Using dedicated Pub/Sub worker for instant processing")
             except Exception as e:
-                print(f"❌ [PUB/SUB] Could not queue background task: {str(e)}")
+                print(f"❌ [PUB/SUB] Could not queue notification task: {str(e)}")
                 import traceback
                 traceback.print_exc()
         else:

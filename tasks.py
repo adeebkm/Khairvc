@@ -112,14 +112,25 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
             # Fetch emails from Gmail
             # For incremental sync, don't limit results - fetch ALL new emails
             # For full sync, respect max_emails limit
+            deleted_message_ids = []
             if start_history_id:
-                # Incremental sync: fetch ALL new emails (no limit)
-                print(f"📧 [TASK] Incremental sync: Fetching ALL new emails since history_id={start_history_id}")
-                emails, new_history_id = gmail.get_emails(
-                    max_results=None,  # No limit for incremental sync
-                    unread_only=False,
-                    start_history_id=start_history_id
-                )
+                # Incremental sync: fetch ALL new emails (no limit) and deletions
+                print(f"📧 [TASK] Incremental sync: Fetching ALL new emails and deletions since history_id={start_history_id}")
+                # Use the internal method to get the full result with deletions
+                result = gmail._get_emails_incremental(start_history_id, unread_only=False)
+                emails = result['new_emails']
+                deleted_message_ids = result['deleted_ids']
+                new_history_id = result['history_id']
+                
+                # Process deletions from Gmail
+                if deleted_message_ids:
+                    print(f"🗑️  [TASK] Processing {len(deleted_message_ids)} deleted emails...")
+                    deleted_count = EmailClassification.query.filter(
+                        EmailClassification.user_id == user_id,
+                        EmailClassification.message_id.in_(deleted_message_ids)
+                    ).delete(synchronize_session=False)
+                    db.session.commit()
+                    print(f"🗑️  [TASK] Removed {deleted_count} deleted emails from database")
             else:
                 # Full sync: respect max_emails limit
                 print(f"📧 [TASK] Full sync: Fetching up to {max_emails} emails...")
@@ -129,7 +140,7 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                     start_history_id=None
                 )
             if start_history_id:
-                print(f"📧 [TASK] Incremental sync: Fetched {len(emails)} new emails (no limit)")
+                print(f"📧 [TASK] Incremental sync: Fetched {len(emails)} new emails, {len(deleted_message_ids)} deletions")
             else:
                 print(f"📧 [TASK] Full sync: Fetched {len(emails)} emails from Gmail (target: {max_emails})")
             
@@ -228,6 +239,7 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
             
             # Track message_ids we've already processed in this task run to prevent duplicates
             processed_message_ids = set()
+            classifications_to_mark_processed = []  # Track classifications to mark as processed after commit
             
             for idx, email in enumerate(emails):
                 message_id = email.get('id', '')
@@ -240,6 +252,37 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                 
                 processed_message_ids.add(message_id)
                 try:
+                    # Check if email already exists FIRST (before any processing to save API calls and prevent re-processing)
+                    # Use a fresh query after any potential rollback
+                    try:
+                        existing_classification = EmailClassification.query.filter_by(
+                            user_id=user_id,
+                            message_id=email.get('id', '')
+                        ).first()
+                    except Exception as query_error:
+                        # If query fails (e.g., session rolled back), rollback and retry
+                        db.session.rollback()
+                        existing_classification = EmailClassification.query.filter_by(
+                            user_id=user_id,
+                            message_id=email.get('id', '')
+                        ).first()
+                    
+                    # If email exists and is already processed, skip entirely (no re-classification, no PDF extraction)
+                    if existing_classification and existing_classification.processed:
+                        emails_processed += 1
+                        emails_skipped_duplicate += 1
+                        if (idx + 1) % 10 == 0 or emails_skipped_duplicate <= 5:  # Log first 5 and every 10th
+                            print(f"⏭️  [TASK] Email {idx + 1}/{len(emails)}: Skipped (already processed: {email.get('id', 'unknown')[:16]}...) - Total skipped: {emails_skipped_duplicate}")
+                        continue  # Skip this email entirely - already processed
+                    
+                    # If email exists but not processed, skip it (might be in progress or failed - don't reprocess)
+                    if existing_classification:
+                        emails_processed += 1
+                        emails_skipped_duplicate += 1
+                        if (idx + 1) % 10 == 0 or emails_skipped_duplicate <= 5:  # Log first 5 and every 10th
+                            print(f"⏭️  [TASK] Email {idx + 1}/{len(emails)}: Skipped (exists but not processed: {email.get('id', 'unknown')[:16]}...) - Total skipped: {emails_skipped_duplicate}")
+                        continue  # Skip this email entirely
+                    
                     # Update progress every 10 emails
                     if (idx + 1) % 10 == 0 or idx == 0:
                         self.update_state(
@@ -255,7 +298,7 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                         )
                         print(f"📧 [TASK] Progress: {idx + 1}/{len(emails)} emails processed, {emails_classified} classified, {emails_skipped_duplicate} skipped (duplicate)")
                     
-                    # Extract email data
+                    # Extract email data (only if not already processed)
                     headers = email.get('headers', {})
                     # Use combined_text if available (includes attachment content, limited to 1500 chars)
                     # Otherwise fall back to body
@@ -277,28 +320,6 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                         for att in email['attachments']:
                             if att.get('mimeType', '').startswith('application/pdf'):
                                 pdf_attachments.append(att)
-                    
-                    # Check if email already exists FIRST (before classification to save API calls)
-                    # Use a fresh query after any potential rollback
-                    try:
-                        existing_classification = EmailClassification.query.filter_by(
-                            user_id=user_id,
-                            message_id=email.get('id', '')
-                        ).first()
-                    except Exception as query_error:
-                        # If query fails (e.g., session rolled back), rollback and retry
-                        db.session.rollback()
-                        existing_classification = EmailClassification.query.filter_by(
-                            user_id=user_id,
-                            message_id=email.get('id', '')
-                        ).first()
-                    
-                    if existing_classification:
-                        emails_processed += 1
-                        emails_skipped_duplicate += 1
-                        if (idx + 1) % 10 == 0 or emails_skipped_duplicate <= 5:  # Log first 5 and every 10th
-                            print(f"⏭️  [TASK] Email {idx + 1}/{len(emails)}: Skipped (duplicate by message_id: {email.get('id', 'unknown')[:16]}...) - Total skipped: {emails_skipped_duplicate}")
-                        continue  # Skip this email entirely
                     
                     # Classify email (with rate limiting)
                     try:
@@ -343,6 +364,10 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                     new_classification.set_subject_encrypted(email.get('subject', 'No Subject'))
                     new_classification.set_snippet_encrypted(email.get('snippet', ''))
                     db.session.add(new_classification)
+                    # Track non-deal-flow classifications to mark as processed after successful commit
+                    # Deal-flow emails will be marked as processed after deal creation
+                    if classification_result['category'] != CATEGORY_DEAL_FLOW:
+                        classifications_to_mark_processed.append(new_classification)
                     
                     # Batch commits: Commit every 10 emails instead of each one (10x faster for DB operations)
                     # Only commit immediately if it's the last email or we've accumulated 10
@@ -358,6 +383,15 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                             try:
                                 db.session.commit()
                                 commit_success = True
+                                # Mark all classifications in this batch as processed (prevents re-processing)
+                                for classification in classifications_to_mark_processed:
+                                    if not classification.processed:
+                                        classification.processed = True
+                                # Commit the processed flags
+                                if any(not c.processed for c in classifications_to_mark_processed):
+                                    db.session.commit()
+                                # Clear the list after successful commit
+                                classifications_to_mark_processed = []
                                 break
                             except Exception as commit_error:
                                 error_str = str(commit_error)
@@ -423,6 +457,7 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                         print(f"✅ [TASK] Email {idx + 1}/{len(emails)}: Successfully classified and saved - Total classified: {emails_classified}")
                     
                     # Deal Flow specific processing
+                    deal_created = False
                     if classification_result['category'] == CATEGORY_DEAL_FLOW:
                         deck_links = [l for l in classification_result.get('links', []) if any(
                             ind in l.lower() for ind in ['docsend', 'dataroom', 'deck', 'drive.google.com', 'dropbox.com', 'notion.so']
@@ -469,6 +504,10 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                         for commit_attempt in range(max_commit_retries):
                             try:
                                 db.session.commit()
+                                deal_created = True
+                                # Mark email as fully processed (classification + deal creation complete)
+                                new_classification.processed = True
+                                db.session.commit()
                                 # Send WhatsApp alert if enabled
                                 try:
                                     from whatsapp_service import WhatsAppService
@@ -480,7 +519,7 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False):
                                         if user.whatsapp_enabled and user.whatsapp_number:
                                             print(f"📱 [TASK] Sending WhatsApp alert for deal {deal.id} to {user.whatsapp_number}")
                                             print(f"   📧 Deal subject: {deal.subject or 'No subject'}")
-                                            print(f"   👤 Founder: {deal.founder_name or 'Unknown'}")
+                                            print(f"   👤 ![1763845166912](image/tasks/1763845166912.png)![1763845173839](image/tasks/1763845173839.png)![1763845185380](image/tasks/1763845185380.png)Founder: {deal.founder_name or 'Unknown'}")
                                             whatsapp = WhatsAppService()
                                             whatsapp.send_deal_alert(deal, user.whatsapp_number)
                                             deal.whatsapp_alert_sent = True
@@ -748,14 +787,17 @@ def fetch_older_emails(self, user_id, max_emails=200):
                         }
                     )
                     
-                    # Check if email already exists (prevent duplicates)
+                    # Check if email already exists and is processed (prevent duplicates and re-processing)
                     existing_classification = EmailClassification.query.filter_by(
                         user_id=user_id,
                         message_id=email.get('id', '')
                     ).first()
                     
                     if existing_classification:
-                        print(f"⏭️  Email {email.get('id', '')} already exists, skipping...")
+                        if existing_classification.processed:
+                            print(f"⏭️  Email {email.get('id', '')} already processed, skipping...")
+                        else:
+                            print(f"⏭️  Email {email.get('id', '')} exists but not processed, skipping...")
                         emails_classified += 1
                         continue
                     
@@ -797,6 +839,9 @@ def fetch_older_emails(self, user_id, max_emails=200):
                         try:
                             db.session.commit()
                             commit_success = True
+                            # Mark as processed after successful classification (prevents re-processing)
+                            new_classification.processed = True
+                            db.session.commit()
                             break
                         except Exception as commit_error:
                             error_str = str(commit_error)
@@ -1000,3 +1045,76 @@ def send_whatsapp_followups():
         import traceback
         traceback.print_exc()
         return {'status': 'error', 'error': error_msg}
+
+
+@celery.task(bind=True, name='tasks.process_pubsub_notification', time_limit=300, soft_time_limit=270)
+def process_pubsub_notification(self, user_id, history_id):
+    """
+    High-priority task to process Pub/Sub notifications instantly.
+    This task runs on the dedicated pubsub_notifications queue with a dedicated worker.
+    
+    Args:
+        user_id: User ID to sync emails for
+        history_id: Gmail history ID from Pub/Sub notification
+    
+    Returns:
+        dict: Status and results
+    """
+    # Import inside function to avoid circular imports
+    try:
+        from app import app, db
+    except ImportError:
+        import sys
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+        if '/app' not in sys.path:
+            sys.path.insert(0, '/app')
+        from app import app, db
+    
+    from models import User, GmailToken
+    from gmail_client import GmailClient
+    from auth import decrypt_token
+    
+    with app.app_context():
+        try:
+            print(f"🚀 [PUB/SUB] Processing notification instantly for user {user_id}, historyId: {history_id}")
+            
+            # Get user
+            user = User.query.get(user_id)
+            if not user:
+                return {'status': 'error', 'error': 'User not found'}
+            
+            if not user.gmail_token:
+                return {'status': 'error', 'error': 'Gmail not connected'}
+            
+            # Update history_id in database
+            if user.gmail_token:
+                user.gmail_token.history_id = str(history_id)
+                db.session.commit()
+            
+            # Trigger incremental sync using the updated history_id
+            # Use sync_user_emails with force_full_sync=False to use history_id from database
+            from tasks import sync_user_emails
+            # Queue sync task on email_sync queue (not pubsub queue - keep pubsub queue for notifications only)
+            sync_task = sync_user_emails.apply_async(
+                args=[user_id, 10000],  # High limit for incremental sync
+                kwargs={'force_full_sync': False},  # Use incremental sync with history_id
+                queue='email_sync'  # Route to email_sync queue
+            )
+            
+            print(f"✅ [PUB/SUB] Queued incremental sync task {sync_task.id} for user {user_id}")
+            
+            return {
+                'status': 'success',
+                'sync_task_id': sync_task.id,
+                'user_id': user_id,
+                'history_id': history_id
+            }
+            
+        except Exception as e:
+            error_msg = f"Pub/Sub notification processing failed: {str(e)}"
+            print(f"❌ [PUB/SUB] {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return {'status': 'error', 'error': error_msg}

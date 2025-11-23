@@ -116,32 +116,130 @@ async function autoFetchNewEmails() {
             return;
         }
         
-        if (data.success && data.emails && data.emails.length > 0) {
-            // Check if these are actually new emails
-            const existingThreadIds = new Set(emailCache.data.map(e => e.thread_id));
-            const uniqueNewEmails = data.emails.filter(e => !existingThreadIds.has(e.thread_id));
+        if (data.success) {
+            // Handle deletions from Gmail
+            if (data.deleted_message_ids && data.deleted_message_ids.length > 0) {
+                await handleEmailDeletions(data.deleted_message_ids);
+            }
             
-            if (uniqueNewEmails.length > 0) {
-                // Add new emails to cache
-                emailCache.data = [...emailCache.data, ...uniqueNewEmails];
-                emailCache.timestamp = Date.now();
-                saveEmailCacheToStorage(); // Save to localStorage
-                allEmails = emailCache.data;
+            // Handle new emails
+            if (data.emails && data.emails.length > 0) {
+                // Check if these are actually new emails
+                const existingThreadIds = new Set(emailCache.data.map(e => e.thread_id));
+                const uniqueNewEmails = data.emails.filter(e => !existingThreadIds.has(e.thread_id));
                 
-                // Apply filters and update display
-                applyFilters();
-                
-                // Show notification
-                showAlert('success', `📧 ${uniqueNewEmails.length} new email${uniqueNewEmails.length !== 1 ? 's' : ''} detected!`);
-                
-                console.log(`✅ Auto-fetch: Detected and loaded ${uniqueNewEmails.length} new emails`);
-            } else {
-                console.log(`ℹ️  Auto-fetch: No new emails detected`);
+                if (uniqueNewEmails.length > 0) {
+                    // Add new emails to cache
+                    emailCache.data = [...emailCache.data, ...uniqueNewEmails];
+                    emailCache.timestamp = Date.now();
+                    saveEmailCacheToStorage(); // Save to localStorage
+                    allEmails = emailCache.data;
+                    
+                    // Apply filters and update display
+                    applyFilters();
+                    
+                    // Show notification
+                    showAlert('success', `📧 ${uniqueNewEmails.length} new email${uniqueNewEmails.length !== 1 ? 's' : ''} detected!`);
+                    
+                    console.log(`✅ Auto-fetch: Detected and loaded ${uniqueNewEmails.length} new emails`);
+                } else {
+                    console.log(`ℹ️  Auto-fetch: No new emails detected`);
+                }
             }
         }
     } catch (error) {
         console.error('Error in auto-fetch:', error);
         // Silently fail - don't spam user with errors for background polling
+    }
+}
+
+// Handle email deletions from Gmail
+async function handleEmailDeletions(deletedIds) {
+    if (!deletedIds || deletedIds.length === 0) {
+        return;
+    }
+    
+    console.log(`🗑️  Processing ${deletedIds.length} deleted email(s) from Gmail`);
+    
+    // Remove from email list cache
+    emailCache.data = emailCache.data.filter(e => !deletedIds.includes(e.id));
+    
+    // Remove from allEmails
+    allEmails = allEmails.filter(e => !deletedIds.includes(e.id));
+    
+    // Invalidate thread caches for deleted emails
+    const threadsToInvalidate = new Set();
+    for (const messageId of deletedIds) {
+        // Find the thread_id before removal
+        const email = emailCache.data.find(e => e.id === messageId) || allEmails.find(e => e.id === messageId);
+        if (email && email.thread_id) {
+            threadsToInvalidate.add(email.thread_id);
+        }
+    }
+    
+    // Invalidate thread caches
+    for (const threadId of threadsToInvalidate) {
+        await invalidateThreadCache(threadId);
+    }
+    
+    // Update UI
+    applyFilters();
+    saveEmailCacheToStorage();
+    
+    if (deletedIds.length > 0) {
+        showAlert('info', `${deletedIds.length} email${deletedIds.length !== 1 ? 's' : ''} deleted from Gmail`);
+    }
+}
+
+// Delete email from UI and Gmail
+async function deleteEmail(messageId, threadId) {
+    if (!confirm('Are you sure you want to delete this email?')) {
+        return;
+    }
+    
+    try {
+        // Optimistic UI update - remove from display immediately
+        const emailIndex = allEmails.findIndex(e => e.id === messageId);
+        let removedEmail = null;
+        if (emailIndex >= 0) {
+            removedEmail = allEmails[emailIndex];
+            allEmails.splice(emailIndex, 1);
+            applyFilters();
+        }
+        
+        // Call backend to delete from Gmail
+        const response = await fetch(`/api/email/${messageId}/delete`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            // Invalidate thread cache
+            if (threadId) {
+                await invalidateThreadCache(threadId);
+            }
+            
+            // Remove from email list cache
+            emailCache.data = emailCache.data.filter(e => e.id !== messageId);
+            saveEmailCacheToStorage();
+            
+            // Close modal if open
+            const modal = document.getElementById('emailModal');
+            if (modal && modal.style.display === 'flex') {
+                closeModal();
+            }
+            
+            showAlert('success', 'Email deleted');
+        } else {
+            // Rollback: restore email in UI if delete failed
+            if (removedEmail) {
+                allEmails.splice(emailIndex, 0, removedEmail);
+                applyFilters();
+            }
+            showAlert('error', 'Failed to delete email');
+        }
+    } catch (error) {
+        console.error('Error deleting email:', error);
+        showAlert('error', 'Error deleting email');
     }
 }
 
@@ -186,6 +284,7 @@ function toggleGmailDropdown(event) {
 }
 
 // ==================== SETUP SCREEN ====================
+let finalizeSetupPromise = null;
 async function startSetup() {
     const setupScreen = document.getElementById('setupScreen');
     const startBtn = document.getElementById('startSetupBtn');
@@ -256,135 +355,9 @@ async function startSetup() {
             throw new Error(data.error || 'Failed to start setup');
         }
         
-        // Mark setup as complete
-        await fetch('/api/setup/complete', { method: 'POST' });
-        
-        // Auto-setup Pub/Sub if enabled (test environment)
-        try {
-            const pubsubResponse = await fetch('/api/setup-pubsub', { method: 'POST' });
-            const pubsubData = await pubsubResponse.json();
-            if (pubsubData.success) {
-                console.log('✅ Pub/Sub watch configured automatically');
-            } else if (pubsubResponse.status === 400 && pubsubData.error?.includes('not enabled')) {
-                console.log('ℹ️  Pub/Sub not enabled (production environment)');
-            } else {
-                console.warn('⚠️  Pub/Sub setup failed (non-critical):', pubsubData.error);
-            }
-        } catch (error) {
-            console.warn('⚠️  Pub/Sub setup error (non-critical):', error);
-        }
-        
-        // Load emails FIRST before hiding setup screen
-        console.log('📧 Loading emails from database after setup...');
-        if (progressText) progressText.textContent = 'Loading emails...';
-        if (progressBar) progressBar.style.width = '95%';
-        
-        // Use hardcoded timer approach: random 7-10 minutes, then show inbox
+        // Keep setup screen visible until the timer completes (completeSetupAfterTimer handles the UI transition)
         await startHardcodedTimer(progressBar, progressText, setupScreen);
-        
-        // Get DOM elements BEFORE hiding setup screen
-        const compactHeader = document.querySelector('.main-content > .compact-header');
-        const emailListEl = document.getElementById('emailList');
-        
-        // Ensure all emails have category before filtering
-        allEmails.forEach(email => {
-            if (!email.category && email.classification?.category) {
-                email.category = email.classification.category.toLowerCase();
-            } else if (!email.category) {
-                email.category = 'general';
-            }
-        });
-        
-        // NOW hide setup screen and show main content FIRST
-        // This ensures emailList element is available before we try to display emails
-        if (setupScreen) setupScreen.style.display = 'none';
-        if (compactHeader) compactHeader.style.display = 'block';
-        if (emailListEl) {
-            emailListEl.style.display = 'block';
-            // Force scroll to top of email list
-            emailListEl.scrollTop = 0;
-        }
-        
-        // Wait for DOM to update after hiding setup screen
-        await new Promise(resolve => setTimeout(resolve, 200));
-        
-        // Verify emailList element is now available
-        const emailListCheck = document.getElementById('emailList');
-        if (!emailListCheck) {
-            console.error('❌ emailList element still not found after hiding setup screen');
-            showAlert('error', 'Failed to display emails. Please refresh the page.');
-            return;
-        }
-        
-        // Now apply filters and display emails (emailList is now available)
-        console.log('🔄 Applying filters and preparing emails for display...');
-        applyFilters();
-        
-        // Verify emails are ready to display
-        if (filteredEmails.length === 0 && allEmails.length > 0) {
-            console.warn('⚠️ filteredEmails is empty but allEmails has data - forcing filter application');
-            // Ensure categories are set again
-            allEmails.forEach(email => {
-                if (!email.category && email.classification?.category) {
-                    email.category = email.classification.category.toLowerCase();
-                } else if (!email.category) {
-                    email.category = 'general';
-                }
-            });
-            applyFilters(); // Try again
-        }
-        
-        // Force display emails - always call updatePagination which will display emails
-        console.log(`📧 Displaying emails: ${filteredEmails.length} filtered, ${allEmails.length} total`);
-        if (filteredEmails.length > 0) {
-            updatePagination(); // This will call displayEmails internally
-        } else if (allEmails.length > 0) {
-            // If filteredEmails is still empty, display allEmails directly
-            console.warn('⚠️ filteredEmails still empty, displaying allEmails directly');
-            displayEmails(allEmails.slice(0, EMAILS_PER_PAGE));
-            // Create a simple pagination for allEmails
-            const totalPages = Math.ceil(allEmails.length / EMAILS_PER_PAGE);
-            if (totalPages > 1) {
-                updatePagination(); // This will create pagination controls
-            }
-        } else {
-            // No emails at all
-            displayEmails([]);
-        }
-        
-        // Double-check that emails are displayed after a short delay
-        setTimeout(() => {
-            const checkCount = emailListEl ? emailListEl.querySelectorAll('.email-item').length : 0;
-            console.log(`📊 After display check: ${checkCount} emails visible, ${filteredEmails.length} filtered, ${allEmails.length} total`);
-            if (checkCount === 0 && allEmails.length > 0) {
-                console.warn('⚠️ Emails still not displayed, forcing display again...');
-                // Ensure categories are set
-                allEmails.forEach(email => {
-                    if (!email.category && email.classification?.category) {
-                        email.category = email.classification.category.toLowerCase();
-                    } else if (!email.category) {
-                        email.category = 'general';
-                    }
-                });
-                applyFilters();
-                if (filteredEmails.length > 0) {
-                    displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
-                    updatePagination();
-                } else {
-                    // Last resort - display all emails directly
-                    displayEmails(allEmails.slice(0, EMAILS_PER_PAGE));
-                    updatePagination();
-                }
-            }
-        }, 500);
-        
-        // Show success message
-        showAlert('success', `Setup complete! Loaded ${allEmails.length} emails.`);
-        
-        // No need to fetch older emails separately - we fetch all 200 upfront
-        // Classification happens in background and emails appear progressively
-        console.log(`✅ Setup complete. All 200 emails are being fetched and classified in the background.`);
-        
+        return;
     } catch (error) {
         console.error('Setup error:', error);
         // Even if setup fails, try to load existing emails and mark setup as complete
@@ -397,7 +370,7 @@ async function startSetup() {
             if (emailCount > 0) {
                 // We have emails, mark setup as complete and continue
                 console.log(`✅ Found ${emailCount} existing emails, marking setup as complete`);
-                await fetch('/api/setup/complete', { method: 'POST' });
+                await finalizeSetupStatus();
                 
                 // Hide setup screen
                 if (setupScreen) setupScreen.style.display = 'none';
@@ -726,7 +699,49 @@ async function completeSetupAfterTimer(progressBar, progressText, setupScreen) {
     } catch (error) {
         console.error('Error loading emails after timer:', error);
         showAlert('info', 'Setup complete! Emails are being classified in the background.');
+    } finally {
+        await finalizeSetupStatus();
     }
+}
+
+async function finalizeSetupStatus() {
+    if (finalizeSetupPromise) {
+        return finalizeSetupPromise;
+    }
+    
+    finalizeSetupPromise = (async () => {
+        try {
+            const response = await fetch('/api/setup/complete', { method: 'POST' });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || response.statusText || 'Failed to mark setup complete');
+            }
+            console.log('✅ Setup marked complete on server');
+        } catch (error) {
+            console.warn('⚠️  Could not mark setup as complete:', error);
+        }
+        
+        try {
+            const pubsubResponse = await fetch('/api/setup-pubsub', { method: 'POST' });
+            const contentType = pubsubResponse.headers.get('content-type') || '';
+            let pubsubData = {};
+            if (contentType.includes('application/json')) {
+                pubsubData = await pubsubResponse.json();
+            }
+            
+            if (pubsubResponse.ok && pubsubData.success) {
+                console.log('✅ Pub/Sub watch configured automatically');
+            } else if (pubsubResponse.status === 400 && pubsubData.error?.includes('not enabled')) {
+                console.log('ℹ️  Pub/Sub not enabled (production environment)');
+            } else if (pubsubData.error) {
+                console.warn('⚠️  Pub/Sub setup failed (non-critical):', pubsubData.error);
+            }
+        } catch (error) {
+            console.warn('⚠️  Pub/Sub setup error (non-critical):', error);
+        }
+    })();
+    
+    return finalizeSetupPromise;
 }
 
 async function fetchInitialEmailsStreaming(progressBar, progressText) {
@@ -1036,7 +1051,64 @@ function stopBackgroundFetching() {
 }
 
 // Load config on page load
+// Pre-fetching with IntersectionObserver
+let threadPrefetchObserver = null;
+const prefetchedThreads = new Set();
+
+function initThreadPrefetching() {
+    if (!('IntersectionObserver' in window)) {
+        console.log('IntersectionObserver not supported - pre-fetching disabled');
+        return;
+    }
+    
+    // Create observer with 200px margin (prefetch when email is 200px from viewport)
+    threadPrefetchObserver = new IntersectionObserver(
+        (entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const threadId = entry.target.dataset.threadId;
+                    if (threadId && !prefetchedThreads.has(threadId)) {
+                        prefetchedThreads.add(threadId);
+                        prefetchThread(threadId);
+                    }
+                }
+            });
+        },
+        {
+            root: null,
+            rootMargin: '200px',
+            threshold: 0
+        }
+    );
+    
+    console.log('✅ Thread pre-fetching initialized');
+}
+
+function observeEmailsForPrefetch() {
+    if (!threadPrefetchObserver) return;
+    
+    // Observe all visible email items
+    const emailItems = document.querySelectorAll('.email-item[data-thread-id]');
+    emailItems.forEach(item => {
+        threadPrefetchObserver.observe(item);
+    });
+}
+
+function stopObservingEmails() {
+    if (!threadPrefetchObserver) return;
+    threadPrefetchObserver.disconnect();
+}
+
 document.addEventListener('DOMContentLoaded', async function() {
+    // Initialize IndexedDB thread cache and pre-fetching
+    try {
+        await initThreadCache();
+        await cleanupOldThreads();
+        initThreadPrefetching();
+    } catch (error) {
+        console.error('Error initializing cache:', error);
+    }
+    
     // Initialize sidebar state
     initSidebar();
     loadConfig();
@@ -1903,7 +1975,42 @@ async function loadConfig() {
 }
 
 // Fetch emails from Gmail
+// Show cache refresh indicator
+function showCacheRefreshIndicator() {
+    const indicator = document.createElement('div');
+    indicator.id = 'cacheRefreshIndicator';
+    indicator.style.cssText = `
+        position: fixed;
+        top: 70px;
+        right: 20px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 8px 16px;
+        box-shadow: var(--shadow-md);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        z-index: 9999;
+    `;
+    indicator.innerHTML = '<div class="spinner-small" style="width: 14px; height: 14px;"></div>Refreshing...';
+    document.body.appendChild(indicator);
+}
+
+// Hide cache refresh indicator
+function hideCacheRefreshIndicator() {
+    const indicator = document.getElementById('cacheRefreshIndicator');
+    if (indicator) {
+        indicator.remove();
+    }
+}
+
+// Refresh emails manually (cache-first for instant feedback)
 async function refreshEmails() {
+    console.log('🔄 Manual refresh triggered');
+    
     // Add spinning animation to refresh button
     const refreshBtn = document.getElementById('refreshEmailsBtn');
     if (refreshBtn) {
@@ -1912,14 +2019,50 @@ async function refreshEmails() {
     }
     
     try {
-        // Refresh emails by reloading from database
-        console.log('🔄 Refreshing emails from database...');
-        await loadEmailsFromDatabase();
-        applyFilters();
-        updatePagination();
-        showAlert('success', 'Emails refreshed');
+        // Show cached emails immediately for instant feedback
+        if (emailCache.data && emailCache.data.length > 0) {
+            console.log(`⚡ Displaying ${emailCache.data.length} cached emails immediately`);
+            allEmails = [...emailCache.data];
+            applyFilters();
+            updatePagination();
+        }
+        
+        // Fetch fresh data in background
+        console.log('🔄 Fetching fresh emails from server...');
+        const response = await fetch(`/api/emails?max=200&show_spam=true`);
+        const data = await response.json();
+        
+        if (data.success && data.emails) {
+            const oldCount = emailCache.data.length;
+            const newCount = data.emails.length;
+            
+            // Update cache
+            emailCache.data = data.emails;
+            emailCache.timestamp = Date.now();
+            saveEmailCacheToStorage();
+            
+            // Update display
+            allEmails = data.emails;
+            applyFilters();
+            updatePagination();
+            
+            // Show diff
+            const diff = newCount - oldCount;
+            if (diff > 0) {
+                showAlert('success', `📧 ${diff} new email${diff !== 1 ? 's' : ''} loaded`);
+            } else if (diff < 0) {
+                showAlert('info', `${Math.abs(diff)} email${Math.abs(diff) !== 1 ? 's' : ''} removed`);
+            } else {
+                showAlert('info', 'Inbox up to date');
+            }
+            
+            console.log(`✅ Refreshed: ${newCount} emails (${diff > 0 ? '+' : ''}${diff})`);
+        }
+    } catch (error) {
+        console.error('Error refreshing emails:', error);
+        showAlert('error', 'Failed to refresh emails');
     } finally {
-        // Remove spinning animation from refresh button
+        // Remove spinning animation
         if (refreshBtn) {
             refreshBtn.classList.remove('refreshing');
             refreshBtn.disabled = false;
@@ -2355,6 +2498,9 @@ async function loadEmailsFromDatabase() {
 function displayEmails(emails) {
     const emailList = document.getElementById('emailList');
     
+    // Stop observing old emails for pre-fetching
+    stopObservingEmails();
+    
     // Safety check: ensure email list element exists
     if (!emailList) {
         console.warn('⚠️ displayEmails: emailList element not found, skipping display');
@@ -2483,7 +2629,8 @@ function displayEmails(emails) {
             <div class="email-card ${unreadClass} ${attachmentClass}" 
                  onclick="openEmail(${index})" 
                  oncontextmenu="event.preventDefault(); showContextMenu(event, ${index});"
-                 data-email-index="${index}">
+                 data-email-index="${index}"
+                 data-thread-id="${escapeHtml(email.thread_id || '')}">
                 <div class="email-row">
                     <div class="email-star" onclick="event.stopPropagation(); toggleStar('${email.id}', ${isStarred}, ${index})" title="${isStarred ? 'Unstar' : 'Star'}">
                         <span class="star-icon ${starClass}">★</span>
@@ -2508,6 +2655,9 @@ function displayEmails(emails) {
             </div>
         `;
     }).join('');
+    
+    // Start observing new emails for pre-fetching
+    setTimeout(() => observeEmailsForPrefetch(), 100);
 }
 
 // Get category badge HTML
@@ -3056,22 +3206,43 @@ async function openEmail(indexOrEmail) {
     // Show modal immediately
     document.getElementById('emailModal').style.display = 'flex';
     
-    // Display cached email immediately for instant opening
-    if (currentEmail.body || currentEmail.combined_text) {
-        // Render the cached email first
-        threadContainer.innerHTML = renderThreadMessage(currentEmail, true);
-        enhanceHtmlEmails([currentEmail]);
+    const threadId = currentEmail.thread_id;
+    
+    // Check IndexedDB cache FIRST for instant loading
+    const cached = await getCachedThread(threadId);
+    if (cached && cached.emails && cached.emails.length > 0) {
+        console.log(`⚡ Loading thread ${threadId} from cache (instant)`);
+        
+        // Display cached data immediately
+        let threadHtml = '';
+        cached.emails.forEach((email, idx) => {
+            threadHtml += renderThreadMessage(email, idx === 0);
+        });
+        threadContainer.innerHTML = threadHtml;
+        enhanceHtmlEmails(cached.emails);
+        
+        // Show subtle "refreshing" indicator
+        showCacheRefreshIndicator();
     } else {
-        threadContainer.innerHTML = '<div class="spinner-small"></div><p>Loading thread...</p>';
+        // No cache - display cached email from email list if available
+        if (currentEmail.body || currentEmail.combined_text) {
+            threadContainer.innerHTML = renderThreadMessage(currentEmail, true);
+            enhanceHtmlEmails([currentEmail]);
+        } else {
+            threadContainer.innerHTML = '<div class="spinner-small"></div><p>Loading thread...</p>';
+        }
     }
     
-    // Fetch full thread in the background (async, non-blocking)
+    // Always fetch fresh data in background (even if cache exists)
     (async () => {
         try {
             const response = await fetch(`/api/thread/${currentEmail.thread_id}`);
             const data = await response.json();
             
             if (data.success && data.emails && data.emails.length > 0) {
+                // Cache the fresh data
+                await cacheThread(threadId, data);
+                
                 // Find the first email with a valid subject
                 let subjectToUse = null;
                 for (const email of data.emails) {
@@ -3090,13 +3261,30 @@ async function openEmail(indexOrEmail) {
                     }
                 }
                 
-                // Render all messages in thread
-                let threadHtml = '';
-                data.emails.forEach((email, idx) => {
-                    threadHtml += renderThreadMessage(email, idx === 0);
-                });
-                threadContainer.innerHTML = threadHtml;
-                enhanceHtmlEmails(data.emails);
+                // Update UI if cache was shown (or display if no cache)
+                if (cached) {
+                    // Check if thread changed (new messages arrived)
+                    if (data.emails.length !== cached.emails.length) {
+                        // Render all messages in thread
+                        let threadHtml = '';
+                        data.emails.forEach((email, idx) => {
+                            threadHtml += renderThreadMessage(email, idx === 0);
+                        });
+                        threadContainer.innerHTML = threadHtml;
+                        enhanceHtmlEmails(data.emails);
+                        showAlert('info', 'Thread updated');
+                    }
+                } else {
+                    // First time viewing - render fresh data
+                    let threadHtml = '';
+                    data.emails.forEach((email, idx) => {
+                        threadHtml += renderThreadMessage(email, idx === 0);
+                    });
+                    threadContainer.innerHTML = threadHtml;
+                    enhanceHtmlEmails(data.emails);
+                }
+                
+                hideCacheRefreshIndicator();
                 
                 // Use the latest email for reply generation, but preserve original email fields
                 const latestEmail = data.emails[data.emails.length - 1];
@@ -3121,8 +3309,9 @@ async function openEmail(indexOrEmail) {
             }
         } catch (error) {
             console.error('Error fetching thread:', error);
+            hideCacheRefreshIndicator();
             // Only show error if we didn't have cached data to display
-            if (!currentEmail.body && !currentEmail.combined_text) {
+            if (!cached && !currentEmail.body && !currentEmail.combined_text) {
                 threadContainer.innerHTML = '<div class="empty-state"><p>Error loading thread</p></div>';
             }
         }
@@ -3379,6 +3568,67 @@ function saveEdit() {
         editBtn.textContent = '✏️ Edit';
         editBtn.onclick = editReply;
     }
+}
+
+// Delete current email from modal
+async function deleteCurrentEmail() {
+    if (!currentEmail || !currentEmail.id) {
+        showAlert('error', 'No email selected');
+        return;
+    }
+    await deleteEmail(currentEmail.id, currentEmail.thread_id);
+}
+
+// Archive email (remove from inbox)
+async function archiveEmail() {
+    if (!currentEmail || !currentEmail.id) {
+        showAlert('error', 'No email selected');
+        return;
+    }
+    // TODO: Implement archive functionality
+    showAlert('info', 'Archive functionality coming soon');
+}
+
+// Mark email as unread
+async function markAsUnread() {
+    if (!currentEmail || !currentEmail.id) {
+        showAlert('error', 'No email selected');
+        return;
+    }
+    // TODO: Implement mark as unread functionality
+    showAlert('info', 'Mark as unread functionality coming soon');
+}
+
+// Open reply composer (to be implemented with full features)
+function openReplyComposer() {
+    if (!currentEmail) {
+        showAlert('error', 'No email selected');
+        return;
+    }
+    // Show reply section
+    document.getElementById('replySection').style.display = 'block';
+    // Generate reply
+    generateReply();
+}
+
+// Open reply all composer
+function openReplyAllComposer() {
+    if (!currentEmail) {
+        showAlert('error', 'No email selected');
+        return;
+    }
+    // TODO: Implement reply all functionality
+    showAlert('info', 'Reply All functionality coming soon');
+}
+
+// Open forward composer
+function openForwardComposer() {
+    if (!currentEmail) {
+        showAlert('error', 'No email selected');
+        return;
+    }
+    // TODO: Implement forward functionality
+    showAlert('info', 'Forward functionality coming soon');
 }
 
 // Send reply

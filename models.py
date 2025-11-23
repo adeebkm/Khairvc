@@ -99,6 +99,7 @@ class EmailClassification(db.Model):
     reply_sent = db.Column(db.Boolean, default=False)
     confidence = db.Column(db.Float)  # Classification confidence score
     classified_at = db.Column(db.DateTime, default=datetime.utcnow)
+    processed = db.Column(db.Boolean, default=False)  # True once classification + attachments fully processed
     
     # Deal Flow specific
     deal_state = db.Column(db.String(50))  # New, Ask-More, Routed (for Deal Flow only)

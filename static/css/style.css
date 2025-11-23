@@ -1653,7 +1653,7 @@ body::before {
 .modal-content {
     background: var(--bg-primary);
     border-radius: 8px;
-    max-width: 800px;
+    max-width: 900px;
     width: 100%;
     max-height: 90vh;
     overflow-y: auto;
@@ -1846,6 +1846,31 @@ body::before {
     overflow-y: auto;
 }
 
+/* Action bar for email modal */
+.modal-action-bar {
+    display: flex;
+    gap: 8px;
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    flex-wrap: wrap;
+}
+
+.modal-action-bar .btn {
+    font-size: 13px;
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.modal-action-bar .btn-icon {
+    font-size: 16px;
+}
+
 .thread-message {
     border-bottom: 1px solid var(--border-color);
     padding: 20px 0;
@@ -1889,14 +1914,49 @@ body::before {
     padding: 0;
     border-radius: 0;
     word-wrap: break-word;
-    line-height: 1.6;
+    line-height: 1.7;
     color: var(--text-primary);
     max-height: none;
     overflow-y: visible;
     border: none;
-    font-size: 14px;
+    font-size: 15px;
     position: relative;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.email-body a {
+    color: var(--primary-color);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s ease;
+}
+
+.email-body a:hover {
+    border-bottom-color: var(--primary-color);
+}
+
+.email-body code {
+    background: var(--bg-secondary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: 'Courier New', monospace;
+}
+
+.email-body pre {
+    background: var(--bg-secondary);
+    padding: 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 13px;
+}
+
+.email-body blockquote {
+    border-left: 3px solid var(--primary-color);
+    padding-left: 12px;
+    margin-left: 0;
+    color: var(--text-secondary);
+    font-style: italic;
 }
 
 .email-body p {

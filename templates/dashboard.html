@@ -306,6 +306,29 @@
                     <div id="modalTags" class="modal-tags"></div>
                 </div>
             </div>
+            
+            <!-- Action Bar -->
+            <div class="modal-action-bar">
+                <button class="btn btn-primary btn-small" onclick="openReplyComposer()" title="Reply to this email">
+                    <span class="btn-icon">↩️</span> Reply
+                </button>
+                <button class="btn btn-secondary btn-small" onclick="openReplyAllComposer()" title="Reply to all recipients">
+                    <span class="btn-icon">↩️</span> Reply All
+                </button>
+                <button class="btn btn-secondary btn-small" onclick="openForwardComposer()" title="Forward this email">
+                    <span class="btn-icon">➡️</span> Forward
+                </button>
+                <button class="btn btn-danger btn-small" onclick="deleteCurrentEmail()" title="Delete this email">
+                    <span class="btn-icon">🗑️</span> Delete
+                </button>
+                <button class="btn btn-secondary btn-small" onclick="archiveEmail()" title="Archive this email">
+                    <span class="btn-icon">📁</span> Archive
+                </button>
+                <button class="btn btn-secondary btn-small" onclick="markAsUnread()" title="Mark as unread">
+                    <span class="btn-icon">✉️</span> Mark Unread
+                </button>
+            </div>
+            
             <div class="modal-body">
                 <div class="thread-container" id="threadContainer">
                     <!-- Thread messages will be populated here -->
@@ -476,6 +499,7 @@
         </div>
     </div>
 
+    <script src="{{ url_for('static', filename='js/cache.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

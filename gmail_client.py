@@ -270,7 +270,11 @@ class GmailClient:
             # This fetches ALL new emails since history_id (ignores max_results limit)
             if start_history_id:
                 print(f"🔄 Using incremental sync from history ID: {start_history_id} (fetching ALL new emails, no limit)")
-                return self._get_emails_incremental(start_history_id, unread_only)
+                result = self._get_emails_incremental(start_history_id, unread_only)
+                # Return in old format for backward compatibility (emails, history_id)
+                # Note: deleted_ids are available in result but not returned here
+                # They should be accessed separately via the full result dict
+                return result['new_emails'], result['history_id']
             
             # FULL SYNC: Use messages.list() for first time or full refresh
             query = 'in:inbox'
@@ -577,13 +581,14 @@ class GmailClient:
         """
         Fetch only changes since start_history_id using Gmail History API.
         This is MUCH faster and uses far fewer API calls than full sync.
+        Returns dict with new_emails, deleted_ids, and history_id.
         """
         try:
-            # Single API call to get all changes since last sync
+            # Single API call to get all changes since last sync (additions AND deletions)
             history_response = self.service.users().history().list(
                 userId='me',
                 startHistoryId=start_history_id,
-                historyTypes=['messageAdded'],  # Only get new messages
+                historyTypes=['messageAdded', 'messageDeleted'],  # Track both additions and deletions
                 labelId='INBOX'  # Only inbox messages
             ).execute()
             
@@ -591,12 +596,26 @@ class GmailClient:
             new_history_id = history_response.get('historyId')
             
             if not changes:
-                print(f"✅ Incremental sync: No new emails since last sync. historyId: {new_history_id}")
-                return [], new_history_id
+                print(f"✅ Incremental sync: No changes since last sync. historyId: {new_history_id}")
+                return {
+                    'new_emails': [],
+                    'deleted_ids': [],
+                    'history_id': new_history_id
+                }
             
-            # Extract message IDs from history changes
+            # Extract message IDs from history changes (both additions and deletions)
             message_ids = set()
+            deleted_message_ids = set()
+            
             for change in changes:
+                # Track deletions
+                if 'messagesDeleted' in change:
+                    for msg_deleted in change['messagesDeleted']:
+                        message = msg_deleted.get('message', {})
+                        deleted_message_ids.add(message['id'])
+                        print(f"🗑️  Detected deleted message: {message['id'][:16]}...")
+                
+                # Track additions
                 if 'messagesAdded' in change:
                     for msg_added in change['messagesAdded']:
                         message = msg_added.get('message', {})
@@ -609,9 +628,16 @@ class GmailClient:
                             if 'INBOX' in message.get('labelIds', []):
                                 message_ids.add(message['id'])
             
-            if not message_ids:
-                print(f"✅ Incremental sync: {len(changes)} changes but no new inbox messages. historyId: {new_history_id}")
-                return [], new_history_id
+            if not message_ids and not deleted_message_ids:
+                print(f"✅ Incremental sync: {len(changes)} changes but no new inbox messages or deletions. historyId: {new_history_id}")
+                return {
+                    'new_emails': [],
+                    'deleted_ids': [],
+                    'history_id': new_history_id
+                }
+            
+            if deleted_message_ids:
+                print(f"🗑️  Found {len(deleted_message_ids)} deleted message(s)")
             
             print(f"🔄 Incremental sync: Found {len(message_ids)} new messages. Fetching details...")
             
@@ -677,18 +703,27 @@ class GmailClient:
             # Calculate actual API calls: 1 for history + batches
             num_batches = (len(message_ids_list) + BATCH_SIZE - 1) // BATCH_SIZE if message_ids_list else 0
             total_api_calls = 1 + num_batches  # 1 for history, rest for batches
-            print(f"✅ Incremental sync: Fetched {len(emails)} new emails with {total_api_calls} API calls. historyId: {new_history_id}")
+            print(f"✅ Incremental sync: Fetched {len(emails)} new emails, {len(deleted_message_ids)} deleted with {total_api_calls} API calls. historyId: {new_history_id}")
             if errors:
                 print(f"⚠️  {len(errors)} errors encountered (some emails may be missing)")
             
-            return emails, new_history_id
+            return {
+                'new_emails': emails,
+                'deleted_ids': list(deleted_message_ids),
+                'history_id': new_history_id
+            }
             
         except Exception as e:
             error_str = str(e)
             # If history is too old or invalid, fall back to full sync
             if 'historyId' in error_str or '404' in error_str or 'invalid' in error_str.lower():
                 print(f"⚠️  History ID expired or invalid, falling back to full sync: {error_str}")
-                return self.get_emails(max_results=10, unread_only=unread_only, start_history_id=None)
+                emails, history_id = self.get_emails(max_results=10, unread_only=unread_only, start_history_id=None)
+                return {
+                    'new_emails': emails,
+                    'deleted_ids': [],
+                    'history_id': history_id
+                }
             else:
                 print(f"Error in incremental sync: {error_str}")
                 raise
@@ -1203,6 +1238,157 @@ class GmailClient:
         
         except Exception as e:
             print(f"Error sending reply: {str(e)}")
+            return False
+    
+    def send_reply_with_attachments(self, to_email, subject, body, thread_id=None, attachments=None, send_as_email=None, cc=None, bcc=None):
+        """
+        Send a reply email with attachments
+        
+        Args:
+            to_email: Recipient email address
+            subject: Email subject
+            body: Email body
+            thread_id: Optional Gmail thread ID for threading
+            attachments: List of dicts with 'filename' and 'data' (base64 encoded)
+            send_as_email: Optional email address of send-as alias to use for signature
+            cc: Optional CC recipients
+            bcc: Optional BCC recipients
+        """
+        if not self.service:
+            return False
+        
+        try:
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.base import MIMEBase
+            from email import encoders
+            
+            # Create message container
+            message = MIMEMultipart()
+            message['to'] = to_email
+            message['subject'] = f"Re: {subject}" if not subject.startswith('Re:') else subject
+            
+            if cc:
+                message['cc'] = cc
+            if bcc:
+                message['bcc'] = bcc
+            
+            # Fetch and append signature
+            signature = self.get_signature(send_as_email=send_as_email)
+            if signature:
+                body = f"{body}\n\n{signature}"
+            
+            # Add body
+            body_part = MIMEText(body, 'plain')
+            message.attach(body_part)
+            
+            # Add attachments
+            if attachments:
+                for attachment in attachments:
+                    part = MIMEBase('application', 'octet-stream')
+                    # Decode base64 data
+                    file_data = base64.b64decode(attachment['data'])
+                    part.set_payload(file_data)
+                    encoders.encode_base64(part)
+                    part.add_header('Content-Disposition', f'attachment; filename="{attachment["filename"]}"')
+                    message.attach(part)
+            
+            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+            
+            send_message = {'raw': raw_message}
+            if thread_id:
+                send_message['threadId'] = thread_id
+            
+            result = self.service.users().messages().send(
+                userId='me',
+                body=send_message
+            ).execute()
+            
+            return True
+        
+        except Exception as e:
+            print(f"Error sending reply with attachments: {str(e)}")
+            return False
+    
+    def forward_email(self, to_email, subject, body, original_message_id, include_attachments=False, send_as_email=None):
+        """
+        Forward an email
+        
+        Args:
+            to_email: Recipient email address
+            subject: Email subject
+            body: Email body (your message)
+            original_message_id: Gmail message ID of original email
+            include_attachments: Whether to include original attachments
+            send_as_email: Optional email address of send-as alias to use for signature
+        """
+        if not self.service:
+            return False
+        
+        try:
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.base import MIMEBase
+            from email import encoders
+            
+            # Fetch original message
+            original = self.service.users().messages().get(
+                userId='me',
+                id=original_message_id,
+                format='full'
+            ).execute()
+            
+            # Create message container
+            message = MIMEMultipart()
+            message['to'] = to_email
+            message['subject'] = f"Fwd: {subject}" if not subject.startswith('Fwd:') else subject
+            
+            # Fetch and append signature
+            signature = self.get_signature(send_as_email=send_as_email)
+            
+            # Build forwarded message body
+            original_data = self._extract_message_data(original)
+            forwarded_body = f"{body}\n\n"
+            forwarded_body += "---------- Forwarded message ---------\n"
+            forwarded_body += f"From: {original_data.get('from', 'Unknown')}\n"
+            forwarded_body += f"Date: {original_data.get('date', '')}\n"
+            forwarded_body += f"Subject: {original_data.get('subject', 'No Subject')}\n"
+            forwarded_body += f"To: {original_data.get('to', '')}\n\n"
+            forwarded_body += original_data.get('body', '')
+            
+            if signature:
+                forwarded_body = f"{forwarded_body}\n\n{signature}"
+            
+            body_part = MIMEText(forwarded_body, 'plain')
+            message.attach(body_part)
+            
+            # Include attachments if requested
+            if include_attachments and original_data.get('attachments'):
+                for att in original_data['attachments']:
+                    # Fetch attachment data
+                    if att.get('attachmentId'):
+                        att_data = self.service.users().messages().attachments().get(
+                            userId='me',
+                            messageId=original_message_id,
+                            id=att['attachmentId']
+                        ).execute()
+                        
+                        file_data = base64.urlsafe_b64decode(att_data['data'])
+                        part = MIMEBase('application', 'octet-stream')
+                        part.set_payload(file_data)
+                        encoders.encode_base64(part)
+                        part.add_header('Content-Disposition', f'attachment; filename="{att.get("filename", "attachment")}"')
+                        message.attach(part)
+            
+            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+            
+            result = self.service.users().messages().send(
+                userId='me',
+                body={'raw': raw_message}
+            ).execute()
+            
+            return True
+        
+        except Exception as e:
+            print(f"Error forwarding email: {str(e)}")
             return False
     
     def send_email(self, to_email, subject, body, send_as_email=None, cc=None, bcc=None):
