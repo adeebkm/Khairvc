@@ -375,7 +375,8 @@ class GmailClient:
                     if not latest_history_id and 'historyId' in response:
                         latest_history_id = response['historyId']
                     
-                    email_data = self._extract_message_data(response)
+                    # Extract attachments for classification
+                    email_data = self._extract_message_data(response, extract_attachments=True)
                     if email_data:
                         emails.append(email_data)
             
@@ -533,7 +534,8 @@ class GmailClient:
                             print(f"⚠️  Error in batch request: {exception}")
                         errors.append(exception)
                     else:
-                        email_data = self._extract_message_data(response)
+                        # Extract attachments for classification
+                        email_data = self._extract_message_data(response, extract_attachments=True)
                         if email_data:
                             page_emails.append(email_data)
                 
@@ -685,7 +687,8 @@ class GmailClient:
                         print(f"⚠️  Error in batch request: {exception}")
                     errors.append(exception)
                 else:
-                    email_data = self._extract_message_data(response)
+                    # Extract attachments for classification
+                    email_data = self._extract_message_data(response, extract_attachments=True)
                     if email_data:
                         emails.append(email_data)
             
@@ -753,8 +756,14 @@ class GmailClient:
                 print(f"Error in incremental sync: {error_str}")
                 raise
     
-    def get_thread_messages(self, thread_id):
-        """Get all messages in a thread - optimized to avoid extra API calls"""
+    def get_thread_messages(self, thread_id, extract_attachments=False):
+        """Get all messages in a thread - optimized to avoid extra API calls
+        
+        Args:
+            thread_id: Gmail thread ID
+            extract_attachments: If False (default), skip PDF/attachment extraction for faster loading.
+                                Only set to True when classifying emails for the first time.
+        """
         if not self.service:
             return []
         
@@ -771,7 +780,7 @@ class GmailClient:
             
             # Extract data directly from thread response (no additional API calls!)
             for message in messages:
-                email_data = self._extract_message_data(message)
+                email_data = self._extract_message_data(message, extract_attachments=extract_attachments)
                 if email_data:
                     thread_emails.append(email_data)
             
@@ -785,10 +794,15 @@ class GmailClient:
             print(f"Error fetching thread messages: {str(e)}")
             return []
     
-    def _extract_message_data(self, message):
+    def _extract_message_data(self, message, extract_attachments=False):
         """
         Extract email data from a message object (no API call).
         This can be used when we already have the message data from threads.get() or messages.get()
+        
+        Args:
+            message: Gmail message object
+            extract_attachments: If False (default), only list attachment filenames without extracting content.
+                                If True, download and extract PDF/document text content.
         """
         try:
             message_id = message['id']
@@ -830,8 +844,12 @@ class GmailClient:
             # For classification and snippet we prefer plain text, fall back to HTML if needed
             body = body_plain or body_html or ''
             
-            # Extract and parse attachments
-            attachments_data = self._extract_attachments(message['payload'], message_id)
+            # Extract and parse attachments (conditionally)
+            if extract_attachments:
+                attachments_data = self._extract_attachments(message['payload'], message_id)
+            else:
+                # Just list attachment filenames without extracting content (much faster!)
+                attachments_data = self._list_attachments_only(message['payload'])
             attachment_texts = []
             pdf_attachments = []
             
@@ -977,6 +995,44 @@ class GmailClient:
         """
         body_plain, body_html = self._get_email_bodies(payload)
         return body_plain or body_html or ""
+    
+    def _list_attachments_only(self, payload):
+        """
+        List attachments without downloading or extracting content (much faster!)
+        Used when viewing emails to avoid expensive PDF extraction.
+        """
+        attachments = []
+        
+        def walk_parts(parts):
+            """Recursively walk through email parts to find attachments"""
+            for part in parts:
+                mime_type = part.get('mimeType', '')
+                filename = part.get('filename', '')
+                body = part.get('body', {})
+                attachment_id = body.get('attachmentId')
+                size = body.get('size', 0)
+                
+                # Skip if not an attachment or no filename
+                if not attachment_id or not filename:
+                    # Check nested parts
+                    if 'parts' in part:
+                        walk_parts(part['parts'])
+                    continue
+                
+                # Just add metadata without downloading
+                attachments.append({
+                    'filename': filename,
+                    'mime_type': mime_type,
+                    'size': size,
+                    'text': None,  # No text extraction
+                    'has_text': False
+                })
+        
+        # Start walking from payload
+        if 'parts' in payload:
+            walk_parts(payload['parts'])
+        
+        return attachments
     
     def _extract_attachments(self, payload, message_id):
         """Extract attachments from email payload and parse text content"""

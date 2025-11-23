@@ -3555,7 +3555,8 @@ def get_thread(thread_id):
         if not gmail:
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
-        thread_emails = gmail.get_thread_messages(thread_id)
+        # Don't extract attachments when viewing (much faster - no PDF downloads)
+        thread_emails = gmail.get_thread_messages(thread_id, extract_attachments=False)
         
         return jsonify({
             'success': True,
