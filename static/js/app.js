@@ -104,8 +104,9 @@ async function autoFetchNewEmails() {
     }
     
     try {
-        // Use incremental sync - only fetch new emails (no force_full_sync)
-        const response = await fetch(`/api/emails?max=200&show_spam=true`);
+        // Poll database for new emails (Pub/Sub syncs to DB, we just need to check DB)
+        // Use db_only=true to avoid triggering Gmail API calls (Pub/Sub handles that)
+        const response = await fetch(`/api/emails?max=200&show_spam=true&db_only=true`);
         const data = await response.json();
         
         // Handle rate limit errors
@@ -124,13 +125,32 @@ async function autoFetchNewEmails() {
             
             // Handle new emails
             if (data.emails && data.emails.length > 0) {
-                // Check if these are actually new emails
-                const existingThreadIds = new Set(emailCache.data.map(e => e.thread_id));
-                const uniqueNewEmails = data.emails.filter(e => !existingThreadIds.has(e.thread_id));
+                // Check if these are actually new emails by comparing message_id (not thread_id)
+                // This catches replies on existing threads as new emails
+                const existingMessageIds = new Set(emailCache.data.map(e => e.id || e.message_id));
+                const uniqueNewEmails = data.emails.filter(e => {
+                    const msgId = e.id || e.message_id;
+                    return msgId && !existingMessageIds.has(msgId);
+                });
                 
                 if (uniqueNewEmails.length > 0) {
-                    // Add new emails to cache
-                    emailCache.data = [...emailCache.data, ...uniqueNewEmails];
+                    console.log(`📧 Auto-fetch: Found ${uniqueNewEmails.length} new email(s) in database`);
+                    
+                    // Merge new emails with existing (replace duplicates, add new ones)
+                    const existingMap = new Map(emailCache.data.map(e => [e.id || e.message_id, e]));
+                    uniqueNewEmails.forEach(email => {
+                        const msgId = email.id || email.message_id;
+                        if (msgId) {
+                            existingMap.set(msgId, email);
+                        }
+                    });
+                    
+                    // Update cache with merged emails (sorted by date, newest first)
+                    emailCache.data = Array.from(existingMap.values()).sort((a, b) => {
+                        const dateA = parseInt(a.date) || 0;
+                        const dateB = parseInt(b.date) || 0;
+                        return dateB - dateA; // Newest first
+                    });
                     emailCache.timestamp = Date.now();
                     saveEmailCacheToStorage(); // Save to localStorage
                     allEmails = emailCache.data;
@@ -141,10 +161,12 @@ async function autoFetchNewEmails() {
                     // Show notification
                     showAlert('success', `📧 ${uniqueNewEmails.length} new email${uniqueNewEmails.length !== 1 ? 's' : ''} detected!`);
                     
-                    console.log(`✅ Auto-fetch: Detected and loaded ${uniqueNewEmails.length} new emails`);
+                    console.log(`✅ Auto-fetch: Updated UI with ${uniqueNewEmails.length} new email(s), total: ${allEmails.length}`);
                 } else {
-                    console.log(`ℹ️  Auto-fetch: No new emails detected`);
+                    console.log(`ℹ️  Auto-fetch: No new emails detected (${data.emails.length} total in database)`);
                 }
+            } else {
+                console.log(`ℹ️  Auto-fetch: No emails in database yet`);
             }
         }
     } catch (error) {
@@ -245,19 +267,20 @@ async function deleteEmail(messageId, threadId) {
 
 // Start/stop auto-fetch polling
 function toggleAutoFetch(enabled) {
-    // Auto-fetch disabled - using Pub/Sub for real-time notifications instead
-    // This function is kept for compatibility but does nothing
-    autoFetchEnabled = false;
+    // Auto-fetch enabled - polls database for new emails synced by Pub/Sub
+    // Pub/Sub syncs emails to database, but frontend needs to poll to update UI
+    autoFetchEnabled = true;
     
-    // Stop any existing polling
+    // Start polling every 30 seconds to check for new emails in database
     if (autoFetchInterval) {
         clearInterval(autoFetchInterval);
-        autoFetchInterval = null;
     }
     
-    console.log('ℹ️  Auto-fetch disabled - using Pub/Sub for real-time email notifications');
+    // Poll immediately, then every 30 seconds
+    autoFetchNewEmails();
+    autoFetchInterval = setInterval(autoFetchNewEmails, 30 * 1000); // 30 seconds
     
-    // Pub/Sub handles new email notifications automatically
+    console.log('✅ Auto-fetch enabled - polling database every 30 seconds for new emails synced by Pub/Sub');
     // No polling needed - Pub/Sub will trigger background sync when new emails arrive
 }
 
