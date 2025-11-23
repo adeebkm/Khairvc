@@ -762,7 +762,7 @@ class GmailClient:
             history_response = self.service.users().history().list(
                 userId='me',
                 startHistoryId=start_history_id,
-                historyTypes=['messageAdded', 'messageDeleted', 'labelsAdded', 'labelsRemoved'],  # Track label changes too!
+                historyTypes=['messageAdded', 'messageDeleted', 'labelAdded', 'labelRemoved'],  # Fixed: labelAdded (not labelsAdded)
                 labelId='INBOX'  # Only inbox messages
             ).execute()
             
@@ -792,8 +792,8 @@ class GmailClient:
                         print(f"🗑️  Detected deleted message: {message['id'][:16]}...")
                 
                 # Track label additions (e.g., marking as unread in Gmail)
-                if 'labelsAdded' in change:
-                    for label_change in change['labelsAdded']:
+                if 'labelAdded' in change:
+                    for label_change in change['labelAdded']:
                         message = label_change.get('message', {})
                         message_id = message.get('id')
                         label_ids = message.get('labelIds', [])
@@ -809,8 +809,8 @@ class GmailClient:
                                     label_changes[message_id]['label_ids'].append('UNREAD')
                 
                 # Track label removals (e.g., marking as read in Gmail)
-                if 'labelsRemoved' in change:
-                    for label_change in change['labelsRemoved']:
+                if 'labelRemoved' in change:
+                    for label_change in change['labelRemoved']:
                         message = label_change.get('message', {})
                         message_id = message.get('id')
                         label_ids = message.get('labelIds', [])
