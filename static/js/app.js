@@ -3204,35 +3204,50 @@ function renderThreadMessage(email, isFirst = false) {
     const hasHtmlBody = !!(email.body_html || email.bodyHtml);
     const plainBodyHtml = formatEmailBody(email.body || email.snippet || '');
     
-    // Handle attachments - use message_id for each attachment
+    // Handle attachments - download on-demand when clicked
     let attachmentsHtml = '';
     const attachments = email.attachments || [];
     if (attachments.length > 0) {
         const attHtml = attachments.map(att => {
             const filename = att.filename || 'attachment';
-            const mimeType = att.mime_type || '';
-            // URL encode the filename for the URL
+            const mimeType = att.mime_type || 'application/octet-stream';
+            const attachmentId = att.attachment_id || '';
+            const messageId = att.message_id || email.id;
+            
+            // Skip if no attachment_id (shouldn't happen)
+            if (!attachmentId) {
+                return '';
+            }
+            
+            // Build download URL with query parameters
             const encodedFilename = encodeURIComponent(filename);
+            const encodedMimeType = encodeURIComponent(mimeType);
+            const url = `/api/attachment/${escapeHtml(messageId)}/${escapeHtml(attachmentId)}?filename=${encodedFilename}&mime_type=${encodedMimeType}`;
+            
+            // Format file size if available
+            const sizeText = att.size ? ` (${formatFileSize(att.size)})` : '';
             
             if (mimeType === 'application/pdf') {
-                // Use message_id instead of thread_id so each message's attachments work correctly
-                return `<a href="/api/attachment/${escapeHtml(email.id)}/${encodedFilename}" target="_blank" class="attachment-link" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; color: var(--primary-color); text-decoration: none; margin-right: 8px; margin-bottom: 8px;">📎 ${escapeHtml(filename)}</a>`;
+                // PDF - opens in new tab for browser viewing
+                return `<a href="${url}" target="_blank" class="attachment-link" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: #FEF3F2; border: 1px solid #FEE4E2; border-radius: 8px; color: #B42318; text-decoration: none; margin-right: 8px; margin-bottom: 8px; font-weight: 500;">
+                    📄 ${escapeHtml(filename)}${sizeText}
+                </a>`;
             } else if (mimeType.startsWith('image/')) {
-                // Inline preview for image attachments
-                const url = `/api/attachment/${escapeHtml(email.id)}/${encodedFilename}`;
+                // Image - inline preview with download link
                 return `
                     <a href="${url}" target="_blank" class="attachment-link" style="display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; text-decoration: none; margin-right: 8px; margin-bottom: 8px;">
-                        <span style="color: var(--text-secondary); font-size: 12px; margin-bottom: 4px;">📎 ${escapeHtml(filename)}</span>
-                        <img src="${url}" alt="${escapeHtml(filename)}" style="max-width: 220px; max-height: 160px; border-radius: 6px; display: block; object-fit: contain; background: #fff;" />
+                        <span style="color: var(--text-secondary); font-size: 12px; margin-bottom: 4px;">📎 ${escapeHtml(filename)}${sizeText}</span>
+                        <img src="${url}" alt="${escapeHtml(filename)}" style="max-width: 220px; max-height: 160px; border-radius: 6px; display: block; object-fit: contain; background: #fff;" loading="lazy" />
                     </a>
                 `;
             } else {
-                // Generic downloadable attachment
-                const url = `/api/attachment/${escapeHtml(email.id)}/${encodedFilename}`;
-                return `<a href="${url}" target="_blank" class="attachment-link" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-secondary); text-decoration: none; margin-right: 8px; margin-bottom: 8px;">📎 ${escapeHtml(filename)}</a>`;
+                // Generic attachment - download
+                return `<a href="${url}" download="${encodedFilename}" class="attachment-link" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-secondary); text-decoration: none; margin-right: 8px; margin-bottom: 8px;">
+                    📎 ${escapeHtml(filename)}${sizeText}
+                </a>`;
             }
-        }).join('');
-        attachmentsHtml = `<div style="margin-bottom: 16px; margin-top: 12px;"><strong style="color: var(--text-primary); font-size: 13px;">Attachments:</strong><div style="margin-top: 8px;">${attHtml}</div></div>`;
+        }).filter(html => html !== '').join('');
+        attachmentsHtml = `<div style="margin-bottom: 16px; margin-top: 12px;"><strong style="color: var(--text-primary); font-size: 13px;">Attachments:</strong><div style="margin-top: 8px; display: flex; flex-wrap: wrap;">${attHtml}</div></div>`;
     }
     
     const bodySection = hasHtmlBody
@@ -5267,3 +5282,81 @@ document.addEventListener('keydown', function(event) {
         }
     }
 });
+
+// ============================================
+// User Dropdown Functions
+// ============================================
+
+function toggleUserDropdown() {
+    const dropdown = document.getElementById('userDropdownMenu');
+    if (!dropdown) return;
+    
+    if (dropdown.style.display === 'none' || !dropdown.style.display) {
+        dropdown.style.display = 'block';
+    } else {
+        dropdown.style.display = 'none';
+    }
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(event) {
+    const dropdown = document.getElementById('userDropdownMenu');
+    const userMenu = document.querySelector('.nav-user-menu');
+    
+    if (dropdown && userMenu) {
+        // Check if click is outside both the dropdown and user avatar
+        if (!userMenu.contains(event.target)) {
+            dropdown.style.display = 'none';
+        }
+    }
+});
+
+// ============================================
+// Delete Account Function
+// ============================================
+
+async function confirmDeleteAccount() {
+    const confirmed = confirm(
+        '⚠️ WARNING: This will permanently delete your account and ALL your data.\n\n' +
+        'This includes:\n' +
+        '- All email classifications\n' +
+        '- All deal flow data\n' +
+        '- All settings and preferences\n' +
+        '- Gmail connection\n\n' +
+        'This action CANNOT be undone.\n\n' +
+        'Are you absolutely sure you want to delete your account?'
+    );
+    
+    if (!confirmed) return;
+    
+    const doubleConfirm = confirm(
+        '⚠️ FINAL CONFIRMATION\n\n' +
+        'Type confirmation: Are you 100% sure you want to permanently delete your account and all data?\n\n' +
+        'Click OK to DELETE EVERYTHING or Cancel to keep your account.'
+    );
+    
+    if (!doubleConfirm) return;
+    
+    try {
+        const response = await fetch('/api/user/delete', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showAlert('success', 'Account deleted successfully. Redirecting...');
+            setTimeout(() => {
+                window.location.href = '/login';
+            }, 1500);
+        } else {
+            showAlert('error', data.error || 'Failed to delete account');
+        }
+    } catch (error) {
+        console.error('Delete account error:', error);
+        showAlert('error', 'Failed to delete account. Please try again.');
+    }
+}

@@ -3570,6 +3570,49 @@ def get_thread(thread_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/attachment/<message_id>/<attachment_id>')
+@login_required
+def download_attachment(message_id, attachment_id):
+    """
+    Download an attachment on-demand (no extraction).
+    For PDFs, serves inline so browser can display them.
+    """
+    if not current_user.gmail_token:
+        return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
+    
+    try:
+        gmail = get_user_gmail_client(current_user)
+        if not gmail:
+            return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
+        
+        # Download the attachment
+        file_data = gmail.download_attachment(message_id, attachment_id)
+        if not file_data:
+            return jsonify({'success': False, 'error': 'Failed to download attachment'}), 500
+        
+        # Get filename and mime_type from request args (passed from frontend)
+        filename = request.args.get('filename', 'attachment')
+        mime_type = request.args.get('mime_type', 'application/octet-stream')
+        
+        # Create response with the file
+        from flask import make_response
+        response = make_response(file_data)
+        response.headers['Content-Type'] = mime_type
+        
+        # For PDFs, set inline so browser displays them; for others, download
+        if mime_type == 'application/pdf':
+            response.headers['Content-Disposition'] = f'inline; filename="{filename}"'
+        else:
+            response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        return response
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/config')
 @login_required
 def get_config():
@@ -4303,6 +4346,69 @@ def user_profile():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/api/user/delete', methods=['DELETE'])
+@login_required
+def delete_user_account():
+    """
+    Permanently delete user account and all associated data.
+    This includes:
+    - User record
+    - Gmail tokens
+    - Email classifications
+    - Deal flow data
+    """
+    try:
+        user_id = current_user.id
+        user_email = current_user.email
+        
+        print(f"🗑️  Deleting account for user {user_id} ({user_email})")
+        
+        # Delete all associated data (cascades will handle most of this, but being explicit)
+        # 1. Delete deals
+        deals_count = Deal.query.filter_by(user_id=user_id).delete()
+        print(f"   Deleted {deals_count} deal records")
+        
+        # 2. Delete email classifications
+        classifications_count = EmailClassification.query.filter_by(user_id=user_id).delete()
+        print(f"   Deleted {classifications_count} email classifications")
+        
+        # 3. Delete Gmail token
+        token_count = GmailToken.query.filter_by(user_id=user_id).delete()
+        print(f"   Deleted {token_count} Gmail token")
+        
+        # 4. Finally, delete the user
+        user = User.query.get(user_id)
+        if user:
+            db.session.delete(user)
+            db.session.commit()
+            print(f"   ✅ User {user_id} deleted successfully")
+            
+            # Logout the user
+            logout_user()
+            session.clear()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Account deleted successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'User not found'
+            }), 404
+            
+    except Exception as e:
+        db.session.rollback()
+        print(f"   ❌ Error deleting user account: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': 'Failed to delete account. Please try again or contact support.'
+        }), 500
+
 
 if __name__ == '__main__':
     print("=" * 60)

@@ -848,8 +848,8 @@ class GmailClient:
             if extract_attachments:
                 attachments_data = self._extract_attachments(message['payload'], message_id)
             else:
-                # Just list attachment filenames without extracting content (much faster!)
-                attachments_data = self._list_attachments_only(message['payload'])
+                # Just list attachment metadata for on-demand download (much faster!)
+                attachments_data = self._list_attachments_only(message['payload'], message_id)
             attachment_texts = []
             pdf_attachments = []
             
@@ -996,10 +996,11 @@ class GmailClient:
         body_plain, body_html = self._get_email_bodies(payload)
         return body_plain or body_html or ""
     
-    def _list_attachments_only(self, payload):
+    def _list_attachments_only(self, payload, message_id):
         """
         List attachments without downloading or extracting content (much faster!)
         Used when viewing emails to avoid expensive PDF extraction.
+        Includes attachment_id for on-demand downloading.
         """
         attachments = []
         
@@ -1019,11 +1020,13 @@ class GmailClient:
                         walk_parts(part['parts'])
                     continue
                 
-                # Just add metadata without downloading
+                # Add metadata with attachment_id for on-demand download
                 attachments.append({
                     'filename': filename,
                     'mime_type': mime_type,
                     'size': size,
+                    'attachment_id': attachment_id,  # For downloading later
+                    'message_id': message_id,  # For downloading later
                     'text': None,  # No text extraction
                     'has_text': False
                 })
@@ -1689,6 +1692,35 @@ class GmailClient:
             return profile
         except Exception as e:
             print(f"Error getting Gmail profile: {str(e)}")
+            return None
+    
+    def download_attachment(self, message_id, attachment_id):
+        """
+        Download a specific attachment on-demand (no extraction).
+        Returns the raw file data for serving to the user.
+        
+        Args:
+            message_id: Gmail message ID
+            attachment_id: Gmail attachment ID
+            
+        Returns:
+            bytes: Raw attachment data, or None if failed
+        """
+        if not self.service:
+            return None
+        
+        try:
+            attachment = self.service.users().messages().attachments().get(
+                userId='me',
+                messageId=message_id,
+                id=attachment_id
+            ).execute()
+            
+            # Decode attachment data
+            file_data = base64.urlsafe_b64decode(attachment['data'])
+            return file_data
+        except Exception as e:
+            print(f"Error downloading attachment: {str(e)}")
             return None
     
     def setup_pubsub_watch(self, topic_name, user_id=None):
