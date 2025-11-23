@@ -1368,6 +1368,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         // On error, try loading cache as fallback
         loadEmailCacheFromStorage();
         loadStarredCacheFromStorage(); // Load starred emails cache
+        loadSentCacheFromStorage(); // Load sent emails cache
+        loadDraftsCacheFromStorage(); // Load drafts cache
         if (emailCache.data.length > 0 && emailCache.timestamp) {
             const cacheAge = Date.now() - emailCache.timestamp;
             const isFresh = cacheAge < emailCache.maxAge;
@@ -1617,21 +1619,26 @@ function switchTab(tabName) {
         emailList.style.display = 'block';
         dealFlowTable.style.display = 'none';
         
-        // Show cached data immediately if available
+        // Show cached data immediately if available (instant load)
         if (sentEmailsCache.length > 0) {
+            console.log(`⚡ Showing ${sentEmailsCache.length} sent emails from cache (instant)`);
             allEmails = sentEmailsCache;
             applyFilters();
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
                 const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
-                emailCountEl.textContent = `${sentEmailsCache.length} sent email${sentEmailsCache.length !== 1 ? 's' : ''} (cached)${searchText}`;
+                emailCountEl.textContent = `${sentEmailsCache.length} sent email${sentEmailsCache.length !== 1 ? 's' : ''}${searchText}`;
             }
         } else {
             // Show empty state immediately
             displayEmails([]);
+            const emailCountEl = document.getElementById('emailCount');
+            if (emailCountEl) {
+                emailCountEl.textContent = 'Loading sent emails...';
+            }
         }
         
-        // Fetch fresh data in background
+        // Fetch fresh data in background (non-blocking)
         fetchSentEmails();
     } else if (tabName === 'starred') {
         emailList.style.display = 'block';
@@ -1678,21 +1685,26 @@ function switchTab(tabName) {
         emailList.style.display = 'block';
         dealFlowTable.style.display = 'none';
         
-        // Show cached data immediately if available
+        // Show cached data immediately if available (instant load)
         if (draftsCache.length > 0) {
+            console.log(`⚡ Showing ${draftsCache.length} drafts from cache (instant)`);
             allEmails = draftsCache;
             applyFilters();
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
                 const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
-                emailCountEl.textContent = `${draftsCache.length} draft${draftsCache.length !== 1 ? 's' : ''} (cached)${searchText}`;
+                emailCountEl.textContent = `${draftsCache.length} draft${draftsCache.length !== 1 ? 's' : ''}${searchText}`;
             }
         } else {
             // Show empty state immediately
             displayEmails([]);
+            const emailCountEl = document.getElementById('emailCount');
+            if (emailCountEl) {
+                emailCountEl.textContent = 'Loading drafts...';
+            }
         }
         
-        // Fetch fresh data in background
+        // Fetch fresh data in background (non-blocking)
         fetchDrafts();
     } else {
         emailList.style.display = 'block';
@@ -1779,8 +1791,9 @@ async function fetchSentEmails() {
                 is_sent: true
             }));
             
-            // Update cache
+            // Update cache (both memory and localStorage)
             sentEmailsCache = sentEmails;
+            saveSentCacheToStorage();
             
             // Only update UI if we're still on the sent tab
             if (currentTab === 'sent') {
@@ -1807,6 +1820,28 @@ async function fetchSentEmails() {
     }
 }
 
+function saveSentCacheToStorage() {
+    try {
+        localStorage.setItem('sentEmailsCache', JSON.stringify(sentEmailsCache));
+        console.log(`💾 Saved ${sentEmailsCache.length} sent emails to localStorage`);
+    } catch (error) {
+        console.error('Error saving sent cache:', error);
+    }
+}
+
+function loadSentCacheFromStorage() {
+    try {
+        const cached = localStorage.getItem('sentEmailsCache');
+        if (cached) {
+            sentEmailsCache = JSON.parse(cached);
+            console.log(`⚡ Loaded ${sentEmailsCache.length} sent emails from localStorage`);
+        }
+    } catch (error) {
+        console.error('Error loading sent cache:', error);
+        sentEmailsCache = [];
+    }
+}
+
 // Fetch drafts
 async function fetchDrafts() {
     try {
@@ -1821,8 +1856,9 @@ async function fetchDrafts() {
                 is_draft: true
             }));
             
-            // Update cache
+            // Update cache (both memory and localStorage)
             draftsCache = drafts;
+            saveDraftsCacheToStorage();
             
             // Only update UI if we're still on the drafts tab
             if (currentTab === 'drafts') {
@@ -1846,6 +1882,28 @@ async function fetchDrafts() {
         if (currentTab === 'drafts') {
             displayEmails([]);
         }
+    }
+}
+
+function saveDraftsCacheToStorage() {
+    try {
+        localStorage.setItem('draftsCache', JSON.stringify(draftsCache));
+        console.log(`💾 Saved ${draftsCache.length} drafts to localStorage`);
+    } catch (error) {
+        console.error('Error saving drafts cache:', error);
+    }
+}
+
+function loadDraftsCacheFromStorage() {
+    try {
+        const cached = localStorage.getItem('draftsCache');
+        if (cached) {
+            draftsCache = JSON.parse(cached);
+            console.log(`⚡ Loaded ${draftsCache.length} drafts from localStorage`);
+        }
+    } catch (error) {
+        console.error('Error loading drafts cache:', error);
+        draftsCache = [];
     }
 }
 
