@@ -983,6 +983,35 @@ def oauth2callback():
         is_signup = session.get('oauth_signup', False)
         session.pop('oauth_signup', None)
         
+        # If signup flag is missing (session lost), check if user exists by email/google_id
+        # This handles the case where session doesn't persist through OAuth redirect
+        if not is_signup and not current_user.is_authenticated:
+            try:
+                from googleapiclient.discovery import build
+                userinfo_service = build('oauth2', 'v2', credentials=creds)
+                user_info = userinfo_service.userinfo().get().execute()
+                email = user_info.get('email')
+                google_id = user_info.get('id')
+                
+                # Check if user exists
+                existing_user = None
+                if google_id:
+                    existing_user = User.query.filter_by(google_id=google_id).first()
+                if not existing_user and email:
+                    existing_user = User.query.filter_by(email=email).first()
+                
+                if not existing_user:
+                    # User doesn't exist - treat as signup
+                    print(f"🔍 User not found (email: {email}, google_id: {google_id}), treating as signup")
+                    return handle_google_signup_callback(creds)
+                else:
+                    # User exists but not logged in - redirect to login
+                    print(f"🔍 User exists but not authenticated, redirecting to login")
+                    return redirect(url_for('login'))
+            except Exception as check_error:
+                print(f"⚠️  Error checking if user exists: {check_error}")
+                # If we can't check, fall through to regular flow
+        
         if is_signup:
             # Handle Google signup - create account and connect Gmail
             return handle_google_signup_callback(creds)
