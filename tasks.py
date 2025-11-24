@@ -1301,7 +1301,24 @@ def classify_bidirectional(self, user_id, batch_size=50, direction='forward'):
         batch_size: Number of emails to process in this batch
         direction: 'forward' (oldest→newest) or 'backward' (newest→oldest)
     """
-    from app import app
+    # Import inside function to avoid circular imports
+    # Try multiple import strategies for Railway worker
+    import os
+    try:
+        from app import app, db
+    except ImportError:
+        # Fallback: add current directory to path and try again
+        import sys
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+        if '/app' not in sys.path:
+            sys.path.insert(0, '/app')
+        from app import app, db
+    
+    from models import EmailClassification
+    from email_classifier import EmailClassifier
+    from openai_client import OpenAIClient
     
     with app.app_context():
         try:
