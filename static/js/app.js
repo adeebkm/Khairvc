@@ -1526,11 +1526,20 @@ function switchTab(tabName) {
                 emailCountEl.textContent = `${sentEmailsCache.length} sent email${sentEmailsCache.length !== 1 ? 's' : ''}${searchText}`;
             }
         } else {
-            // Show empty state immediately
-            displayEmails([]);
+            // Show loading indicator with nice message
+            const emailList = document.getElementById('emailList');
+            if (emailList) {
+                emailList.innerHTML = `
+                    <div class="empty-state" style="text-align: center; padding: 60px 20px;">
+                        <div class="spinner" style="width: 40px; height: 40px; margin: 0 auto 20px; border: 3px solid rgba(99, 102, 241, 0.1); border-top-color: #6366f1; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                        <p style="font-size: 16px; color: var(--text-primary); margin-bottom: 8px; font-weight: 500;">Loading your sent emails...</p>
+                        <p style="font-size: 14px; color: var(--text-secondary);">Just a moment, we're gathering them for you ✨</p>
+                    </div>
+                `;
+            }
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
-                emailCountEl.textContent = 'Loading sent emails...';
+                emailCountEl.textContent = 'Loading...';
             }
         }
         
@@ -1731,7 +1740,15 @@ async function fetchSentEmails() {
         } else {
             console.error('❌ [FRONTEND] Error fetching sent emails:', data.error);
             if (currentTab === 'sent') {
-                displayEmails([]);
+                const emailList = document.getElementById('emailList');
+                if (emailList) {
+                    emailList.innerHTML = `
+                        <div class="empty-state" style="text-align: center; padding: 60px 20px;">
+                            <p style="font-size: 16px; color: var(--text-primary); margin-bottom: 8px; font-weight: 500;">Unable to load sent emails</p>
+                            <p style="font-size: 14px; color: var(--text-secondary);">${data.error || 'Please try refreshing the page'}</p>
+                        </div>
+                    `;
+                }
                 showToast(`Failed to load sent emails: ${data.error || 'Unknown error'}`, 'error');
             }
         }
@@ -1739,7 +1756,15 @@ async function fetchSentEmails() {
         console.error('❌ [FRONTEND] Exception fetching sent emails:', error);
         console.error('❌ [FRONTEND] Error stack:', error.stack);
         if (currentTab === 'sent') {
-            displayEmails([]);
+            const emailList = document.getElementById('emailList');
+            if (emailList) {
+                emailList.innerHTML = `
+                    <div class="empty-state" style="text-align: center; padding: 60px 20px;">
+                        <p style="font-size: 16px; color: var(--text-primary); margin-bottom: 8px; font-weight: 500;">Unable to load sent emails</p>
+                        <p style="font-size: 14px; color: var(--text-secondary);">Please try refreshing the page</p>
+                    </div>
+                `;
+            }
             showToast(`Failed to load sent emails: ${error.message}`, 'error');
         }
     }
