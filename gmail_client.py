@@ -29,15 +29,7 @@ except ImportError:
     DOCX_AVAILABLE = False
     print("Note: python-docx not installed. Word documents won't be parsed.")
 
-# Moonshot API for better PDF extraction (with OCR support)
-try:
-    from openai import OpenAI as MoonshotClient
-    from pathlib import Path
-    import tempfile
-    MOONSHOT_AVAILABLE = True
-except ImportError:
-    MOONSHOT_AVAILABLE = False
-    print("Note: OpenAI SDK not available. Moonshot PDF extraction won't work.")
+# Moonshot removed - using PyPDF2 only for PDF extraction
 
 
 # Gmail API scopes
@@ -1313,77 +1305,8 @@ class GmailClient:
         
         return attachments
     
-    def _get_moonshot_api_key(self):
-        """Get Moonshot API key from AWS Secrets Manager (if available) or environment variables"""
-        # First try AWS Secrets Manager (like Lambda does)
-        try:
-            aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
-            aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-            aws_region = os.getenv('AWS_REGION', 'us-east-1')
-            
-            if aws_access_key and aws_secret_key:
-                import boto3
-                secrets_client = boto3.client(
-                    'secretsmanager',
-                    aws_access_key_id=aws_access_key,
-                    aws_secret_access_key=aws_secret_key,
-                    region_name=aws_region
-                )
-                
-                secret_name = os.getenv('OPENAI_SECRET_NAME', 'openai-api-key-test')
-                try:
-                    response = secrets_client.get_secret_value(SecretId=secret_name)
-                    secret = json.loads(response['SecretString'])
-                    api_key = secret.get('api_key') or secret.get('MOONSHOT_API_KEY') or secret.get('OPENAI_API_KEY')
-                    if api_key:
-                        print(f"   🔑 Retrieved Moonshot API key from AWS Secrets Manager")
-                        return api_key
-                except Exception as secrets_error:
-                    print(f"   ⚠️  Could not retrieve from Secrets Manager: {str(secrets_error)[:100]}")
-        except Exception as e:
-            # AWS not available or not configured, fall through to environment variables
-            pass
-        
-        # Fallback to environment variables (Railway)
-        moonshot_key = os.getenv('MOONSHOT_API_KEY') or os.getenv('OPENAI_API_KEY')
-        if moonshot_key:
-            # Log first few characters for debugging (don't log full key for security)
-            key_preview = moonshot_key[:10] + "..." if len(moonshot_key) > 10 else moonshot_key[:len(moonshot_key)]
-            print(f"   🔑 Using Moonshot API key from environment variables (key starts with: {key_preview})")
-            # Validate key format
-            if not moonshot_key.startswith('sk-'):
-                print(f"   ⚠️  WARNING: API key doesn't start with 'sk-' - may be invalid")
-        else:
-            print(f"   ❌ No Moonshot API key found in environment variables (checked MOONSHOT_API_KEY and OPENAI_API_KEY)")
-        return moonshot_key
-    
     def _extract_pdf_text(self, file_data, filename):
-        """Extract text from PDF file using Moonshot (if enabled) or PyPDF2 (fallback)"""
-        use_moonshot = os.getenv('USE_MOONSHOT', 'false').lower() == 'true'
-        
-        # Try Moonshot first if enabled (better extraction with OCR)
-        if use_moonshot and MOONSHOT_AVAILABLE:
-            try:
-                moonshot_key = self._get_moonshot_api_key()
-                if moonshot_key:
-                    # Check if key looks valid (starts with 'sk-')
-                    if moonshot_key.startswith('sk-'):
-                        print(f"📄 Using Moonshot to extract PDF content: {filename}")
-                        result = self._extract_pdf_with_moonshot(file_data, filename, moonshot_key)
-                        if result:
-                            return result
-                        # If Moonshot failed, fall through to PyPDF2
-                        print(f"⚠️  Moonshot extraction returned None, falling back to PyPDF2")
-                    else:
-                        print(f"⚠️  Moonshot API key format invalid (should start with 'sk-'), falling back to PyPDF2")
-                else:
-                    print(f"⚠️  Moonshot enabled but API key not found (checked Secrets Manager and environment), falling back to PyPDF2")
-            except Exception as e:
-                print(f"⚠️  Moonshot PDF extraction failed: {str(e)}, falling back to PyPDF2")
-                import traceback
-                traceback.print_exc()
-        
-        # Fallback to PyPDF2 (production or if Moonshot fails)
+        """Extract text from PDF using PyPDF2 only"""
         if not PDF_AVAILABLE:
             return None
         
@@ -1401,172 +1324,13 @@ class GmailClient:
                     continue
             
             if text_parts:
-                return '\n\n'.join(text_parts)
+                full_text = '\n\n'.join(text_parts)
+                # Limit to first 1500 characters
+                return full_text[:1500] + ('...' if len(full_text) > 1500 else '')
         except Exception as e:
             print(f"Note: Could not parse PDF {filename}: {str(e)}")
         
         return None
-    
-    def _cleanup_moonshot_files(self, api_key, keep_count=100):
-        """Automatically clean up old Moonshot files to stay under 1000 file limit"""
-        try:
-            import requests
-            
-            headers = {
-                "Authorization": f"Bearer {api_key}"
-            }
-            base_url = "https://api.moonshot.ai/v1"
-            
-            # List all files
-            response = requests.get(f"{base_url}/files", headers=headers)
-            
-            if response.status_code != 200:
-                print(f"⚠️  [MOONSHOT] Failed to list files: {response.status_code}")
-                return 0
-            
-            files = response.json().get('data', [])
-            
-            if len(files) <= keep_count:
-                return 0  # No cleanup needed
-            
-            print(f"🧹 [MOONSHOT] Found {len(files)} files, cleaning up to keep {keep_count} most recent...")
-            
-            # Sort by creation time (oldest first)
-            # Files have 'created_at' timestamp (Unix timestamp)
-            files_sorted = sorted(files, key=lambda x: x.get('created_at', 0))
-            
-            # Delete oldest files
-            files_to_delete = files_sorted[:-keep_count]
-            
-            deleted_count = 0
-            for file_obj in files_to_delete:
-                try:
-                    file_id = file_obj.get('id')
-                    delete_response = requests.delete(
-                        f"{base_url}/files/{file_id}",
-                        headers=headers
-                    )
-                    
-                    if delete_response.status_code in [200, 204]:
-                        deleted_count += 1
-                        if deleted_count % 50 == 0:
-                            print(f"  🗑️  Deleted {deleted_count}/{len(files_to_delete)} old files...")
-                    else:
-                        print(f"  ⚠️  Failed to delete file {file_id}: {delete_response.status_code}")
-                except Exception as delete_error:
-                    print(f"  ⚠️  Error deleting file: {delete_error}")
-                    continue
-            
-            print(f"✅ [MOONSHOT] Cleanup complete! Deleted {deleted_count} files, kept {keep_count}")
-            return deleted_count
-            
-        except Exception as cleanup_error:
-            print(f"⚠️  [MOONSHOT] Error during cleanup: {cleanup_error}")
-            import traceback
-            traceback.print_exc()
-            return 0
-    
-    def _extract_pdf_with_moonshot(self, file_data, filename, api_key):
-        """Extract text from PDF using Moonshot's file upload API (with OCR support)"""
-        tmp_path = None
-        try:
-            # Create Moonshot client
-            client = MoonshotClient(
-                api_key=api_key,
-                base_url="https://api.moonshot.ai/v1"
-            )
-            
-            # Save PDF to temporary file (Moonshot API requires a file path)
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                tmp_file.write(file_data)
-                tmp_path = tmp_file.name
-            
-            try:
-                # Upload PDF to Moonshot
-                print(f"   📤 Uploading PDF to Moonshot...")
-                file_object = client.files.create(
-                    file=Path(tmp_path),
-                    purpose="file-extract"
-                )
-                
-                # Extract content from uploaded file
-                print(f"   📥 Extracting content from Moonshot...")
-                file_content = client.files.content(file_id=file_object.id).text
-                
-                print(f"   ✅ Successfully extracted {len(file_content)} characters from PDF using Moonshot")
-                return file_content
-                
-            except Exception as upload_error:
-                error_msg = str(upload_error)
-                error_dict = {}
-                
-                # Try to parse error response
-                try:
-                    if hasattr(upload_error, 'response'):
-                        import json
-                        error_dict = json.loads(upload_error.response.text) if hasattr(upload_error.response, 'text') else {}
-                except:
-                    pass
-                
-                # Check if it's the file limit error
-                if 'exceeded the max file count' in error_msg or '1000' in error_msg:
-                    print(f"⚠️  [MOONSHOT] File limit reached (1000 files). Automatically cleaning up old files...")
-                    
-                    # Automatically clean up old files
-                    deleted = self._cleanup_moonshot_files(api_key, keep_count=100)
-                    
-                    if deleted > 0:
-                        # Retry upload after cleanup
-                        print(f"   🔄 Retrying PDF upload after cleanup...")
-                        try:
-                            file_object = client.files.create(
-                                file=Path(tmp_path),
-                                purpose="file-extract"
-                            )
-                            
-                            # Extract content from uploaded file
-                            print(f"   📥 Extracting content from Moonshot...")
-                            file_content = client.files.content(file_id=file_object.id).text
-                            
-                            print(f"   ✅ Successfully extracted {len(file_content)} characters from PDF using Moonshot (after cleanup)")
-                            return file_content
-                        except Exception as retry_error:
-                            print(f"   ❌ Retry failed: {retry_error}")
-                            raise upload_error  # Re-raise original error
-                    else:
-                        # Cleanup didn't work, raise original error
-                        raise upload_error
-                else:
-                    # Not a file limit error, re-raise
-                    raise upload_error
-                
-            finally:
-                # Clean up temporary file
-                if tmp_path:
-                    try:
-                        os.unlink(tmp_path)
-                    except:
-                        pass
-                    
-        except Exception as e:
-            error_msg = str(e)
-            # Check if it's an authentication error
-            if '401' in error_msg or 'incorrect_api_key' in error_msg.lower() or 'unauthorized' in error_msg.lower():
-                print(f"❌ Moonshot API key authentication failed. Please check MOONSHOT_API_KEY in worker environment variables.")
-            elif 'exceeded the max file count' in error_msg or '1000' in error_msg:
-                print(f"❌ Moonshot PDF extraction error: File limit exceeded (cleanup may have failed)")
-            else:
-                print(f"❌ Moonshot PDF extraction error: {error_msg}")
-            
-            # Clean up temp file if it exists
-            if tmp_path:
-                try:
-                    os.unlink(tmp_path)
-                except:
-                    pass
-            
-            # Return None to trigger PyPDF2 fallback
-            return None
     
     def _extract_docx_text(self, file_data, filename):
         """Extract text from Word document"""

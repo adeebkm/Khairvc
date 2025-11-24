@@ -1406,6 +1406,37 @@ def classify_bidirectional(self, user_id, batch_size=50, direction='forward'):
                             
                             print(f"✅ [BIDIRECTIONAL] Email classified as {category} (confidence: {confidence:.2f})")
                             
+                            # If this is a deal flow email, create Deal record
+                            if category == 'DEAL_FLOW':
+                                from models import Deal
+                                
+                                # Check if deal already exists for this thread
+                                existing_deal = Deal.query.filter_by(
+                                    user_id=user_id,
+                                    thread_id=email_locked.thread_id
+                                ).first()
+                                
+                                if not existing_deal:
+                                    # Create Deal record
+                                    founder_name = email_locked.sender.split('<')[0].strip() if email_locked.sender else 'Unknown'
+                                    founder_email = email_locked.sender if email_locked.sender else ''
+                                    
+                                    deal = Deal(
+                                        user_id=user_id,
+                                        thread_id=email_locked.thread_id,
+                                        classification_id=email_locked.id,
+                                        founder_name=founder_name,
+                                        founder_email=founder_email,
+                                        subject=email_locked.subject or '',
+                                        deck_link=email_locked.deck_link,
+                                        has_deck=bool(email_locked.deck_link),
+                                        has_team_info=False,
+                                        has_traction=False,
+                                        state='NEW'
+                                    )
+                                    db.session.add(deal)
+                                    print(f"📊 [BIDIRECTIONAL] Created Deal record for thread {email_locked.thread_id[:16]}")
+                            
                             if classified_count % 10 == 0:
                                 print(f"📊 [BIDIRECTIONAL] {direction}: {classified_count} classified, {skipped_count} skipped")
                             

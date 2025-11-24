@@ -2224,7 +2224,8 @@ body::before {
 .sidebar-label {
     flex: 1;
     min-width: 0; /* Allow text to shrink */
-    overflow: visible;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
     margin-right: 8px; /* Space between label and count */
 }
