@@ -68,7 +68,7 @@
     <div class="auth-container">
         <div class="auth-header">
             <h1>📧 Gmail Auto-Reply</h1>
-            <p>Sign in with your Google account</p>
+            <p>Login with your Google account</p>
         </div>
         
         {% if error %}
@@ -84,11 +84,13 @@
                     <path d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.84-2.2c-.76.53-1.78.9-3.12.9-2.38 0-4.4-1.57-5.12-3.74L.96 13.04C2.45 15.98 5.48 18 9 18z" fill="#34A853"/>
                 </g>
             </svg>
-            Sign in with Google
+            Login with Google
         </a>
         
         <div class="auth-footer">
-            <p>Don't have an account? <a href="{{ url_for('signup') }}">Sign up</a></p>
+            <p style="color: #999; font-size: 14px;">
+                New users will have an account created automatically
+            </p>
         </div>
     </div>
 </body>
