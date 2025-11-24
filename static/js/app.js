@@ -485,7 +485,17 @@ async function pollSetupProgress(taskId, progressBar, progressText) {
 async function startHardcodedTimer(progressBar, progressText, setupScreen) {
     const TIMER_STORAGE_KEY = 'setup_timer_state';
     
-    // Check if there's an existing timer in localStorage
+    // Start timer display IMMEDIATELY
+    if (progressText) {
+        progressText.textContent = 'Setting up your inbox...';
+        progressText.style.display = 'block'; // Ensure visible
+    }
+    if (progressBar) {
+        progressBar.style.width = '10%';
+        progressBar.style.display = 'block'; // Ensure visible
+    }
+    
+    // Check if there's an existing timer
     let timerState = null;
     let remaining = null;
     try {
@@ -496,280 +506,95 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
             const elapsed = Math.floor((now - timerState.startTime) / 1000);
             remaining = timerState.totalSeconds - elapsed;
             
-            if (remaining > 0) {
-                // Timer still active, resume from where we left off
-                console.log(`⏱️ Resuming timer: ${Math.floor(remaining / 60)} minutes remaining (was ${Math.floor(timerState.totalSeconds / 60)} minutes total)`);
-            } else {
-                // Timer has expired, complete setup immediately
-                console.log(`⏱️ Timer expired while page was closed, completing setup...`);
+            if (remaining <= 0) {
+                // Timer expired - complete setup with HARD REFRESH
+                console.log(`⏱️ Timer expired, completing setup with hard refresh...`);
                 localStorage.removeItem(TIMER_STORAGE_KEY);
-                // Complete setup immediately
-                completeSetupAfterTimer(progressBar, progressText, setupScreen);
+                window.location.reload(); // HARD REFRESH
                 return;
             }
         }
     } catch (error) {
-        console.warn('Error reading timer state from localStorage:', error);
+        console.warn('Error reading timer state:', error);
         localStorage.removeItem(TIMER_STORAGE_KEY);
     }
     
-    // Generate new timer if none exists, or use existing
+    // Generate new timer if needed
     let totalSeconds, remainingSeconds, startTime;
-    if (timerState && remaining !== null && remaining > 0) {
-        // Resume existing timer
+    if (timerState && remaining > 0) {
         totalSeconds = timerState.totalSeconds;
         remainingSeconds = remaining;
         startTime = timerState.startTime;
+        console.log(`⏱️ Resuming timer: ${Math.floor(remaining / 60)}m remaining`);
     } else {
-        // Fixed 5-minute timer (300 seconds)
-        const minMinutes = 5;
-        totalSeconds = minMinutes * 60;  // 300 seconds
+        // Check if we already have 200+ emails
+        const currentEmailCount = allEmails?.length || emailCache?.data?.length || 0;
+        if (currentEmailCount >= 200) {
+            console.log(`✅ ${currentEmailCount} emails already loaded, skipping timer`);
+            if (progressText) progressText.textContent = 'Setup complete! Loading inbox...';
+            if (progressBar) progressBar.style.width = '100%';
+            
+            localStorage.removeItem(TIMER_STORAGE_KEY);
+            await finalizeSetupStatus();
+            
+            // Hard refresh to show emails
+            setTimeout(() => {
+                window.location.reload();
+            }, 500);
+            return;
+        }
+        
+        // Start new 5-minute timer
+        totalSeconds = 5 * 60; // 5 minutes
         remainingSeconds = totalSeconds;
         startTime = Date.now();
         
-        // Save timer state to localStorage
-        try {
-            localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify({
-                startTime: startTime,
-                totalSeconds: totalSeconds
-            }));
-        } catch (error) {
-            console.warn('Error saving timer state to localStorage:', error);
-        }
+        localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify({
+            startTime: startTime,
+            totalSeconds: totalSeconds
+        }));
         
-        console.log(`⏱️ Starting new 5-minute timer: ${Math.floor(totalSeconds / 60)} minutes (${totalSeconds} seconds)`);
+        console.log(`⏱️ Starting 5-minute timer`);
     }
-    let lastUpdateTime = Date.now();
-    let secondsUpdateTimeout = null;
-    let isInSecondsMode = false;
     
-    // Update progress bar smoothly
-    const updateProgress = () => {
-        const progressPercent = ((totalSeconds - remainingSeconds) / totalSeconds) * 100;
-        if (progressBar) {
-            progressBar.style.width = `${Math.min(progressPercent, 100)}%`;
-        }
-    };
-    
-    // Schedule next seconds update (random interval)
-    const scheduleNextSecondsUpdate = () => {
-        if (secondsUpdateTimeout) {
-            clearTimeout(secondsUpdateTimeout);
-        }
-        if (remainingSeconds <= 0 || !isInSecondsMode) {
-            return;
-        }
-        // Random interval between 3-8 seconds
-        const randomInterval = Math.floor(Math.random() * 6) + 3;
-        secondsUpdateTimeout = setTimeout(() => {
-            if (remainingSeconds > 0 && progressText && isInSecondsMode) {
-                const seconds = remainingSeconds;
-                progressText.textContent = `Classifying your emails... Approximately ${seconds} second${seconds !== 1 ? 's' : ''} remaining`;
-                // Schedule next update
-                scheduleNextSecondsUpdate();
-            }
-        }, randomInterval * 1000);
-    };
-    
-    // Motivational quotes
-    const quotes = [
-        "Good things take time...",
-        "Excellence is not a skill, it's an attitude...",
-        "Patience is the key to success...",
-        "Great things never come from comfort zones...",
-        "Progress, not perfection...",
-        "Quality takes time...",
-        "Building something amazing...",
-        "The best is yet to come...",
-        "Excellence requires patience...",
-        "Good things come to those who wait..."
-    ];
-    let currentQuoteIndex = 0;
-    
-    // Update timer display (MM:SS format)
-    const updateTimerDisplay = () => {
-        const timerMinutesEl = document.getElementById('timerMinutes');
-        const timerSecondsEl = document.getElementById('timerSeconds');
-        
-        if (timerMinutesEl && timerSecondsEl) {
-            const minutes = Math.floor(remainingSeconds / 60);
-            const seconds = remainingSeconds % 60;
-            // Fix: Use padStart(2, '0') for proper zero-padding
-            timerMinutesEl.textContent = String(minutes).padStart(2, '0');
-            timerSecondsEl.textContent = String(seconds).padStart(2, '0');
-            console.log(`⏱️ Timer update: ${minutes}:${String(seconds).padStart(2, '0')} (${remainingSeconds}s remaining)`);
-        } else {
-            console.warn('⚠️ Timer elements not found:', { timerMinutesEl, timerSecondsEl });
-        }
-    };
-    
-    // Rotate motivational quotes every 8 seconds
-    const rotateQuote = () => {
-        const quoteEl = document.getElementById('motivationalQuote');
-        if (quoteEl) {
-            currentQuoteIndex = (currentQuoteIndex + 1) % quotes.length;
-            quoteEl.textContent = quotes[currentQuoteIndex];
-        }
-    };
-    let quoteInterval = setInterval(rotateQuote, 8000); // Rotate every 8 seconds
-    
-    // Update display text
-    const updateDisplay = () => {
-        // Update timer display
-        updateTimerDisplay();
-        
-        if (!progressText) return;
-        
-        if (remainingSeconds >= 60) {
-            // Show minutes
-            const minutes = Math.ceil(remainingSeconds / 60);
-            progressText.textContent = `Classifying your emails... Approximately ${minutes} minute${minutes !== 1 ? 's' : ''} remaining`;
-            if (isInSecondsMode) {
-                isInSecondsMode = false;
-                if (secondsUpdateTimeout) {
-                    clearTimeout(secondsUpdateTimeout);
-                    secondsUpdateTimeout = null;
-                }
-            }
-        } else {
-            // Show seconds (update at random intervals, not continuously)
-            if (!isInSecondsMode) {
-                isInSecondsMode = true;
-                // Initial seconds display
-                const seconds = remainingSeconds;
-                progressText.textContent = `Classifying your emails... Approximately ${seconds} second${seconds !== 1 ? 's' : ''} remaining`;
-                // Schedule first random update
-                scheduleNextSecondsUpdate();
-            }
-        }
-    };
-    
-    // Initial display - ensure timer shows correctly from start
-    updateTimerDisplay(); // Initial timer display (must be first)
-    updateDisplay();
-    updateProgress();
-    
-    // Force initial timer display update (in case elements weren't ready)
-    setTimeout(() => {
-        updateTimerDisplay();
-        console.log('⏱️ Initial timer display forced update');
-    }, 100);
-    
-    // Start progressive email loading
-    let emailLoadInterval = null;
-    let lastEmailCount = 0;
-    let isCollectingPhase = true; // Track if we're still collecting emails
-    
-    const startProgressiveLoading = async () => {
-        // Load emails immediately
-        try {
-            const response = await fetch(`/api/emails?max=200&show_spam=true`);
-            const data = await response.json();
-            if (data.success && data.emails) {
-                const currentCount = data.emails.length;
-                
-                // If count increased, we're still collecting
-                if (currentCount > lastEmailCount) {
-                    isCollectingPhase = true;
-                    lastEmailCount = currentCount;
-                    console.log(`📧 Progressive loading: ${lastEmailCount} emails collected so far`);
-                } else if (currentCount === lastEmailCount && lastEmailCount > 0) {
-                    // Count hasn't changed - might be done collecting
-                    isCollectingPhase = false;
-                }
-                
-                // Update progress text with email count and status
-                if (progressText && remainingSeconds > 0) {
-                    const minutes = Math.ceil(remainingSeconds / 60);
-                    const timeText = remainingSeconds >= 60 ? 
-                        `${minutes} minute${minutes !== 1 ? 's' : ''}` : 
-                        `${remainingSeconds} second${remainingSeconds !== 1 ? 's' : ''}`;
-                    
-                    if (isCollectingPhase && lastEmailCount < 200) {
-                        // Still collecting emails
-                        progressText.textContent = `Collecting emails... ${lastEmailCount} of 200 collected. ${timeText} remaining`;
-                    } else if (lastEmailCount > 0) {
-                        // Classifying collected emails
-                        progressText.textContent = `Classifying ${lastEmailCount} emails... ${timeText} remaining`;
-                    } else {
-                        // Initial state
-                        progressText.textContent = `Collecting emails... ${timeText} remaining`;
-                    }
-                }
-                
-                // Update progress bar based on email count
-                if (progressBar) {
-                    const progressPercent = Math.min((lastEmailCount / 200) * 90, 90); // Max 90% until timer completes
-                    progressBar.style.width = `${progressPercent}%`;
-                }
-            } else if (progressText && lastEmailCount === 0) {
-                // No emails yet - show collecting status
-                const minutes = Math.ceil(remainingSeconds / 60);
-                const timeText = remainingSeconds >= 60 ? 
-                    `${minutes} minute${minutes !== 1 ? 's' : ''}` : 
-                    `${remainingSeconds} second${remainingSeconds !== 1 ? 's' : ''}`;
-                progressText.textContent = `Collecting emails... ${timeText} remaining`;
-            }
-        } catch (error) {
-            console.error('Error in progressive loading:', error);
-        }
-    };
-    
-    // Start progressive loading immediately
-    startProgressiveLoading();
-    
-    // Poll every 10 seconds for new classified emails (more frequent updates)
-    emailLoadInterval = setInterval(startProgressiveLoading, 10000);
-    
-    // Countdown timer
+    // Update timer display every second using Date.now() comparison
     const timerInterval = setInterval(() => {
-        remainingSeconds--;
-        updateProgress();
-        updateTimerDisplay(); // Update timer display every second
+        const now = Date.now();
+        const elapsed = Math.floor((now - startTime) / 1000);
+        const remaining = totalSeconds - elapsed;
         
-        // Update display at different intervals based on time remaining
-        if (remainingSeconds >= 60) {
-            // Update every 30 seconds when showing minutes
-            const now = Date.now();
-            if (now - lastUpdateTime >= 30000) {
-                updateDisplay();
-                lastUpdateTime = now;
-            }
-        }
-        // Note: seconds mode updates are handled by scheduleNextSecondsUpdate()
-        
-        // Save timer state to localStorage every 5 seconds (for persistence across refreshes)
-        if (remainingSeconds % 5 === 0) {
-            try {
-                localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify({
-                    startTime: startTime,
-                    totalSeconds: totalSeconds
-                }));
-            } catch (error) {
-                // Ignore localStorage errors (might be full or disabled)
-            }
-        }
-        
-        // Timer complete
-        if (remainingSeconds <= 0) {
+        if (remaining <= 0) {
             clearInterval(timerInterval);
-            if (emailLoadInterval) {
-                clearInterval(emailLoadInterval);
-            }
-            if (secondsUpdateTimeout) {
-                clearTimeout(secondsUpdateTimeout);
-            }
-            if (quoteInterval) {
-                clearInterval(quoteInterval);
-            }
-            
-            // Clear timer state from localStorage
             localStorage.removeItem(TIMER_STORAGE_KEY);
             
-            // Complete setup (don't await - let it run asynchronously)
-            completeSetupAfterTimer(progressBar, progressText, setupScreen);
+            // Complete setup with HARD REFRESH
+            if (progressText) progressText.textContent = 'Setup complete! Refreshing...';
+            if (progressBar) progressBar.style.width = '100%';
+            
+            console.log('⏱️ Timer complete, hard refreshing page...');
+            setTimeout(() => {
+                window.location.reload(); // HARD REFRESH
+            }, 500);
+        } else {
+            // Update display
+            const minutes = Math.floor(remaining / 60);
+            const seconds = remaining % 60;
+            const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            
+            const percentage = Math.max(10, Math.min(90, ((totalSeconds - remaining) / totalSeconds) * 100));
+            if (progressBar) progressBar.style.width = `${percentage}%`;
+            
+            if (progressText) {
+                // Show collecting or classifying message
+                const emailCount = allEmails?.length || 0;
+                if (emailCount < 200) {
+                    progressText.textContent = `Collecting emails... ${emailCount} of 200 collected (${timeStr})`;
+                } else {
+                    progressText.textContent = `Classifying emails... (${timeStr})`;
+                }
+            }
         }
-    }, 1000); // Update every second
+    }, 1000);
 }
 
 /**
@@ -1428,6 +1253,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         loadStarredCacheFromStorage(); // Load starred emails cache
         loadSentCacheFromStorage(); // Load sent emails cache
         loadDraftsCacheFromStorage(); // Load drafts cache
+        loadDealsCacheFromStorage(); // Load deals cache
         if (emailCache.data.length > 0 && emailCache.timestamp) {
             const cacheAge = Date.now() - emailCache.timestamp;
             const isFresh = cacheAge < emailCache.maxAge;
@@ -1575,10 +1401,11 @@ async function toggleStar(emailId, currentlyStarred, emailIndex) {
     }
 }
 
-// Cache for sent, starred, and drafts emails
+// Cache for sent, starred, drafts, and deals
 let sentEmailsCache = [];
 let starredEmailsCache = [];
 let draftsCache = [];
+let dealsCache = [];
 
 // In-memory thread cache for instant access (populated from IndexedDB)
 let threadCacheMemory = new Map();
@@ -1978,6 +1805,28 @@ function loadDraftsCacheFromStorage() {
     }
 }
 
+function saveDealsCacheToStorage() {
+    try {
+        localStorage.setItem('dealsCache', JSON.stringify(dealsCache));
+        console.log(`💾 Saved ${dealsCache.length} deals to localStorage`);
+    } catch (error) {
+        console.error('Error saving deals cache:', error);
+    }
+}
+
+function loadDealsCacheFromStorage() {
+    try {
+        const cached = localStorage.getItem('dealsCache');
+        if (cached) {
+            dealsCache = JSON.parse(cached);
+            console.log(`⚡ Loaded ${dealsCache.length} deals from localStorage`);
+        }
+    } catch (error) {
+        console.error('Error loading deals cache:', error);
+        dealsCache = [];
+    }
+}
+
 // Search functionality
 function handleSearchInput(value) {
     searchQuery = value.trim().toLowerCase();
@@ -2153,11 +2002,20 @@ async function rescoreAllDeals() {
 }
 
 async function loadDeals() {
+    // Show cached deals immediately
+    if (dealsCache.length > 0) {
+        console.log(`⚡ Showing ${dealsCache.length} deals from cache (instant)`);
+        displayDeals(dealsCache);
+    }
+    
+    // Fetch fresh data in background
     try {
         const response = await fetch('/api/deals');
         const data = await response.json();
         
         if (data.success) {
+            dealsCache = data.deals;
+            saveDealsCacheToStorage();
             displayDeals(data.deals);
         } else {
             console.error('Error loading deals:', data.error);
@@ -3073,13 +2931,13 @@ function updateSidebarUnreadCounts() {
 // Get category badge HTML
 function getCategoryBadge(category) {
     const badges = {
-        'DEAL_FLOW': '<span class="badge badge-deal-flow">💼 Deal Flow</span>',
-        'NETWORKING': '<span class="badge badge-networking">🤝 Networking</span>',
-        'HIRING': '<span class="badge badge-hiring">👔 Hiring</span>',
-        'GENERAL': '<span class="badge badge-general">📰 General</span>',
-        'SPAM': '<span class="badge badge-spam">⚠️ Spam</span>',
-        'SENT': '<span class="badge badge-sent">📤 Sent</span>',
-        'STARRED': '<span class="badge badge-starred">⭐ Starred</span>'
+        'DEAL_FLOW': '<span class="badge badge-deal-flow">Deal Flow</span>',
+        'NETWORKING': '<span class="badge badge-networking">Networking</span>',
+        'HIRING': '<span class="badge badge-hiring">Hiring</span>',
+        'GENERAL': '<span class="badge badge-general">General</span>',
+        'SPAM': '<span class="badge badge-spam">Spam</span>',
+        'SENT': '<span class="badge badge-sent">Sent</span>',
+        'STARRED': '<span class="badge badge-starred">Starred</span>'
     };
     return badges[category] || '';
 }

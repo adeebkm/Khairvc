@@ -93,6 +93,15 @@
         <!-- Left Sidebar (Gmail-style) -->
         <aside class="sidebar" id="sidebar">
             <nav class="sidebar-nav">
+                <button class="sidebar-item compose-btn" onclick="openComposeModal()" title="Compose new email">
+                    <span class="sidebar-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                    </span>
+                    <span class="sidebar-label">Compose</span>
+                </button>
                 <button class="sidebar-item active" onclick="switchTab('all')" data-tab="all" data-label="Inbox">
                     <span class="sidebar-icon icon-inbox">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -150,10 +159,7 @@
                 <button class="sidebar-item" onclick="switchTab('networking')" data-tab="networking" data-label="Networking">
                     <span class="sidebar-icon icon-networking">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                            <circle cx="9" cy="7" r="4"></circle>
-                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-                            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                            <path d="M20.42 4.58a5.4 5.4 0 0 0-7.65 0l-.77.78-.77-.78a5.4 5.4 0 0 0-7.65 0C1.46 6.7 1.33 10.28 4 13l8 8 8-8c2.67-2.72 2.54-6.3.42-8.42z"></path>
                         </svg>
                     </span>
                     <span class="sidebar-label">Networking</span>
@@ -172,11 +178,8 @@
                 <button class="sidebar-item" onclick="switchTab('general')" data-tab="general" data-label="General">
                     <span class="sidebar-icon icon-general">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                            <polyline points="14 2 14 8 20 8"></polyline>
-                            <line x1="16" y1="13" x2="8" y2="13"></line>
-                            <line x1="16" y1="17" x2="8" y2="17"></line>
-                            <polyline points="10 9 9 9 8 9"></polyline>
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                            <polyline points="22,6 12,13 2,6"></polyline>
                         </svg>
                     </span>
                     <span class="sidebar-label">General</span>
@@ -493,13 +496,6 @@
             </div>
         </div>
     </div>
-
-    {% if has_gmail %}
-    <!-- Floating Compose Button -->
-    <button class="floating-compose" onclick="openComposeModal()" title="Compose new email">
-        ✉️
-    </button>
-    {% endif %}
 
     <!-- Right-click Context Menu -->
     <div class="context-menu" id="contextMenu">

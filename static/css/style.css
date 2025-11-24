@@ -2331,28 +2331,33 @@ body::before {
 }
 
 .badge-deal-flow {
-    background: rgba(124, 58, 237, 0.1);
-    color: #7c3aed;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
 }
 
 .badge-networking {
-    background: rgba(59, 130, 246, 0.1);
-    color: #3b82f6;
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+    border: none;
 }
 
 .badge-hiring {
-    background: rgba(16, 185, 129, 0.1);
-    color: #10b981;
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    color: white;
+    border: none;
 }
 
 .badge-general {
-    background: rgba(156, 163, 175, 0.1);
-    color: #6b7280;
+    background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+    color: white;
+    border: none;
 }
 
 .badge-spam {
-    background: rgba(239, 68, 68, 0.1);
-    color: #ef4444;
+    background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    color: white;
+    border: none;
 }
 
 .badge-sent {
@@ -3426,34 +3431,23 @@ body::before {
     }
 }
 
-/* Floating Compose Button */
-.floating-compose {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+/* Compose Button in Sidebar */
+.sidebar-item.compose-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
-    border: none;
-    cursor: pointer;
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 24px;
-    z-index: 1000;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    font-weight: 600;
+    margin-bottom: 16px;
+    border-radius: 12px;
+    transition: all 0.2s ease;
 }
 
-.floating-compose:hover {
-    transform: translateY(-2px) scale(1.05);
-    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+.sidebar-item.compose-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
-.floating-compose:active {
-    transform: translateY(0) scale(0.95);
+.sidebar-item.compose-btn .sidebar-icon {
+    color: white;
 }
 
 /* Email Hover Actions */
