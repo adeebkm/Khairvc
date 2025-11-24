@@ -549,10 +549,10 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
         remainingSeconds = totalSeconds;
         startTime = Date.now();
         
-        localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify({
-            startTime: startTime,
-            totalSeconds: totalSeconds
-        }));
+            localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify({
+                startTime: startTime,
+                totalSeconds: totalSeconds
+            }));
         
         console.log(`⏱️ Starting 5-minute timer`);
     }
@@ -589,7 +589,7 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
                 const emailCount = allEmails?.length || 0;
                 if (emailCount < 200) {
                     progressText.textContent = `Collecting emails... ${emailCount} of 200 collected (${timeStr})`;
-                } else {
+        } else {
                     progressText.textContent = `Classifying emails... (${timeStr})`;
                 }
             }
@@ -1699,8 +1699,12 @@ async function fetchSentEmails() {
             
             // Only update UI if we're still on the sent tab
             if (currentTab === 'sent') {
+                console.log(`📤 [FRONTEND] Updating UI with ${sentEmails.length} sent emails`);
                 allEmails = sentEmails;
                 applyFilters(); // Apply filters including search
+                
+                console.log(`📤 [FRONTEND] After applyFilters: ${filteredEmails.length} filtered emails`);
+                console.log(`📤 [FRONTEND] Sample email:`, sentEmails[0]);
                 
                 const emailCountEl = document.getElementById('emailCount');
                 if (emailCountEl) {
@@ -1708,12 +1712,10 @@ async function fetchSentEmails() {
                     emailCountEl.textContent = `${sentEmails.length} sent email${sentEmails.length !== 1 ? 's' : ''}${searchText}`;
                 }
                 
-                // Force display if we have emails
-                if (sentEmails.length > 0) {
-                    displayEmails(filteredEmails);
-                } else {
-                    displayEmails([]);
-                }
+                // Force display - use filteredEmails if available, otherwise use sentEmails
+                const emailsToDisplay = filteredEmails.length > 0 ? filteredEmails : sentEmails;
+                console.log(`📤 [FRONTEND] Displaying ${emailsToDisplay.length} emails`);
+                displayEmails(emailsToDisplay);
             }
         } else {
             console.error('❌ [FRONTEND] Error fetching sent emails:', data.error);
@@ -1911,7 +1913,13 @@ function applyFilters() {
             return cat.toLowerCase() === 'dealflow' || cat.toLowerCase() === 'deal_flow';
         });
     } else if (currentTab === 'sent') {
-        filtered = allEmails.filter(e => e.from_me === true);
+        filtered = allEmails.filter(e => {
+            // Check multiple ways an email can be identified as sent
+            return e.from_me === true || 
+                   e.is_sent === true || 
+                   e.category === 'SENT' ||
+                   (e.classification && e.classification.category === 'SENT');
+        });
     } else if (currentTab === 'starred') {
         filtered = allEmails.filter(e => {
             // Check multiple ways an email can be starred
