@@ -1426,8 +1426,17 @@ def get_emails():
         else:
             print("📂 Loading all classified emails from database...")
 
+        # Check if user still exists (may have been deleted)
+        try:
+            user_id = current_user.id
+        except (AttributeError, Exception) as e:
+            # User has been deleted or session is invalid
+            print(f"⚠️  User session invalid or user deleted: {e}")
+            logout_user()
+            return jsonify({'error': 'User session expired. Please log in again.'}), 401
+
         print(f"   (Ignoring 'unread_only' filter - database doesn't track read status)")
-        query = EmailClassification.query.filter_by(user_id=current_user.id)
+        query = EmailClassification.query.filter_by(user_id=user_id)
 
         if category_filter:
             query = query.filter_by(category=category_filter)
@@ -2083,6 +2092,20 @@ def get_emails():
         error_trace = traceback.format_exc()
         print(f"Error in get_emails: {str(e)}")
         print(error_trace)
+        
+        # Check if it's a deleted user error
+        if 'ObjectDeletedError' in str(type(e)) or 'has been deleted' in str(e):
+            print("⚠️  User has been deleted. Logging out user...")
+            try:
+                logout_user()
+            except:
+                pass
+            return jsonify({
+                'success': False, 
+                'error': 'User session expired. Please log in again.',
+                'logout_required': True
+            }), 401
+        
         return jsonify({
             'success': False, 
             'error': str(e),
@@ -2094,8 +2117,14 @@ def get_emails():
 def stream_emails():
     """Stream emails as they're being classified (progressive loading)"""
     # Store user info before entering generator (Flask-Login compatibility)
-    user_id = current_user.id
-    has_gmail_token = current_user.gmail_token is not None
+    try:
+        user_id = current_user.id
+        has_gmail_token = current_user.gmail_token is not None
+    except (AttributeError, Exception) as e:
+        # User has been deleted or session is invalid
+        print(f"⚠️  User session invalid or user deleted in stream_emails: {e}")
+        logout_user()
+        return jsonify({'error': 'User session expired. Please log in again.', 'logout_required': True}), 401
     
     if not has_gmail_token:
         return jsonify({'error': 'Gmail not connected'}), 400
