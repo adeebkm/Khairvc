@@ -681,6 +681,18 @@ def connect_gmail():
             
             db.session.commit()
             
+            # Trigger email sync after connecting Gmail to fetch any emails received
+            if CELERY_AVAILABLE:
+                try:
+                    task = sync_user_emails.delay(
+                        user_id=current_user.id,
+                        max_emails=200,
+                        force_full_sync=False  # Use incremental sync
+                    )
+                    print(f"✅ Auto-sync triggered after Gmail connection: task {task.id}")
+                except Exception as sync_error:
+                    print(f"⚠️  Auto-sync error (non-critical): {sync_error}")
+            
             # Redirect with parameter to trigger auto-fetch
             return redirect(url_for('dashboard') + '?connected=true')
     
@@ -778,6 +790,18 @@ def handle_google_signup_callback(creds):
                             db.session.commit()
             except Exception as pubsub_error:
                 print(f"⚠️  Pub/Sub auto-setup error (non-critical): {pubsub_error}")
+        
+        # Trigger email sync after login to fetch any emails received while logged out
+        if CELERY_AVAILABLE:
+            try:
+                task = sync_user_emails.delay(
+                    user_id=current_user_obj.id,
+                    max_emails=200,
+                    force_full_sync=False  # Use incremental sync
+                )
+                print(f"✅ Auto-sync triggered after Google signup: task {task.id}")
+            except Exception as sync_error:
+                print(f"⚠️  Auto-sync error (non-critical): {sync_error}")
         
         return redirect(url_for('dashboard') + '?auto_setup=true')
     except Exception as e:
@@ -1019,6 +1043,18 @@ def oauth2callback():
         # Check if this is from signup (auto-start setup)
         from_signup = request.args.get('from_signup') == 'true' or session.get('from_signup', False)
         session.pop('from_signup', None)
+        
+        # Trigger email sync after login to fetch any emails received while logged out
+        if CELERY_AVAILABLE:
+            try:
+                task = sync_user_emails.delay(
+                    user_id=current_user.id,
+                    max_emails=200,
+                    force_full_sync=False  # Use incremental sync
+                )
+                print(f"✅ Auto-sync triggered after OAuth login: task {task.id}")
+            except Exception as sync_error:
+                print(f"⚠️  Auto-sync error (non-critical): {sync_error}")
         
         # Redirect to dashboard - setup screen will show automatically if setup_completed is False
         if from_signup:
