@@ -3709,6 +3709,52 @@ async function openEmail(indexOrEmail) {
     const modalDate = document.getElementById('modalDate');
     if (modalDate) modalDate.textContent = formatDate(currentEmail.date);
     
+    // Display CC and BCC if available
+    const modalRecipients = document.getElementById('modalRecipients');
+    const modalTo = document.getElementById('modalTo');
+    const modalCc = document.getElementById('modalCc');
+    const modalBcc = document.getElementById('modalBcc');
+    
+    if (modalRecipients && modalTo && modalCc && modalBcc) {
+        let hasRecipients = false;
+        
+        // Display To field
+        const toField = currentEmail.to || (isSent ? currentEmail.from : '');
+        if (toField) {
+            modalTo.innerHTML = `<strong>To:</strong> ${escapeHtml(toField)}`;
+            hasRecipients = true;
+        } else {
+            modalTo.innerHTML = '';
+        }
+        
+        // Display CC if available
+        const ccField = currentEmail.cc || currentEmail.cc_list;
+        if (ccField) {
+            modalCc.style.display = 'block';
+            modalCc.innerHTML = `<strong>Cc:</strong> ${escapeHtml(ccField)}`;
+            hasRecipients = true;
+        } else {
+            modalCc.style.display = 'none';
+        }
+        
+        // Display BCC if available (only for sent emails where user was BCC'd)
+        const bccField = currentEmail.bcc || currentEmail.bcc_list;
+        if (bccField) {
+            modalBcc.style.display = 'block';
+            modalBcc.innerHTML = `<strong>Bcc:</strong> ${escapeHtml(bccField)}`;
+            hasRecipients = true;
+        } else {
+            modalBcc.style.display = 'none';
+        }
+        
+        // Show recipients section if any recipients exist
+        if (hasRecipients) {
+            modalRecipients.style.display = 'block';
+        } else {
+            modalRecipients.style.display = 'none';
+        }
+    }
+    
     // Display tags
     const classification = currentEmail.classification || {};
     const tags = classification.tags || [];
@@ -5236,10 +5282,14 @@ function openComposeModal() {
     document.getElementById('composeModal').style.display = 'flex';
     // Clear previous values
     document.getElementById('composeTo').value = '';
+    document.getElementById('composeCc').value = '';
+    document.getElementById('composeBcc').value = '';
     document.getElementById('composeSubject').value = '';
     document.getElementById('composeBody').value = '';
     composeAttachments = [];
     updateAttachmentList();
+    // Hide CC/BCC fields by default
+    document.getElementById('composeCcBcc').style.display = 'none';
     // Focus on To field
     setTimeout(() => {
         document.getElementById('composeTo').focus();
@@ -5250,6 +5300,16 @@ function closeComposeModal() {
     document.getElementById('composeModal').style.display = 'none';
     composeAttachments = [];
     updateAttachmentList();
+}
+
+// Toggle CC/BCC fields
+function toggleCcBcc() {
+    const ccBccDiv = document.getElementById('composeCcBcc');
+    if (ccBccDiv.style.display === 'none') {
+        ccBccDiv.style.display = 'block';
+    } else {
+        ccBccDiv.style.display = 'none';
+    }
 }
 
 // Handle attachment selection
@@ -5306,6 +5366,8 @@ function removeAttachment(index) {
 // Send composed email
 async function sendComposedEmail() {
     const to = document.getElementById('composeTo').value.trim();
+    const cc = document.getElementById('composeCc').value.trim();
+    const bcc = document.getElementById('composeBcc').value.trim();
     const subject = document.getElementById('composeSubject').value.trim();
     const body = document.getElementById('composeBody').value.trim();
     
@@ -5333,6 +5395,10 @@ async function sendComposedEmail() {
         formData.append('to', to);
         formData.append('subject', subject);
         formData.append('body', body);
+        
+        // Add CC and BCC if provided
+        if (cc) formData.append('cc', cc);
+        if (bcc) formData.append('bcc', bcc);
         
         // Add attachments
         composeAttachments.forEach(file => {

@@ -323,6 +323,11 @@
                     </div>
                     <div class="modal-date" id="modalDate"></div>
                 </div>
+                <div class="modal-recipients" id="modalRecipients" style="display: none; padding: 12px 0; border-top: 1px solid var(--border-color, #e5e7eb); margin-top: 12px; font-size: 13px; color: var(--text-secondary, #6b7280);">
+                    <div id="modalTo" style="margin-bottom: 6px;"></div>
+                    <div id="modalCc" style="margin-bottom: 6px; display: none;"></div>
+                    <div id="modalBcc" style="margin-bottom: 6px; display: none;"></div>
+                </div>
                 <div class="modal-metadata">
                     <div id="modalTags" class="modal-tags"></div>
                 </div>
@@ -453,6 +458,21 @@
                 <div style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-primary);">To:</label>
                     <input type="text" id="composeTo" class="compose-input" placeholder="recipient@example.com" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px;">
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <button type="button" onclick="toggleCcBcc()" style="background: none; border: none; color: var(--primary-color, #6366f1); cursor: pointer; font-size: 13px; padding: 4px 0; text-decoration: underline;">
+                        Cc, Bcc
+                    </button>
+                </div>
+                <div id="composeCcBcc" style="display: none; margin-bottom: 16px;">
+                    <div style="margin-bottom: 12px;">
+                        <label style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-primary); font-size: 13px;">Cc:</label>
+                        <input type="text" id="composeCc" class="compose-input" placeholder="cc@example.com" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px;">
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <label style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-primary); font-size: 13px;">Bcc:</label>
+                        <input type="text" id="composeBcc" class="compose-input" placeholder="bcc@example.com" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px;">
+                    </div>
                 </div>
                 <div style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-primary);">Subject:</label>

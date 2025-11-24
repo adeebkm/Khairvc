@@ -1027,6 +1027,8 @@ class GmailClient:
             subject_raw = next((h['value'] for h in headers_list if h['name'] == 'Subject'), None)
             sender_raw = next((h['value'] for h in headers_list if h['name'] == 'From'), 'Unknown')
             to_raw = next((h['value'] for h in headers_list if h['name'] == 'To'), None)
+            cc_raw = next((h['value'] for h in headers_list if h['name'] == 'Cc'), None)
+            bcc_raw = next((h['value'] for h in headers_list if h['name'] == 'Bcc'), None)
             
             # Decode RFC 2047 encoded headers (like =?UTF-8?B?...?=)
             def decode_header_value(value):
@@ -1052,6 +1054,8 @@ class GmailClient:
                 subject = 'No Subject'
             sender = decode_header_value(sender_raw)
             recipient = decode_header_value(to_raw) if to_raw else None
+            cc = decode_header_value(cc_raw) if cc_raw else None
+            bcc = decode_header_value(bcc_raw) if bcc_raw else None
             
             # Convert headers to dictionary for classification
             headers_dict = {h['name']: h['value'] for h in headers_list}
@@ -1119,6 +1123,10 @@ class GmailClient:
                 'subject': subject,
                 'from': sender,
                 'to': recipient,  # Add 'to' field for sent emails
+                'cc': cc,  # CC recipients
+                'cc_list': cc,  # Alias for compatibility
+                'bcc': bcc,  # BCC recipients
+                'bcc_list': bcc,  # Alias for compatibility
                 'body': body,
                 'body_html': body_html,  # Raw HTML body (for rich rendering in UI)
                 'combined_text': combined_text,  # Body + attachment text
