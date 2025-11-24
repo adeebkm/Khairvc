@@ -2422,7 +2422,10 @@ def get_starred_emails():
 @login_required
 def get_sent_emails():
     """Get user's sent emails"""
+    print(f"📤 [SENT] Fetching sent emails for user {current_user.id}")
+    
     if not current_user.gmail_token:
+        print(f"❌ [SENT] User {current_user.id} has no Gmail token")
         return jsonify({
             'success': False,
             'error': 'Gmail not connected. Please connect your Gmail account.'
@@ -2431,16 +2434,26 @@ def get_sent_emails():
     try:
         gmail = get_user_gmail_client(current_user)
         if not gmail:
+            print(f"❌ [SENT] Failed to get Gmail client for user {current_user.id}")
             return jsonify({
                 'success': False,
                 'error': 'Failed to connect to Gmail'
             }), 500
         
+        if not gmail.service:
+            print(f"❌ [SENT] Gmail service not initialized for user {current_user.id}")
+            return jsonify({
+                'success': False,
+                'error': 'Gmail service not available'
+            }), 500
+        
         # Get max emails from query parameter
-        max_emails = min(request.args.get('max', default=20, type=int), 200)  # Cap at 200 emails max (user can select 20, 50, 100, or 200)
+        max_emails = min(request.args.get('max', default=20, type=int), 200)
+        print(f"📤 [SENT] Requesting {max_emails} sent emails")
         
         # Fetch sent emails
         sent_emails = gmail.get_sent_emails(max_results=max_emails)
+        print(f"📤 [SENT] Received {len(sent_emails)} sent emails from Gmail API")
         
         # Format sent emails for frontend (similar to received emails)
         formatted_emails = []
@@ -2461,6 +2474,7 @@ def get_sent_emails():
                 'is_sent': True
             })
         
+        print(f"✅ [SENT] Returning {len(formatted_emails)} formatted sent emails")
         return jsonify({
             'success': True,
             'count': len(formatted_emails),

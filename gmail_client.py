@@ -175,42 +175,55 @@ class GmailClient:
             list: List of sent email dictionaries
         """
         if not self.service:
+            print("❌ [SENT] Gmail service not initialized")
             return []
         
         try:
             query = 'in:sent'
-            print(f"📤 Fetching up to {max_results} sent emails...")
+            print(f"📤 [SENT] Fetching up to {max_results} sent emails with query: {query}")
             
-            # Get list of message IDs
-            results = self.service.users().messages().list(
-                userId='me',
-                q=query,
-                maxResults=max_results
-            ).execute()
+            # Get list of message IDs with error handling
+            try:
+                results = self.service.users().messages().list(
+                    userId='me',
+                    q=query,
+                    maxResults=max_results
+                ).execute()
+            except Exception as api_error:
+                print(f"❌ [SENT] Gmail API error during list: {str(api_error)}")
+                import traceback
+                traceback.print_exc()
+                return []
             
             messages = results.get('messages', [])
             if not messages:
-                print("📤 No sent emails found")
+                print("📤 [SENT] No sent emails found in Gmail")
                 return []
             
-            print(f"📤 Found {len(messages)} sent emails, fetching details...")
+            print(f"📤 [SENT] Found {len(messages)} sent email IDs, fetching details...")
             
             # Batch fetch email details
             sent_emails = []
-            for msg in messages:
+            for i, msg in enumerate(messages, 1):
                 try:
+                    print(f"📤 [SENT] Fetching email {i}/{len(messages)}: {msg['id']}")
                     email_data = self.get_email_details(msg['id'])
                     if email_data:
                         sent_emails.append(email_data)
+                        print(f"✅ [SENT] Email {i}/{len(messages)}: {email_data.get('subject', 'No Subject')[:50]}")
+                    else:
+                        print(f"⚠️  [SENT] Email {i}/{len(messages)}: get_email_details returned None")
                 except Exception as e:
-                    print(f"⚠️  Error fetching sent email {msg['id']}: {str(e)}")
+                    print(f"⚠️  [SENT] Error fetching sent email {msg['id']}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
                     continue
             
-            print(f"✅ Fetched {len(sent_emails)} sent emails")
+            print(f"✅ [SENT] Successfully fetched {len(sent_emails)} sent emails")
             return sent_emails
             
         except Exception as e:
-            print(f"❌ Error fetching sent emails: {str(e)}")
+            print(f"❌ [SENT] Error fetching sent emails: {str(e)}")
             import traceback
             traceback.print_exc()
             return []
