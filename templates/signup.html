@@ -69,63 +69,14 @@
     <div class="auth-container">
         <div class="auth-header">
             <h1>📧 Gmail Auto-Reply</h1>
-            <p>Create your account</p>
+            <p>Create your account with Google</p>
         </div>
         
         {% if error %}
         <div class="error">{{ error }}</div>
         {% endif %}
         
-        <form method="POST" action="{{ url_for('signup') }}">
-            <div class="form-group">
-                <label for="username">Username</label>
-                <input type="text" id="username" name="username" required autofocus>
-            </div>
-            
-            <div class="form-group">
-                <label for="email">Email</label>
-                <input type="email" id="email" name="email" required>
-            </div>
-            
-            <div class="form-group">
-                <label for="password">Password</label>
-                <input type="password" id="password" name="password" required>
-            </div>
-            
-            <div class="form-group">
-                <label for="confirm_password">Confirm Password</label>
-                <input type="password" id="confirm_password" name="confirm_password" required>
-            </div>
-            
-            <!-- WhatsApp Settings -->
-            <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 20px; margin-top: 30px;">
-                <label style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" id="whatsapp_enabled" name="whatsapp_enabled" style="width: auto; margin-right: 10px;">
-                    <span>📱 Enable WhatsApp alerts for deal flow</span>
-                </label>
-                <p style="font-size: 0.85rem; color: #666; margin-top: 5px; margin-left: 30px;">
-                    Get instant notifications when we detect potential deals
-                </p>
-            </div>
-            
-            <div class="form-group" id="whatsapp_number_group" style="display: none;">
-                <label for="whatsapp_number">WhatsApp Number</label>
-                <input type="tel" id="whatsapp_number" name="whatsapp_number" placeholder="+1234567890">
-                <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
-                    Include country code (e.g., +1 for US)
-                </p>
-            </div>
-            
-            <button type="submit" class="btn btn-primary btn-block">Create Account</button>
-        </form>
-        
-        <div style="margin: 20px 0; text-align: center; position: relative;">
-            <div style="border-top: 1px solid #ddd; margin: 20px 0; position: relative;">
-                <span style="background: white; padding: 0 15px; position: absolute; top: -10px; left: 50%; transform: translateX(-50%); color: #666; font-size: 14px;">OR</span>
-            </div>
-        </div>
-        
-        <a href="{{ url_for('signup_google') }}" class="btn btn-block" style="background: #4285f4; color: white; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 12px; border-radius: 10px; font-weight: 500;">
+        <a href="{{ url_for('signup_google') }}" class="btn btn-block" style="background: #4285f4; color: white; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px; border-radius: 10px; font-weight: 500; font-size: 16px;">
             <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
                 <g fill="#000" fill-rule="evenodd">
                     <path d="M9 3.48c1.69 0 2.83.73 3.48 1.34l2.54-2.48C13.46.89 11.43 0 9 0 5.48 0 2.44 2.02.96 4.96l2.91 2.26C4.6 5.05 6.62 3.48 9 3.48z" fill="#EA4335"/>
@@ -202,22 +153,6 @@
         }
     </style>
 
-    <script>
-        // Show/hide WhatsApp number field based on checkbox
-        const whatsappCheckbox = document.getElementById('whatsapp_enabled');
-        const whatsappNumberGroup = document.getElementById('whatsapp_number_group');
-        const whatsappNumberInput = document.getElementById('whatsapp_number');
-        
-        whatsappCheckbox.addEventListener('change', function() {
-            if (this.checked) {
-                whatsappNumberGroup.style.display = 'block';
-                whatsappNumberInput.required = true;
-            } else {
-                whatsappNumberGroup.style.display = 'none';
-                whatsappNumberInput.required = false;
-            }
-        });
-    </script>
 </body>
 </html>
 

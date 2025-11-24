@@ -2223,7 +2223,7 @@ body::before {
 /* Sidebar label text (prevent truncation) */
 .sidebar-label {
     flex: 1;
-    min-width: 0; /* Allow text to shrink */
+    min-width: 70px; /* Ensure text is visible */
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
