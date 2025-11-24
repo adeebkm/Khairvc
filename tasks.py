@@ -1368,15 +1368,15 @@ def classify_bidirectional(self, user_id, batch_size=50, direction='forward'):
                         
                         # Classify the email
                         try:
-                            # Get email data for classification
-                            email_data = {
-                                'subject': email_locked.subject or '',
-                                'sender': email_locked.sender or '',
-                                'snippet': email_locked.snippet or '',
-                                'body': email_locked.snippet or ''  # Use snippet as body for classification
-                            }
-                            
-                            classification_result = classifier.classify_email(email_data)
+                            # Call classify_email with keyword arguments (not a dictionary)
+                            classification_result = classifier.classify_email(
+                                subject=email_locked.subject or '',
+                                body=email_locked.snippet or '',  # Use snippet as body for classification
+                                headers={},  # Headers not stored in EmailClassification model
+                                sender=email_locked.sender or '',
+                                thread_id=email_locked.thread_id or '',
+                                user_id=str(user_id)
+                            )
                             
                             # Update classification
                             email_locked.category = classification_result.get('category', 'GENERAL')
