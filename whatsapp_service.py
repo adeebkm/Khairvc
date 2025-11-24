@@ -14,8 +14,8 @@ class WhatsAppService:
     def __init__(self):
         self.phone_number_id = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
         self.access_token = os.getenv('WHATSAPP_ACCESS_TOKEN')
-        self.api_version = os.getenv('WHATSAPP_API_VERSION', 'v24.0')
-        self.template_name = os.getenv('WHATSAPP_TEMPLATE_NAME', 'deal_flow_alert')  # Default to deal_flow_alert
+        self.api_version = os.getenv('WHATSAPP_API_VERSION', 'v21.0')
+        self.template_name = os.getenv('WHATSAPP_TEMPLATE_NAME', 'hello_world')  # Default to hello_world
         self.base_url = f"https://graph.facebook.com/{self.api_version}/{self.phone_number_id}"
         
         if not self.phone_number_id or not self.access_token:
@@ -190,6 +190,51 @@ class WhatsAppService:
             
             return response.json()
         except requests.exceptions.RequestException as e:
+            # Check if template doesn't exist (404 with code 132001)
+            if hasattr(e, 'response') and e.response is not None and e.response.status_code == 404:
+                try:
+                    error_detail = e.response.json()
+                    error_data = error_detail.get('error', {})
+                    error_code = error_data.get('code')
+                    
+                    # Template not found error (code 132001)
+                    if error_code == 132001:
+                        print(f"⚠️  Template '{self.template_name}' not found. Falling back to 'hello_world' template.")
+                        
+                        # Fallback to hello_world template (no parameters)
+                        fallback_payload = {
+                            'messaging_product': 'whatsapp',
+                            'to': to_number,
+                            'type': 'template',
+                            'template': {
+                                'name': 'hello_world',
+                                'language': {
+                                    'code': 'en_US'
+                                }
+                            }
+                        }
+                        
+                        try:
+                            fallback_response = requests.post(url, headers=headers, json=fallback_payload, timeout=10)
+                            fallback_response.raise_for_status()
+                            print(f"📱 Sent WhatsApp template (hello_world fallback) for: {subject}")
+                            print(f"   ⚠️  Note: Create template '{self.template_name}' in Meta platform to use custom template")
+                            return fallback_response.json()
+                        except requests.exceptions.RequestException as fallback_error:
+                            # If fallback also fails, raise original error with helpful message
+                            error_msg = f"Template '{self.template_name}' does not exist in Meta's WhatsApp platform.\n\n"
+                            error_msg += f"To fix this:\n"
+                            error_msg += f"1. Go to https://business.facebook.com/wa/manage/message-templates/\n"
+                            error_msg += f"2. Create a template named '{self.template_name}'\n"
+                            error_msg += f"3. Add 3 text variables in the body: {{subject}}, {{sender}}, {{details}}\n"
+                            error_msg += f"4. Submit for approval\n\n"
+                            error_msg += f"Fallback to 'hello_world' also failed: {str(fallback_error)}"
+                            raise Exception(error_msg)
+                
+                except:
+                    pass  # If we can't parse error, continue to general error handling
+            
+            # General error handling
             error_msg = f"WhatsApp API error: {str(e)}"
             if hasattr(e, 'response') and e.response is not None:
                 try:

@@ -5228,6 +5228,9 @@ function decodeHtmlEntities(text) {
 }
 
 
+// Compose email attachment storage
+let composeAttachments = [];
+
 // Compose email functions
 function openComposeModal() {
     document.getElementById('composeModal').style.display = 'flex';
@@ -5235,6 +5238,8 @@ function openComposeModal() {
     document.getElementById('composeTo').value = '';
     document.getElementById('composeSubject').value = '';
     document.getElementById('composeBody').value = '';
+    composeAttachments = [];
+    updateAttachmentList();
     // Focus on To field
     setTimeout(() => {
         document.getElementById('composeTo').focus();
@@ -5243,6 +5248,119 @@ function openComposeModal() {
 
 function closeComposeModal() {
     document.getElementById('composeModal').style.display = 'none';
+    composeAttachments = [];
+    updateAttachmentList();
+}
+
+// Handle attachment selection
+function handleAttachmentSelection(event) {
+    const files = Array.from(event.target.files);
+    files.forEach(file => {
+        composeAttachments.push(file);
+    });
+    updateAttachmentList();
+    // Reset input to allow selecting same file again
+    event.target.value = '';
+}
+
+// Update attachment list display
+function updateAttachmentList() {
+    const attachmentList = document.getElementById('attachmentList');
+    if (!attachmentList) return;
+    
+    if (composeAttachments.length === 0) {
+        attachmentList.style.display = 'none';
+        attachmentList.innerHTML = '';
+        return;
+    }
+    
+    attachmentList.style.display = 'block';
+    attachmentList.innerHTML = composeAttachments.map((file, index) => {
+        const fileSize = formatFileSize(file.size);
+        return `
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--bg-secondary, #f9fafb); border-radius: 6px; margin-bottom: 6px; font-size: 13px;">
+                <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; color: var(--text-secondary, #6b7280);">
+                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                    </svg>
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary, #111827);">${escapeHtml(file.name)}</span>
+                    <span style="color: var(--text-secondary, #6b7280); font-size: 12px; flex-shrink: 0;">${fileSize}</span>
+                </div>
+                <button type="button" onclick="removeAttachment(${index})" style="background: none; border: none; color: var(--text-secondary, #6b7280); cursor: pointer; padding: 4px; margin-left: 8px; flex-shrink: 0;" title="Remove attachment">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+        `;
+    }).join('');
+}
+
+// Remove attachment
+function removeAttachment(index) {
+    composeAttachments.splice(index, 1);
+    updateAttachmentList();
+}
+
+// Send composed email
+async function sendComposedEmail() {
+    const to = document.getElementById('composeTo').value.trim();
+    const subject = document.getElementById('composeSubject').value.trim();
+    const body = document.getElementById('composeBody').value.trim();
+    
+    if (!to) {
+        showToast('Please enter a recipient', 'error');
+        return;
+    }
+    
+    if (!body) {
+        showToast('Please enter a message', 'error');
+        return;
+    }
+    
+    const sendBtn = document.getElementById('sendComposeBtn');
+    const sendBtnText = document.getElementById('sendComposeBtnText');
+    const sendBtnSpinner = document.getElementById('sendComposeBtnSpinner');
+    
+    // Disable button and show loading
+    sendBtn.disabled = true;
+    sendBtnText.style.display = 'none';
+    sendBtnSpinner.style.display = 'inline-block';
+    
+    try {
+        const formData = new FormData();
+        formData.append('to', to);
+        formData.append('subject', subject);
+        formData.append('body', body);
+        
+        // Add attachments
+        composeAttachments.forEach(file => {
+            formData.append('attachments', file);
+        });
+        
+        const response = await fetch('/api/send-email', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('Email sent successfully', 'success');
+            closeComposeModal();
+        } else {
+            showToast(data.error || 'Failed to send email', 'error');
+        }
+    } catch (error) {
+        console.error('Error sending email:', error);
+        showToast('Error sending email', 'error');
+    } finally {
+        // Re-enable button
+        sendBtn.disabled = false;
+        sendBtnText.style.display = 'inline';
+        sendBtnSpinner.style.display = 'none';
+    }
 }
 
 // Keyboard shortcuts

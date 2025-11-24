@@ -7,6 +7,9 @@ import base64
 import re
 import io
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from email.header import decode_header
 import html
 from google.auth.transport.requests import Request
@@ -1566,7 +1569,7 @@ class GmailClient:
             print(f"Error forwarding email: {str(e)}")
             return False
     
-    def send_email(self, to_email, subject, body, send_as_email=None, cc=None, bcc=None):
+    def send_email(self, to_email, subject, body, send_as_email=None, cc=None, bcc=None, attachments=None):
         """
         Send a new email (not a reply) with signature automatically appended
         
@@ -1577,6 +1580,7 @@ class GmailClient:
             send_as_email: Optional email address of send-as alias to use for signature
             cc: Optional CC email address(es) - can be string or list
             bcc: Optional BCC email address(es) - can be string or list
+            attachments: Optional list of file objects (from request.files)
         """
         if not self.service:
             return False
@@ -1592,7 +1596,13 @@ class GmailClient:
                 if not body_clean.endswith(signature_clean):
                     body = f"{body}\n\n{signature}"
             
-            message = MIMEText(body)
+            # Use MIMEMultipart if there are attachments, otherwise MIMEText
+            if attachments and len(attachments) > 0:
+                message = MIMEMultipart()
+                message.attach(MIMEText(body))
+            else:
+                message = MIMEText(body)
+            
             message['subject'] = subject
             
             # Handle multiple recipients
@@ -1612,6 +1622,21 @@ class GmailClient:
                     message['bcc'] = ', '.join(bcc)
                 else:
                     message['bcc'] = bcc
+            
+            # Add attachments if any
+            if attachments and len(attachments) > 0:
+                for file in attachments:
+                    if file and file.filename:
+                        part = MIMEBase('application', 'octet-stream')
+                        part.set_payload(file.read())
+                        encoders.encode_base64(part)
+                        part.add_header(
+                            'Content-Disposition',
+                            f'attachment; filename= {file.filename}'
+                        )
+                        message.attach(part)
+                        # Reset file pointer for potential reuse
+                        file.seek(0)
             
             raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
             

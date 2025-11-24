@@ -3359,7 +3359,7 @@ def forward_email():
 @app.route('/api/send-email', methods=['POST'])
 @login_required
 def send_email():
-    """Send a new email (not a reply)"""
+    """Send a new email (not a reply) with optional attachments"""
     if not current_user.gmail_token:
         return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
     
@@ -3381,12 +3381,24 @@ def send_email():
         if not gmail:
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
-        data = request.json
-        to_email = data.get('to')
-        subject = data.get('subject')
-        body = data.get('body')
-        cc = data.get('cc')
-        bcc = data.get('bcc')
+        # Handle both JSON and FormData (for attachments)
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            # FormData with attachments
+            to_email = request.form.get('to')
+            subject = request.form.get('subject')
+            body = request.form.get('body')
+            cc = request.form.get('cc')
+            bcc = request.form.get('bcc')
+            attachments = request.files.getlist('attachments')
+        else:
+            # JSON without attachments
+            data = request.json
+            to_email = data.get('to')
+            subject = data.get('subject')
+            body = data.get('body')
+            cc = data.get('cc')
+            bcc = data.get('bcc')
+            attachments = []
         
         if not all([to_email, subject, body]):
             return jsonify({'success': False, 'error': 'Missing required fields: to, subject, body'}), 400
@@ -3394,8 +3406,8 @@ def send_email():
         # Get selected signature email preference
         selected_email = current_user.gmail_token.selected_signature_email if current_user.gmail_token else None
         
-        # Send email
-        success = gmail.send_email(to_email, subject, body, send_as_email=selected_email, cc=cc, bcc=bcc)
+        # Send email with attachments
+        success = gmail.send_email(to_email, subject, body, send_as_email=selected_email, cc=cc, bcc=bcc, attachments=attachments)
         
         return jsonify({
             'success': success,
