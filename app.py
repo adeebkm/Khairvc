@@ -2422,7 +2422,11 @@ def get_starred_emails():
 @login_required
 def get_sent_emails():
     """Get user's sent emails"""
-    print(f"📤 [SENT] Fetching sent emails for user {current_user.id}")
+    print("=" * 60)
+    print(f"📤 [SENT] ===== SENT EMAILS ENDPOINT CALLED =====")
+    print(f"📤 [SENT] User ID: {current_user.id if current_user.is_authenticated else 'NOT AUTHENTICATED'}")
+    print(f"📤 [SENT] User email: {current_user.email if current_user.is_authenticated else 'N/A'}")
+    print("=" * 60)
     
     if not current_user.gmail_token:
         print(f"❌ [SENT] User {current_user.id} has no Gmail token")

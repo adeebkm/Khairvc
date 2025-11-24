@@ -1665,27 +1665,33 @@ async function fetchStarredEmails() {
 // Fetch sent emails
 async function fetchSentEmails() {
     try {
-        console.log('📤 Fetching sent emails...');
+        console.log('📤 [FRONTEND] Fetching sent emails...');
+        console.log('📤 [FRONTEND] Calling /api/sent-emails?max=100');
+        
         const response = await fetch(`/api/sent-emails?max=100`);
         
-        console.log(`📤 Sent emails response status: ${response.status}`);
+        console.log(`📤 [FRONTEND] Response status: ${response.status}`);
+        console.log(`📤 [FRONTEND] Response ok: ${response.ok}`);
         
         if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ [FRONTEND] HTTP ${response.status} error:`, errorText);
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
         const data = await response.json();
-        console.log(`📤 Sent emails data:`, data);
+        console.log(`📤 [FRONTEND] Response data:`, data);
+        console.log(`📤 [FRONTEND] Success: ${data.success}, Count: ${data.count || 0}`);
         
         if (data.success) {
             // Format sent emails similar to received emails
-            const sentEmails = data.emails.map(email => ({
+            const sentEmails = (data.emails || []).map(email => ({
                 ...email,
                 classification: { category: 'SENT' },
                 is_sent: true
             }));
             
-            console.log(`✅ Fetched ${sentEmails.length} sent emails`);
+            console.log(`✅ [FRONTEND] Fetched ${sentEmails.length} sent emails`);
             
             // Update cache (both memory and localStorage)
             sentEmailsCache = sentEmails;
@@ -1701,16 +1707,24 @@ async function fetchSentEmails() {
                     const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
                     emailCountEl.textContent = `${sentEmails.length} sent email${sentEmails.length !== 1 ? 's' : ''}${searchText}`;
                 }
+                
+                // Force display if we have emails
+                if (sentEmails.length > 0) {
+                    displayEmails(filteredEmails);
+                } else {
+                    displayEmails([]);
+                }
             }
         } else {
-            console.error('❌ Error fetching sent emails:', data.error);
+            console.error('❌ [FRONTEND] Error fetching sent emails:', data.error);
             if (currentTab === 'sent') {
                 displayEmails([]);
-                showToast('Failed to load sent emails', 'error');
+                showToast(`Failed to load sent emails: ${data.error || 'Unknown error'}`, 'error');
             }
         }
     } catch (error) {
-        console.error('❌ Exception fetching sent emails:', error);
+        console.error('❌ [FRONTEND] Exception fetching sent emails:', error);
+        console.error('❌ [FRONTEND] Error stack:', error.stack);
         if (currentTab === 'sent') {
             displayEmails([]);
             showToast(`Failed to load sent emails: ${error.message}`, 'error');
