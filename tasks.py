@@ -270,12 +270,17 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
             
             print(f"📊 [TASK] Unprocessed emails before processing: {unprocessed_count_before}")
             
-            # If there are many unprocessed emails, trigger bidirectional classification
-            # and let it handle both old and new emails (after we insert new ones)
-            should_use_bidirectional = unprocessed_count_before > 50
+            # If there are many unprocessed emails OR this is an initial sync (200 emails),
+            # trigger bidirectional classification and let it handle both old and new emails
+            # Initial syncs should always use bidirectional for faster processing
+            is_initial_sync = emails and len(emails) >= 200 and unprocessed_count_before == 0
+            should_use_bidirectional = unprocessed_count_before > 50 or is_initial_sync
             
             if should_use_bidirectional:
-                print(f"🚀 [TASK] Many unprocessed emails ({unprocessed_count_before}) detected. Will trigger bidirectional classification after inserting new emails.")
+                if is_initial_sync:
+                    print(f"🚀 [TASK] Initial sync detected ({len(emails)} emails). Using bidirectional classification for faster processing.")
+                else:
+                    print(f"🚀 [TASK] Many unprocessed emails ({unprocessed_count_before}) detected. Will trigger bidirectional classification after inserting new emails.")
             
             # EmailClassifier initializes LambdaClient internally, don't pass it
             classifier = EmailClassifier(openai_client)
@@ -715,10 +720,17 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
             
             print(f"📊 [TASK] Unprocessed emails after processing: {unprocessed_count}")
             
-            # Trigger bidirectional classification if there are many unprocessed emails
-            # This includes both existing unprocessed emails and newly inserted ones (if should_use_bidirectional was True)
-            if unprocessed_count > 50:
-                print(f"🚀 [TASK] Triggering bidirectional classification for {unprocessed_count} unprocessed emails")
+            # Trigger bidirectional classification if:
+            # 1. We used bidirectional mode (should_use_bidirectional was True) - always trigger
+            # 2. OR there are many unprocessed emails (>50)
+            should_trigger_bidirectional = should_use_bidirectional or unprocessed_count > 50
+            
+            if should_trigger_bidirectional:
+                if should_use_bidirectional:
+                    print(f"🚀 [TASK] Triggering bidirectional classification for {unprocessed_count} unprocessed emails (bidirectional mode enabled)")
+                else:
+                    print(f"🚀 [TASK] Triggering bidirectional classification for {unprocessed_count} unprocessed emails")
+                
                 try:
                     # Start forward worker (oldest first)
                     forward_task = classify_bidirectional.apply_async(

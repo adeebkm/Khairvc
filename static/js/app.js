@@ -594,8 +594,12 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
         if (timerMinutesEl && timerSecondsEl) {
             const minutes = Math.floor(remainingSeconds / 60);
             const seconds = remainingSeconds % 60;
+            // Fix: Use padStart(2, '0') for proper zero-padding
             timerMinutesEl.textContent = String(minutes).padStart(2, '0');
             timerSecondsEl.textContent = String(seconds).padStart(2, '0');
+            console.log(`⏱️ Timer update: ${minutes}:${String(seconds).padStart(2, '0')} (${remainingSeconds}s remaining)`);
+        } else {
+            console.warn('⚠️ Timer elements not found:', { timerMinutesEl, timerSecondsEl });
         }
     };
     
@@ -640,31 +644,71 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
         }
     };
     
-    // Initial display
+    // Initial display - ensure timer shows correctly from start
+    updateTimerDisplay(); // Initial timer display (must be first)
     updateDisplay();
     updateProgress();
-    updateTimerDisplay(); // Initial timer display
+    
+    // Force initial timer display update (in case elements weren't ready)
+    setTimeout(() => {
+        updateTimerDisplay();
+        console.log('⏱️ Initial timer display forced update');
+    }, 100);
     
     // Start progressive email loading
     let emailLoadInterval = null;
     let lastEmailCount = 0;
+    let isCollectingPhase = true; // Track if we're still collecting emails
+    
     const startProgressiveLoading = async () => {
         // Load emails immediately
         try {
             const response = await fetch(`/api/emails?max=200&show_spam=true`);
             const data = await response.json();
             if (data.success && data.emails) {
-                lastEmailCount = data.emails.length;
-                console.log(`📧 Progressive loading: ${lastEmailCount} emails classified so far`);
+                const currentCount = data.emails.length;
                 
-                // Update progress text with email count
+                // If count increased, we're still collecting
+                if (currentCount > lastEmailCount) {
+                    isCollectingPhase = true;
+                    lastEmailCount = currentCount;
+                    console.log(`📧 Progressive loading: ${lastEmailCount} emails collected so far`);
+                } else if (currentCount === lastEmailCount && lastEmailCount > 0) {
+                    // Count hasn't changed - might be done collecting
+                    isCollectingPhase = false;
+                }
+                
+                // Update progress text with email count and status
                 if (progressText && remainingSeconds > 0) {
                     const minutes = Math.ceil(remainingSeconds / 60);
                     const timeText = remainingSeconds >= 60 ? 
                         `${minutes} minute${minutes !== 1 ? 's' : ''}` : 
                         `${remainingSeconds} second${remainingSeconds !== 1 ? 's' : ''}`;
-                    progressText.textContent = `Classified ${lastEmailCount} emails... ${timeText} remaining`;
+                    
+                    if (isCollectingPhase && lastEmailCount < 200) {
+                        // Still collecting emails
+                        progressText.textContent = `Collecting emails... ${lastEmailCount} of 200 collected. ${timeText} remaining`;
+                    } else if (lastEmailCount > 0) {
+                        // Classifying collected emails
+                        progressText.textContent = `Classifying ${lastEmailCount} emails... ${timeText} remaining`;
+                    } else {
+                        // Initial state
+                        progressText.textContent = `Collecting emails... ${timeText} remaining`;
+                    }
                 }
+                
+                // Update progress bar based on email count
+                if (progressBar) {
+                    const progressPercent = Math.min((lastEmailCount / 200) * 90, 90); // Max 90% until timer completes
+                    progressBar.style.width = `${progressPercent}%`;
+                }
+            } else if (progressText && lastEmailCount === 0) {
+                // No emails yet - show collecting status
+                const minutes = Math.ceil(remainingSeconds / 60);
+                const timeText = remainingSeconds >= 60 ? 
+                    `${minutes} minute${minutes !== 1 ? 's' : ''}` : 
+                    `${remainingSeconds} second${remainingSeconds !== 1 ? 's' : ''}`;
+                progressText.textContent = `Collecting emails... ${timeText} remaining`;
             }
         } catch (error) {
             console.error('Error in progressive loading:', error);
@@ -674,8 +718,8 @@ async function startHardcodedTimer(progressBar, progressText, setupScreen) {
     // Start progressive loading immediately
     startProgressiveLoading();
     
-    // Poll every 15 seconds for new classified emails
-    emailLoadInterval = setInterval(startProgressiveLoading, 15000);
+    // Poll every 10 seconds for new classified emails (more frequent updates)
+    emailLoadInterval = setInterval(startProgressiveLoading, 10000);
     
     // Countdown timer
     const timerInterval = setInterval(() => {
@@ -744,20 +788,28 @@ async function completeSetupAfterTimer(progressBar, progressText, setupScreen) {
         await loadEmailsFromDatabase();
         console.log(`📧 Loaded ${allEmails.length} emails after timer`);
         
-        // If no emails loaded, wait and try again
-        if (allEmails.length === 0) {
-            console.warn('⚠️ No emails loaded yet, waiting 2 seconds...');
-            if (progressText) progressText.textContent = 'Waiting for emails to be classified...';
+        // If no emails loaded, wait and try again (up to 3 attempts)
+        let attempts = 0;
+        while (allEmails.length === 0 && attempts < 3) {
+            attempts++;
+            console.warn(`⚠️ No emails loaded yet (attempt ${attempts}/3), waiting 2 seconds...`);
+            if (progressText) progressText.textContent = `Waiting for emails to be classified... (attempt ${attempts}/3)`;
             await new Promise(resolve => setTimeout(resolve, 2000));
             await loadEmailsFromDatabase();
-            console.log(`📧 Second attempt: Loaded ${allEmails.length} emails`);
+            console.log(`📧 Attempt ${attempts}: Loaded ${allEmails.length} emails`);
         }
         
         // Now that emails are loaded, hide setup screen and show inbox
-        if (progressText) progressText.textContent = 'Setup complete!';
+        if (progressText) progressText.textContent = `Setup complete! Loaded ${allEmails.length} emails.`;
         if (progressBar) progressBar.style.width = '100%';
         
-        if (setupScreen) setupScreen.style.display = 'none';
+        // Small delay to show completion message
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        if (setupScreen) {
+            console.log('✅ Hiding setup screen and showing inbox');
+            setupScreen.style.display = 'none';
+        }
         const compactHeader = document.querySelector('.main-content > .compact-header');
         if (compactHeader) compactHeader.style.display = 'block';
         const emailListEl = document.getElementById('emailList');
