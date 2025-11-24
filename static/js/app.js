@@ -260,7 +260,7 @@ async function deleteEmail(messageId, emailIndexOrThreadId) {
                 
                 // Remove from filtered emails
                 filteredEmails = filteredEmails.filter(e => e.id !== messageId);
-                displayEmails(filteredEmails);
+                updatePagination(); // Use updatePagination to preserve pagination
                 
                 // Close modal if open
                 const modal = document.getElementById('emailModal');
@@ -1394,7 +1394,7 @@ async function toggleStar(emailId, currentlyStarred, emailIndex) {
             }
             
             // Re-render the email list to show updated star status
-            displayEmails(filteredEmails);
+            updatePagination(); // Use updatePagination to preserve pagination
             
             // If we're on the starred tab and unstarred, remove from view
             if (currentTab === 'starred' && !star) {
@@ -1403,7 +1403,7 @@ async function toggleStar(emailId, currentlyStarred, emailIndex) {
                 allEmails = allEmails.filter(e => e.id !== emailId);
                 emailCache.data = emailCache.data.filter(e => e.id !== emailId);
                 saveEmailCacheToStorage();
-                displayEmails(filteredEmails);
+                updatePagination(); // Use updatePagination to preserve pagination
             } else if (currentTab === 'starred' && star) {
                 // If we starred an email while on starred tab, update cache and refresh view
                 if (starredEmailsCache.length > 0) {
@@ -3720,7 +3720,18 @@ async function openEmail(indexOrEmail) {
     const singleEmailSection = document.getElementById('singleEmailSection');
     if (singleEmailSection) singleEmailSection.style.display = 'none';
     
-    // ALWAYS show clicked email from list IMMEDIATELY (0ms - no delay)
+    // Show loading indicator if email content isn't available yet
+    if (threadContainer && !(currentEmail.body || currentEmail.combined_text)) {
+        threadContainer.innerHTML = `
+            <div class="empty-state" style="text-align: center; padding: 60px 20px;">
+                <div class="spinner" style="width: 40px; height: 40px; margin: 0 auto 20px; border: 3px solid rgba(99, 102, 241, 0.1); border-top-color: #6366f1; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                <p style="font-size: 16px; color: var(--text-primary); margin-bottom: 8px; font-weight: 500;">Loading email...</p>
+                <p style="font-size: 14px; color: var(--text-secondary);">Just a moment, we're fetching it for you ✨</p>
+            </div>
+        `;
+    }
+    
+    // ALWAYS show clicked email from list IMMEDIATELY (0ms - no delay) if available
     if (threadContainer && (currentEmail.body || currentEmail.combined_text)) {
         threadContainer.innerHTML = renderThreadMessage(currentEmail, true);
         enhanceHtmlEmails([currentEmail]);
@@ -3914,6 +3925,12 @@ function closeModal() {
     document.getElementById('emailModal').style.display = 'none';
     currentEmail = null;
     currentReply = null;
+    
+    // Restore pagination when modal closes
+    // This ensures pagination is maintained after viewing an email
+    if (filteredEmails && filteredEmails.length > EMAILS_PER_PAGE) {
+        updatePagination();
+    }
 }
 
 // Signature selector functions
@@ -4390,7 +4407,7 @@ function updateEmailReadStatusFromSync(messageId, isRead, labelIds) {
         console.log(`✅ [SYNC] Updated ${updatedCount} instance(s) of email ${messageId.substring(0, 16)}`);
         
         // Refresh display to show updated read/unread styling
-        displayEmails(filteredEmails);
+        updatePagination(); // Use updatePagination to preserve pagination
         
         // Update unread counts
         updateSidebarUnreadCounts();
@@ -5124,7 +5141,7 @@ function updateEmailReadStatus(messageId, threadId, isRead) {
     console.log(`✅ Updated ${updatedCount} email(s) to ${isRead ? 'read' : 'unread'}`);
     
     // Refresh display to show updated read/unread styling
-    displayEmails(filteredEmails);
+    updatePagination(); // Use updatePagination to preserve pagination
     
     // Update unread counts
     updateSidebarUnreadCounts();
