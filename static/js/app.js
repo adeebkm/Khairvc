@@ -214,12 +214,23 @@ async function handleEmailDeletions(deletedIds) {
 }
 
 // Delete email from UI and Gmail
-async function deleteEmail(messageId, threadId) {
+async function deleteEmail(messageId, emailIndexOrThreadId) {
     if (!confirm('Are you sure you want to delete this email?')) {
         return;
     }
     
     try {
+        // Get thread_id if emailIndexOrThreadId is an index, otherwise use it as thread_id
+        let threadId = null;
+        if (typeof emailIndexOrThreadId === 'number') {
+            // It's an index - get the email to find thread_id
+            const email = filteredEmails[emailIndexOrThreadId] || allEmails[emailIndexOrThreadId];
+            threadId = email?.thread_id;
+        } else {
+            // It's already a thread_id
+            threadId = emailIndexOrThreadId;
+        }
+        
         // Optimistic UI update - remove from display immediately
         const emailIndex = allEmails.findIndex(e => e.id === messageId);
         let removedEmail = null;
@@ -235,33 +246,48 @@ async function deleteEmail(messageId, threadId) {
         });
         
         if (response.ok) {
-            // Invalidate thread cache
-            if (threadId) {
-                await invalidateThreadCache(threadId);
+            const data = await response.json();
+            
+            if (data.success) {
+                // Invalidate thread cache
+                if (threadId) {
+                    await invalidateThreadCache(threadId);
+                }
+                
+                // Remove from email list cache
+                emailCache.data = emailCache.data.filter(e => e.id !== messageId);
+                saveEmailCacheToStorage();
+                
+                // Remove from filtered emails
+                filteredEmails = filteredEmails.filter(e => e.id !== messageId);
+                displayEmails(filteredEmails);
+                
+                // Close modal if open
+                const modal = document.getElementById('emailModal');
+                if (modal && modal.style.display === 'flex') {
+                    closeModal();
+                }
+                
+                showToast('Email deleted successfully', 'success');
+            } else {
+                // Restore email if deletion failed
+                if (removedEmail && emailIndex >= 0) {
+                    allEmails.splice(emailIndex, 0, removedEmail);
+                    applyFilters();
+                }
+                showToast(data.error || 'Failed to delete email', 'error');
             }
-            
-            // Remove from email list cache
-            emailCache.data = emailCache.data.filter(e => e.id !== messageId);
-            saveEmailCacheToStorage();
-            
-            // Close modal if open
-            const modal = document.getElementById('emailModal');
-            if (modal && modal.style.display === 'flex') {
-                closeModal();
-            }
-            
-            showAlert('success', 'Email deleted');
         } else {
-            // Rollback: restore email in UI if delete failed
-            if (removedEmail) {
+            // Restore email if deletion failed
+            if (removedEmail && emailIndex >= 0) {
                 allEmails.splice(emailIndex, 0, removedEmail);
                 applyFilters();
             }
-            showAlert('error', 'Failed to delete email');
+            showToast('Failed to delete email', 'error');
         }
     } catch (error) {
         console.error('Error deleting email:', error);
-        showAlert('error', 'Error deleting email');
+        showToast('Error deleting email', 'error');
     }
 }
 
@@ -1576,8 +1602,17 @@ function switchTab(tabName) {
                 emailCountEl.textContent = `${starredEmailsCache.length} starred email${starredEmailsCache.length !== 1 ? 's' : ''} (cached)${searchText}`;
             }
         } else {
-            // Show empty state immediately
-            displayEmails([]);
+            // Show loading indicator with nice message
+            const emailList = document.getElementById('emailList');
+            if (emailList) {
+                emailList.innerHTML = `
+                    <div class="empty-state" style="text-align: center; padding: 60px 20px;">
+                        <div class="spinner" style="width: 40px; height: 40px; margin: 0 auto 20px; border: 3px solid rgba(99, 102, 241, 0.1); border-top-color: #6366f1; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                        <p style="font-size: 16px; color: var(--text-primary); margin-bottom: 8px; font-weight: 500;">Loading your starred emails...</p>
+                        <p style="font-size: 14px; color: var(--text-secondary);">Just a moment, we're gathering them for you ✨</p>
+                    </div>
+                `;
+            }
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
                 emailCountEl.textContent = 'Loading starred emails...';
@@ -1601,8 +1636,17 @@ function switchTab(tabName) {
                 emailCountEl.textContent = `${draftsCache.length} draft${draftsCache.length !== 1 ? 's' : ''}${searchText}`;
             }
         } else {
-            // Show empty state immediately
-            displayEmails([]);
+            // Show loading indicator with nice message
+            const emailList = document.getElementById('emailList');
+            if (emailList) {
+                emailList.innerHTML = `
+                    <div class="empty-state" style="text-align: center; padding: 60px 20px;">
+                        <div class="spinner" style="width: 40px; height: 40px; margin: 0 auto 20px; border: 3px solid rgba(99, 102, 241, 0.1); border-top-color: #6366f1; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                        <p style="font-size: 16px; color: var(--text-primary); margin-bottom: 8px; font-weight: 500;">Loading your drafts...</p>
+                        <p style="font-size: 14px; color: var(--text-secondary);">Just a moment, we're gathering them for you ✨</p>
+                    </div>
+                `;
+            }
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
                 emailCountEl.textContent = 'Loading drafts...';
@@ -1667,17 +1711,35 @@ async function fetchStarredEmails() {
                     const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
                     emailCountEl.textContent = `${starredEmails.length} starred email${starredEmails.length !== 1 ? 's' : ''}${searchText}`;
                 }
+                
+                // Only display if we have starred emails - don't show "no emails" if we actually have them
+                if (starredEmails.length > 0) {
+                    // Force display - use filteredEmails if available, otherwise use starredEmails
+                    const emailsToDisplay = filteredEmails.length > 0 ? filteredEmails : starredEmails;
+                    console.log(`⭐ [FRONTEND] Displaying ${emailsToDisplay.length} starred emails`);
+                    displayEmails(emailsToDisplay);
+                } else {
+                    // Only show "no emails" if we actually have no starred emails
+                    console.log(`⭐ [FRONTEND] No starred emails found, showing empty state`);
+                    displayEmails([]);
+                }
             }
         } else {
             console.error('Error fetching starred emails:', data.error);
             if (currentTab === 'starred') {
-                displayEmails([]);
+                // Only show error if we don't have cached starred emails
+                if (starredEmailsCache.length === 0) {
+                    displayEmails([]);
+                }
             }
         }
     } catch (error) {
         console.error('Error fetching starred emails:', error);
         if (currentTab === 'starred') {
-            displayEmails([]);
+            // Only show error if we don't have cached starred emails
+            if (starredEmailsCache.length === 0) {
+                displayEmails([]);
+            }
         }
     }
 }
@@ -1732,10 +1794,17 @@ async function fetchSentEmails() {
                     emailCountEl.textContent = `${sentEmails.length} sent email${sentEmails.length !== 1 ? 's' : ''}${searchText}`;
                 }
                 
-                // Force display - use filteredEmails if available, otherwise use sentEmails
-                const emailsToDisplay = filteredEmails.length > 0 ? filteredEmails : sentEmails;
-                console.log(`📤 [FRONTEND] Displaying ${emailsToDisplay.length} emails`);
-                displayEmails(emailsToDisplay);
+                // Only display if we have emails - don't show "no emails" if we actually have them
+                if (sentEmails.length > 0) {
+                    // Force display - use filteredEmails if available, otherwise use sentEmails
+                    const emailsToDisplay = filteredEmails.length > 0 ? filteredEmails : sentEmails;
+                    console.log(`📤 [FRONTEND] Displaying ${emailsToDisplay.length} emails`);
+                    displayEmails(emailsToDisplay);
+                } else {
+                    // Only show "no emails" if we actually have no emails
+                    console.log(`📤 [FRONTEND] No sent emails found, showing empty state`);
+                    displayEmails([]);
+                }
             }
         } else {
             console.error('❌ [FRONTEND] Error fetching sent emails:', data.error);
@@ -1820,17 +1889,35 @@ async function fetchDrafts() {
                     const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
                     emailCountEl.textContent = `${drafts.length} draft${drafts.length !== 1 ? 's' : ''}${searchText}`;
                 }
+                
+                // Only display if we have drafts - don't show "no emails" if we actually have them
+                if (drafts.length > 0) {
+                    // Force display - use filteredEmails if available, otherwise use drafts
+                    const emailsToDisplay = filteredEmails.length > 0 ? filteredEmails : drafts;
+                    console.log(`📝 [FRONTEND] Displaying ${emailsToDisplay.length} drafts`);
+                    displayEmails(emailsToDisplay);
+                } else {
+                    // Only show "no emails" if we actually have no drafts
+                    console.log(`📝 [FRONTEND] No drafts found, showing empty state`);
+                    displayEmails([]);
+                }
             }
         } else {
             console.error('Error fetching drafts:', data.error);
             if (currentTab === 'drafts') {
-                displayEmails([]);
+                // Only show error if we don't have cached drafts
+                if (draftsCache.length === 0) {
+                    displayEmails([]);
+                }
             }
         }
     } catch (error) {
         console.error('Error fetching drafts:', error);
         if (currentTab === 'drafts') {
-            displayEmails([]);
+            // Only show error if we don't have cached drafts
+            if (draftsCache.length === 0) {
+                displayEmails([]);
+            }
         }
     }
 }
@@ -2774,6 +2861,54 @@ function displayEmails(emails) {
     }
     
     if (emails.length === 0) {
+        // Check if we're on sent tab and might be loading
+        if (currentTab === 'sent') {
+            // Check if we actually have sent emails in cache or allEmails
+            const hasSentEmails = (sentEmailsCache && sentEmailsCache.length > 0) || 
+                                  (allEmails && allEmails.some(e => e.is_sent || e.category === 'SENT'));
+            
+            // Check if loading indicator is showing
+            const emailList = document.getElementById('emailList');
+            const isShowingLoading = emailList && emailList.innerHTML.includes('Loading your sent emails');
+            
+            // Don't show "no emails" if we're loading or have emails elsewhere
+            if (isShowingLoading || hasSentEmails) {
+                return; // Keep showing loading indicator or wait for emails to load
+            }
+        }
+        
+        // Check if we're on drafts tab and might be loading
+        if (currentTab === 'drafts') {
+            // Check if we actually have drafts in cache or allEmails
+            const hasDrafts = (draftsCache && draftsCache.length > 0) || 
+                             (allEmails && allEmails.some(e => e.is_draft || e.category === 'DRAFT'));
+            
+            // Check if loading indicator is showing
+            const emailList = document.getElementById('emailList');
+            const isShowingLoading = emailList && emailList.innerHTML.includes('Loading your drafts');
+            
+            // Don't show "no emails" if we're loading or have drafts elsewhere
+            if (isShowingLoading || hasDrafts) {
+                return; // Keep showing loading indicator or wait for drafts to load
+            }
+        }
+        
+        // Check if we're on starred tab and might be loading
+        if (currentTab === 'starred') {
+            // Check if we actually have starred emails in cache or allEmails
+            const hasStarredEmails = (starredEmailsCache && starredEmailsCache.length > 0) || 
+                                     (allEmails && allEmails.some(e => e.is_starred || e.starred || e.category === 'STARRED'));
+            
+            // Check if loading indicator is showing
+            const emailList = document.getElementById('emailList');
+            const isShowingLoading = emailList && emailList.innerHTML.includes('Loading your starred emails');
+            
+            // Don't show "no emails" if we're loading or have starred emails elsewhere
+            if (isShowingLoading || hasStarredEmails) {
+                return; // Keep showing loading indicator or wait for starred emails to load
+            }
+        }
+        
         const currentTabName = document.querySelector('.tab-btn.active, .tab-btn-compact.active')?.textContent?.trim() || 'All Emails';
         let message = '📭 No emails found';
         
@@ -4022,7 +4157,7 @@ function saveEdit() {
 // Delete current email from modal
 async function deleteCurrentEmail() {
     if (!currentEmail || !currentEmail.id) {
-        showAlert('error', 'No email selected');
+        showToast('No email selected', 'error');
         return;
     }
     await deleteEmail(currentEmail.id, currentEmail.thread_id);
@@ -5228,36 +5363,6 @@ function contextMenuDelete() {
 async function archiveEmail(emailId, emailIndex) {
     // TODO: Implement archive functionality
     showAlert('info', 'Archive functionality coming soon');
-}
-
-async function deleteEmail(emailId, emailIndex) {
-    if (!confirm('Are you sure you want to delete this email?')) {
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/emails/${emailId}`, {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            // Remove email from list
-            allEmails = allEmails.filter(e => e.id !== emailId);
-            filteredEmails = filteredEmails.filter(e => e.id !== emailId);
-            displayEmails(filteredEmails);
-            showAlert('success', 'Email deleted');
-        } else {
-            showAlert('error', data.error || 'Failed to delete email');
-        }
-    } catch (error) {
-        console.error('Error deleting email:', error);
-        showAlert('error', 'Failed to delete email');
-    }
 }
 
 // Older Emails Fetch Functions
