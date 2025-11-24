@@ -1407,6 +1407,65 @@ class GmailClient:
         
         return None
     
+    def _cleanup_moonshot_files(self, api_key, keep_count=100):
+        """Automatically clean up old Moonshot files to stay under 1000 file limit"""
+        try:
+            import requests
+            
+            headers = {
+                "Authorization": f"Bearer {api_key}"
+            }
+            base_url = "https://api.moonshot.ai/v1"
+            
+            # List all files
+            response = requests.get(f"{base_url}/files", headers=headers)
+            
+            if response.status_code != 200:
+                print(f"⚠️  [MOONSHOT] Failed to list files: {response.status_code}")
+                return 0
+            
+            files = response.json().get('data', [])
+            
+            if len(files) <= keep_count:
+                return 0  # No cleanup needed
+            
+            print(f"🧹 [MOONSHOT] Found {len(files)} files, cleaning up to keep {keep_count} most recent...")
+            
+            # Sort by creation time (oldest first)
+            # Files have 'created_at' timestamp (Unix timestamp)
+            files_sorted = sorted(files, key=lambda x: x.get('created_at', 0))
+            
+            # Delete oldest files
+            files_to_delete = files_sorted[:-keep_count]
+            
+            deleted_count = 0
+            for file_obj in files_to_delete:
+                try:
+                    file_id = file_obj.get('id')
+                    delete_response = requests.delete(
+                        f"{base_url}/files/{file_id}",
+                        headers=headers
+                    )
+                    
+                    if delete_response.status_code in [200, 204]:
+                        deleted_count += 1
+                        if deleted_count % 50 == 0:
+                            print(f"  🗑️  Deleted {deleted_count}/{len(files_to_delete)} old files...")
+                    else:
+                        print(f"  ⚠️  Failed to delete file {file_id}: {delete_response.status_code}")
+                except Exception as delete_error:
+                    print(f"  ⚠️  Error deleting file: {delete_error}")
+                    continue
+            
+            print(f"✅ [MOONSHOT] Cleanup complete! Deleted {deleted_count} files, kept {keep_count}")
+            return deleted_count
+            
+        except Exception as cleanup_error:
+            print(f"⚠️  [MOONSHOT] Error during cleanup: {cleanup_error}")
+            import traceback
+            traceback.print_exc()
+            return 0
+    
     def _extract_pdf_with_moonshot(self, file_data, filename, api_key):
         """Extract text from PDF using Moonshot's file upload API (with OCR support)"""
         tmp_path = None
@@ -1437,6 +1496,50 @@ class GmailClient:
                 print(f"   ✅ Successfully extracted {len(file_content)} characters from PDF using Moonshot")
                 return file_content
                 
+            except Exception as upload_error:
+                error_msg = str(upload_error)
+                error_dict = {}
+                
+                # Try to parse error response
+                try:
+                    if hasattr(upload_error, 'response'):
+                        import json
+                        error_dict = json.loads(upload_error.response.text) if hasattr(upload_error.response, 'text') else {}
+                except:
+                    pass
+                
+                # Check if it's the file limit error
+                if 'exceeded the max file count' in error_msg or '1000' in error_msg:
+                    print(f"⚠️  [MOONSHOT] File limit reached (1000 files). Automatically cleaning up old files...")
+                    
+                    # Automatically clean up old files
+                    deleted = self._cleanup_moonshot_files(api_key, keep_count=100)
+                    
+                    if deleted > 0:
+                        # Retry upload after cleanup
+                        print(f"   🔄 Retrying PDF upload after cleanup...")
+                        try:
+                            file_object = client.files.create(
+                                file=Path(tmp_path),
+                                purpose="file-extract"
+                            )
+                            
+                            # Extract content from uploaded file
+                            print(f"   📥 Extracting content from Moonshot...")
+                            file_content = client.files.content(file_id=file_object.id).text
+                            
+                            print(f"   ✅ Successfully extracted {len(file_content)} characters from PDF using Moonshot (after cleanup)")
+                            return file_content
+                        except Exception as retry_error:
+                            print(f"   ❌ Retry failed: {retry_error}")
+                            raise upload_error  # Re-raise original error
+                    else:
+                        # Cleanup didn't work, raise original error
+                        raise upload_error
+                else:
+                    # Not a file limit error, re-raise
+                    raise upload_error
+                
             finally:
                 # Clean up temporary file
                 if tmp_path:
@@ -1450,6 +1553,8 @@ class GmailClient:
             # Check if it's an authentication error
             if '401' in error_msg or 'incorrect_api_key' in error_msg.lower() or 'unauthorized' in error_msg.lower():
                 print(f"❌ Moonshot API key authentication failed. Please check MOONSHOT_API_KEY in worker environment variables.")
+            elif 'exceeded the max file count' in error_msg or '1000' in error_msg:
+                print(f"❌ Moonshot PDF extraction error: File limit exceeded (cleanup may have failed)")
             else:
                 print(f"❌ Moonshot PDF extraction error: {error_msg}")
             
