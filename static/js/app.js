@@ -3480,12 +3480,14 @@ function renderThreadMessage(email, isFirst = false) {
                     📄 ${escapeHtml(filename)}${sizeText}
                 </a>`;
             } else if (mimeType.startsWith('image/')) {
-                // Image - inline preview with download link
+                // Image - inline preview with download link (click to view full size)
                 return `
-                    <a href="${url}" target="_blank" class="attachment-link" style="display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; text-decoration: none; margin-right: 8px; margin-bottom: 8px;">
-                        <span style="color: var(--text-secondary); font-size: 12px; margin-bottom: 4px;">📎 ${escapeHtml(filename)}${sizeText}</span>
-                        <img src="${url}" alt="${escapeHtml(filename)}" style="max-width: 220px; max-height: 160px; border-radius: 6px; display: block; object-fit: contain; background: #fff;" loading="lazy" />
-                    </a>
+                    <div class="image-attachment" style="display: inline-block; margin-right: 12px; margin-bottom: 12px; vertical-align: top;">
+                        <a href="${url}" target="_blank" class="attachment-link" style="display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 10px; background: var(--bg-secondary, #f9fafb); border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; text-decoration: none; transition: all 0.2s ease; cursor: pointer;" onmouseover="this.style.borderColor='var(--primary-color, #6366f1)'; this.style.boxShadow='0 2px 8px rgba(99, 102, 241, 0.1)'" onmouseout="this.style.borderColor='var(--border-color, #e5e7eb)'; this.style.boxShadow='none'">
+                            <span style="color: var(--text-secondary, #6b7280); font-size: 12px; font-weight: 500;">📷 ${escapeHtml(filename)}${sizeText}</span>
+                            <img src="${url}" alt="${escapeHtml(filename)}" style="max-width: 400px; max-height: 300px; border-radius: 6px; display: block; object-fit: contain; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); cursor: pointer;" loading="lazy" onclick="event.preventDefault(); window.open('${url}', '_blank');" />
+                        </a>
+                    </div>
                 `;
             } else {
                 // Generic attachment - download

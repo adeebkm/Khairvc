@@ -3925,8 +3925,8 @@ def download_attachment(message_id, attachment_id):
         response = make_response(file_data)
         response.headers['Content-Type'] = mime_type
         
-        # For PDFs, set inline so browser displays them; for others, download
-        if mime_type == 'application/pdf':
+        # For PDFs and images, set inline so browser displays them; for others, download
+        if mime_type == 'application/pdf' or (mime_type and mime_type.startswith('image/')):
             response.headers['Content-Disposition'] = f'inline; filename="{filename}"'
         else:
             response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
