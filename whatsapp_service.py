@@ -14,8 +14,8 @@ class WhatsAppService:
     def __init__(self):
         self.phone_number_id = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
         self.access_token = os.getenv('WHATSAPP_ACCESS_TOKEN')
-        self.api_version = os.getenv('WHATSAPP_API_VERSION', 'v21.0')
-        self.template_name = os.getenv('WHATSAPP_TEMPLATE_NAME', 'hello_world')  # Default to hello_world
+        self.api_version = os.getenv('WHATSAPP_API_VERSION', 'v24.0')
+        self.template_name = os.getenv('WHATSAPP_TEMPLATE_NAME', 'deal_flow_alert')  # Default to deal_flow_alert
         self.base_url = f"https://graph.facebook.com/{self.api_version}/{self.phone_number_id}"
         
         if not self.phone_number_id or not self.access_token:
