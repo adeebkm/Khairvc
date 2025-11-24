@@ -2974,8 +2974,8 @@ body::before {
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-size: 11px;
-    position: sticky;
-    top: 0; /* Stick to top of scroll container */
+    position: static;
+    top: -28px; /* Offset by container padding to prevent overlap */
     background: #ffffff;
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(139, 92, 246, 0.08) 100%);
     z-index: 10;
