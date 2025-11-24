@@ -80,6 +80,24 @@ try:
     print("✅ Tasks module imported successfully")
 except ImportError as e:
     print(f"⚠️  Warning: Could not import tasks module: {e}")
+    import traceback
+    traceback.print_exc()
+
+# Validate Redis connection on startup (optional - won't fail if redis not installed)
+try:
+    import redis
+    from urllib.parse import urlparse
+    parsed = urlparse(redis_url)
+    redis_client = redis.from_url(redis_url, socket_connect_timeout=5)
+    redis_client.ping()
+    print(f"✅ Redis connection validated: {parsed.hostname}:{parsed.port}")
+except ImportError:
+    # Redis library not installed - that's okay, Celery will handle it
+    pass
+except Exception as e:
+    print(f"⚠️  Warning: Could not connect to Redis: {e}")
+    print(f"   Redis URL: {redis_url.split('@')[-1] if '@' in redis_url else redis_url}")
+    print(f"   This may cause the worker to fail. Check REDIS_URL environment variable.")
 
 print(f"✅ Celery configured with broker: {redis_url.split('@')[-1] if '@' in redis_url else redis_url}")
 
