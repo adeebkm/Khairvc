@@ -1366,8 +1366,22 @@ def classify_bidirectional(self, user_id, batch_size=50, direction='forward'):
                             skipped_count += 1
                             continue
                         
+                        # Check if email has minimum required data
+                        if not email_locked.subject and not email_locked.snippet:
+                            print(f"⚠️  [BIDIRECTIONAL] Skipping email {email_locked.message_id[:16]}: No subject or snippet")
+                            email_locked.processed = True
+                            email_locked.category = 'GENERAL'
+                            email_locked.confidence = 0.0
+                            skipped_count += 1
+                            continue
+                        
                         # Classify the email
                         try:
+                            # Log progress for each email
+                            print(f"🤖 [BIDIRECTIONAL] Classifying email {classified_count + skipped_count + 1}/{len(emails)} (direction: {direction}, message_id: {email_locked.message_id[:16]}...)")
+                            print(f"   📧 Subject: {(email_locked.subject or 'No Subject')[:50]}")
+                            print(f"   👤 From: {(email_locked.sender or 'Unknown')[:50]}")
+                            
                             # Call classify_email with keyword arguments (not a dictionary)
                             classification_result = classifier.classify_email(
                                 subject=email_locked.subject or '',
@@ -1379,19 +1393,26 @@ def classify_bidirectional(self, user_id, batch_size=50, direction='forward'):
                             )
                             
                             # Update classification
-                            email_locked.category = classification_result.get('category', 'GENERAL')
+                            category = classification_result.get('category', 'GENERAL')
+                            confidence = classification_result.get('confidence', 0.0)
                             tags = classification_result.get('tags', [])
+                            
+                            email_locked.category = category
                             email_locked.tags = ','.join(tags) if isinstance(tags, list) else tags
-                            email_locked.confidence = classification_result.get('confidence', 1.0)
+                            email_locked.confidence = confidence
                             email_locked.processed = True
                             
                             classified_count += 1
+                            
+                            print(f"✅ [BIDIRECTIONAL] Email classified as {category} (confidence: {confidence:.2f})")
                             
                             if classified_count % 10 == 0:
                                 print(f"📊 [BIDIRECTIONAL] {direction}: {classified_count} classified, {skipped_count} skipped")
                             
                         except Exception as e:
-                            print(f"❌ [BIDIRECTIONAL] Error classifying email {email.message_id}: {e}")
+                            import traceback
+                            print(f"❌ [BIDIRECTIONAL] Error classifying email {email_locked.message_id[:16] if email_locked else 'unknown'}: {e}")
+                            print(f"   Traceback: {traceback.format_exc()}")
                             continue
                     
                     db.session.commit()
