@@ -249,32 +249,32 @@ async function deleteEmail(messageId, emailIndexOrThreadId) {
             const data = await response.json();
             
             if (data.success) {
-                // Invalidate thread cache
-                if (threadId) {
-                    await invalidateThreadCache(threadId);
-                }
-                
-                // Remove from email list cache
-                emailCache.data = emailCache.data.filter(e => e.id !== messageId);
-                saveEmailCacheToStorage();
+            // Invalidate thread cache
+            if (threadId) {
+                await invalidateThreadCache(threadId);
+            }
+            
+            // Remove from email list cache
+            emailCache.data = emailCache.data.filter(e => e.id !== messageId);
+            saveEmailCacheToStorage();
                 
                 // Remove from filtered emails
                 filteredEmails = filteredEmails.filter(e => e.id !== messageId);
                 updatePagination(); // Use updatePagination to preserve pagination
-                
-                // Close modal if open
-                const modal = document.getElementById('emailModal');
-                if (modal && modal.style.display === 'flex') {
-                    closeModal();
-                }
-                
+            
+            // Close modal if open
+            const modal = document.getElementById('emailModal');
+            if (modal && modal.style.display === 'flex') {
+                closeModal();
+            }
+            
                 showToast('Email deleted successfully', 'success');
-            } else {
+        } else {
                 // Restore email if deletion failed
                 if (removedEmail && emailIndex >= 0) {
-                    allEmails.splice(emailIndex, 0, removedEmail);
-                    applyFilters();
-                }
+                allEmails.splice(emailIndex, 0, removedEmail);
+                applyFilters();
+            }
                 showToast(data.error || 'Failed to delete email', 'error');
             }
         } else {
@@ -1729,7 +1729,7 @@ async function fetchStarredEmails() {
             if (currentTab === 'starred') {
                 // Only show error if we don't have cached starred emails
                 if (starredEmailsCache.length === 0) {
-                    displayEmails([]);
+                displayEmails([]);
                 }
             }
         }
@@ -1738,7 +1738,7 @@ async function fetchStarredEmails() {
         if (currentTab === 'starred') {
             // Only show error if we don't have cached starred emails
             if (starredEmailsCache.length === 0) {
-                displayEmails([]);
+            displayEmails([]);
             }
         }
     }
@@ -1907,7 +1907,7 @@ async function fetchDrafts() {
             if (currentTab === 'drafts') {
                 // Only show error if we don't have cached drafts
                 if (draftsCache.length === 0) {
-                    displayEmails([]);
+                displayEmails([]);
                 }
             }
         }
@@ -1916,7 +1916,7 @@ async function fetchDrafts() {
         if (currentTab === 'drafts') {
             // Only show error if we don't have cached drafts
             if (draftsCache.length === 0) {
-                displayEmails([]);
+            displayEmails([]);
             }
         }
     }
@@ -2162,7 +2162,7 @@ async function loadDeals() {
             
             // Only update UI if we're still on the deal-flow tab
             if (currentTab === 'deal-flow') {
-                displayDeals(data.deals);
+            displayDeals(data.deals);
             }
         } else {
             console.error('❌ [DEALS] Error loading deals:', data.error);
@@ -3723,27 +3723,31 @@ async function openEmail(indexOrEmail) {
         // Display To field
         const toField = currentEmail.to || (isSent ? currentEmail.from : '');
         if (toField) {
-            modalTo.innerHTML = `<strong>To:</strong> ${escapeHtml(toField)}`;
+            const toList = Array.isArray(toField) ? toField : (toField.includes(',') ? toField.split(',').map(e => e.trim()) : [toField]);
+            modalTo.innerHTML = `<span style="color: #6b7280; margin-right: 8px;">To:</span>${toList.map(email => `<span style="color: #1f2937;">${escapeHtml(email)}</span>`).join(', ')}`;
+            modalTo.style.display = 'block';
             hasRecipients = true;
         } else {
-            modalTo.innerHTML = '';
+            modalTo.style.display = 'none';
         }
         
-        // Display CC if available
-        const ccField = currentEmail.cc || currentEmail.cc_list;
+        // Display CC field
+        const ccField = currentEmail.cc;
         if (ccField) {
+            const ccList = Array.isArray(ccField) ? ccField : (ccField.includes(',') ? ccField.split(',').map(e => e.trim()) : [ccField]);
+            modalCc.innerHTML = `<span style="color: #6b7280; margin-right: 8px;">Cc:</span>${ccList.map(email => `<span style="color: #1f2937;">${escapeHtml(email)}</span>`).join(', ')}`;
             modalCc.style.display = 'block';
-            modalCc.innerHTML = `<strong>Cc:</strong> ${escapeHtml(ccField)}`;
             hasRecipients = true;
         } else {
             modalCc.style.display = 'none';
         }
         
-        // Display BCC if available (only for sent emails where user was BCC'd)
-        const bccField = currentEmail.bcc || currentEmail.bcc_list;
+        // Display BCC field
+        const bccField = currentEmail.bcc;
         if (bccField) {
+            const bccList = Array.isArray(bccField) ? bccField : (bccField.includes(',') ? bccField.split(',').map(e => e.trim()) : [bccField]);
+            modalBcc.innerHTML = `<span style="color: #6b7280; margin-right: 8px;">Bcc:</span>${bccList.map(email => `<span style="color: #1f2937;">${escapeHtml(email)}</span>`).join(', ')}`;
             modalBcc.style.display = 'block';
-            modalBcc.innerHTML = `<strong>Bcc:</strong> ${escapeHtml(bccField)}`;
             hasRecipients = true;
         } else {
             modalBcc.style.display = 'none';
@@ -3757,12 +3761,24 @@ async function openEmail(indexOrEmail) {
         }
     }
     
-    // Display tags
+    // Display category badge
     const classification = currentEmail.classification || {};
-    const tags = classification.tags || [];
-    const tagsHtml = tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('');
-    const modalTags = document.getElementById('modalTags');
-    if (modalTags) modalTags.innerHTML = tagsHtml || '';
+    const category = classification.category || 'UNKNOWN';
+    const categoryBadge = getCategoryBadge(category);
+    const modalCategoryBadge = document.getElementById('modalCategoryBadge');
+    if (modalCategoryBadge) {
+        modalCategoryBadge.innerHTML = categoryBadge || '';
+    }
+    
+    // Show/hide spam warning banner
+    const modalSpamWarning = document.getElementById('modalSpamWarning');
+    if (modalSpamWarning) {
+        if (category === 'SPAM') {
+            modalSpamWarning.style.display = 'flex';
+        } else {
+            modalSpamWarning.style.display = 'none';
+        }
+    }
     
     // Hide single email section, show thread container
     const singleEmailSection = document.getElementById('singleEmailSection');
@@ -3957,12 +3973,19 @@ async function openEmail(indexOrEmail) {
         }
     })();
     
-    // Show reply section and reset state
-    document.getElementById('replySection').style.display = 'block';
-    document.getElementById('replyContent').innerHTML = '';
-    document.getElementById('replyActions').style.display = 'none';
-    document.getElementById('replyEditor').style.display = 'none';
-    document.getElementById('replyLoading').style.display = 'none';
+    // Reset AI reply section state (always visible in footer now)
+    const replyContent = document.getElementById('replyContent');
+    const replyActions = document.getElementById('replyActions');
+    const replyLoading = document.getElementById('replyLoading');
+    const aiReplyStatus = document.getElementById('aiReplyStatus');
+    
+    if (replyContent) {
+        replyContent.innerHTML = '';
+        replyContent.style.display = 'none';
+    }
+    if (replyActions) replyActions.style.display = 'none';
+    if (replyLoading) replyLoading.style.display = 'none';
+    if (aiReplyStatus) aiReplyStatus.textContent = 'Ready';
     
     // Clear composer when opening a new email (prevent draft from previous email)
     clearComposer();
@@ -3970,9 +3993,28 @@ async function openEmail(indexOrEmail) {
 
 // Close modal
 function closeModal() {
-    document.getElementById('emailModal').style.display = 'none';
+    const emailModal = document.getElementById('emailModal');
+    if (emailModal) {
+        emailModal.style.display = 'none';
+    }
     currentEmail = null;
     currentReply = null;
+    
+    // Reset AI reply section
+    const replyContent = document.getElementById('replyContent');
+    const replyLoading = document.getElementById('replyLoading');
+    const replyActions = document.getElementById('replyActions');
+    const aiReplyStatus = document.getElementById('aiReplyStatus');
+    const generateReplyBtn = document.getElementById('generateReplyBtn');
+    
+    if (replyContent) {
+        replyContent.style.display = 'none';
+        replyContent.innerHTML = '';
+    }
+    if (replyLoading) replyLoading.style.display = 'none';
+    if (replyActions) replyActions.style.display = 'none';
+    if (aiReplyStatus) aiReplyStatus.textContent = 'Ready';
+    if (generateReplyBtn) generateReplyBtn.disabled = false;
     
     // Restore pagination when modal closes
     // This ensures pagination is maintained after viewing an email
@@ -4112,11 +4154,16 @@ async function generateReply() {
     const replyLoading = document.getElementById('replyLoading');
     const replyContent = document.getElementById('replyContent');
     const replyActions = document.getElementById('replyActions');
+    const aiReplyStatus = document.getElementById('aiReplyStatus');
+    const generateReplyBtn = document.getElementById('generateReplyBtn');
     
     // Show loading
-    replyLoading.style.display = 'block';
-    replyContent.innerHTML = '';
-    replyActions.style.display = 'none';
+    if (replyLoading) replyLoading.style.display = 'flex';
+    if (replyContent) replyContent.style.display = 'none';
+    if (replyContent) replyContent.innerHTML = '';
+    if (replyActions) replyActions.style.display = 'none';
+    if (aiReplyStatus) aiReplyStatus.textContent = 'Generating...';
+    if (generateReplyBtn) generateReplyBtn.disabled = true;
     
     try {
         // Use combined_text (includes PDF content) if available, otherwise body
@@ -4158,24 +4205,31 @@ async function generateReply() {
         
         if (data.success) {
             if (!data.should_reply) {
-                replyContent.innerHTML = `
-                    <div class="alert alert-info">
-                        ${data.message || 'AI determined this email doesn\'t need a reply'}
-                    </div>
-                `;
+                if (replyContent) {
+                    replyContent.innerHTML = `<div style="color: #6b7280; font-size: 0.875rem;">${data.message || 'AI determined this email doesn\'t need a reply'}</div>`;
+                    replyContent.style.display = 'block';
+                }
+                if (aiReplyStatus) aiReplyStatus.textContent = 'No reply needed';
             } else {
                 currentReply = data.reply;
+                if (replyContent) {
                 replyContent.textContent = data.reply;
-                replyActions.style.display = 'flex';
+                    replyContent.style.display = 'block';
+                }
+                if (replyActions) replyActions.style.display = 'flex';
+                if (aiReplyStatus) aiReplyStatus.textContent = 'Generated';
             }
         } else {
-            showAlert('error', data.error || 'Failed to generate reply');
+            showToast('error', data.error || 'Failed to generate reply');
+            if (aiReplyStatus) aiReplyStatus.textContent = 'Error';
         }
     } catch (error) {
         console.error('Error generating reply:', error);
-        showAlert('error', 'Error generating reply: ' + error.message);
+        showToast('error', 'Error generating reply: ' + error.message);
+        if (aiReplyStatus) aiReplyStatus.textContent = 'Error';
     } finally {
-        replyLoading.style.display = 'none';
+        if (replyLoading) replyLoading.style.display = 'none';
+        if (generateReplyBtn) generateReplyBtn.disabled = false;
     }
 }
 
@@ -4241,11 +4295,30 @@ async function archiveEmail() {
 // Mark email as unread
 async function markAsUnread() {
     if (!currentEmail || !currentEmail.id) {
-        showAlert('error', 'No email selected');
+        showToast('No email selected', 'error');
         return;
     }
-    // TODO: Implement mark as unread functionality
-    showAlert('info', 'Mark as unread functionality coming soon');
+    await markEmailAsUnread(currentEmail.id);
+}
+
+// Mark email as spam and archive
+async function markAsSpam() {
+    if (!currentEmail || !currentEmail.id) {
+        showToast('No email selected', 'error');
+        return;
+    }
+    // TODO: Implement mark as spam functionality
+    showToast('Mark as spam functionality coming soon', 'info');
+}
+
+// Mark email as not spam
+async function markAsNotSpam() {
+    if (!currentEmail || !currentEmail.id) {
+        showToast('No email selected', 'error');
+        return;
+    }
+    // TODO: Implement mark as not spam functionality
+    showToast('Mark as not spam functionality coming soon', 'info');
 }
 
 // Open reply composer (to be implemented with full features)
@@ -4584,8 +4657,7 @@ function openReplyComposer() {
     composerAttachments = [];
     updateAttachmentPreview();
     
-    // Hide reply section, show composer
-    document.getElementById('replySection').style.display = 'none';
+    // Show composer (AI reply section stays visible in footer)
     composerSection.style.display = 'block';
     
     // Focus on body
@@ -4639,8 +4711,7 @@ function openReplyAllComposer() {
     composerAttachments = [];
     updateAttachmentPreview();
     
-    // Hide reply section, show composer
-    document.getElementById('replySection').style.display = 'none';
+    // Show composer (AI reply section stays visible in footer)
     composerSection.style.display = 'block';
     
     // Focus on body
@@ -4685,8 +4756,7 @@ function openForwardComposer() {
     }
     updateAttachmentPreview();
     
-    // Hide reply section, show composer
-    document.getElementById('replySection').style.display = 'none';
+    // Show composer (AI reply section stays visible in footer)
     composerSection.style.display = 'block';
     
     // Focus on TO field

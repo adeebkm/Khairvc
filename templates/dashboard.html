@@ -309,141 +309,203 @@
 
     <!-- Modal for email details -->
     <div class="modal" id="emailModal" style="display: none;">
-        <div class="modal-content">
-            <span class="close" onclick="closeModal()">&times;</span>
-            <div class="modal-header">
-                <div class="modal-header-top">
-                    <h2 id="modalSubject">Email Subject</h2>
-                </div>
-                <div class="modal-from-section">
-                    <div class="modal-avatar" id="modalAvatar">A</div>
-                    <div class="modal-from-info">
-                        <span class="modal-from" id="modalFrom">Sender Name</span>
-                        <span class="modal-from-email" id="modalFromEmail">sender@example.com</span>
-                    </div>
-                    <div class="modal-date" id="modalDate"></div>
-                </div>
-                <div class="modal-recipients" id="modalRecipients" style="display: none; padding: 12px 0; border-top: 1px solid var(--border-color, #e5e7eb); margin-top: 12px; font-size: 13px; color: var(--text-secondary, #6b7280);">
-                    <div id="modalTo" style="margin-bottom: 6px;"></div>
-                    <div id="modalCc" style="margin-bottom: 6px; display: none;"></div>
-                    <div id="modalBcc" style="margin-bottom: 6px; display: none;"></div>
-                </div>
-                <div class="modal-metadata">
-                    <div id="modalTags" class="modal-tags"></div>
+        <div class="email-modal-content">
+            <!-- Header - Row 1: Subject + Timestamp + Close -->
+            <div class="email-modal-header-row1">
+                <h2 class="email-modal-subject" id="modalSubject">Email Subject</h2>
+                <div class="email-modal-header-right">
+                    <span class="email-modal-date" id="modalDate"></span>
+                    <button class="email-modal-close" onclick="closeModal()" title="Close">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
                 </div>
             </div>
+            
+            <!-- Header - Row 2: Sender Info + Category Badge -->
+            <div class="email-modal-header-row2">
+                <div class="email-modal-sender-info">
+                    <div class="email-modal-avatar" id="modalAvatar">A</div>
+                    <div class="email-modal-sender-details">
+                        <div class="email-modal-sender-name" id="modalFrom">Sender Name</div>
+                        <div class="email-modal-sender-email" id="modalFromEmail">sender@example.com</div>
+                    </div>
+                </div>
+                <div class="email-modal-category-badge" id="modalCategoryBadge"></div>
+            </div>
+            
+            <!-- Recipients (To/Cc/Bcc) -->
+            <div class="email-modal-recipients" id="modalRecipients" style="display: none;">
+                <div id="modalTo"></div>
+                <div id="modalCc" style="display: none;"></div>
+                <div id="modalBcc" style="display: none;"></div>
+            </div>
+            
+            <!-- Header Divider -->
+            <div class="email-modal-header-divider"></div>
             
             <!-- Action Bar -->
-            <div class="modal-action-bar">
-                <button class="btn btn-primary btn-small" onclick="openReplyComposer()" title="Reply to this email">
-                    <span class="btn-icon">↩️</span> Reply
+            <div class="email-modal-action-bar">
+                <button class="email-action-btn email-action-primary" onclick="openReplyComposer()" title="Reply">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="9 10 4 15 9 20"></polyline>
+                        <path d="M20 4v7a4 4 0 0 1-4 4H4"></path>
+                    </svg>
+                    Reply
                 </button>
-                <button class="btn btn-secondary btn-small" onclick="openReplyAllComposer()" title="Reply to all recipients">
-                    <span class="btn-icon">↩️</span> Reply All
+                <button class="email-action-btn email-action-secondary" onclick="openReplyAllComposer()" title="Reply All">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="9 10 4 15 9 20"></polyline>
+                        <path d="M20 4v7a4 4 0 0 1-4 4H4"></path>
+                    </svg>
+                    Reply All
                 </button>
-                <button class="btn btn-secondary btn-small" onclick="openForwardComposer()" title="Forward this email">
-                    <span class="btn-icon">➡️</span> Forward
+                <button class="email-action-btn email-action-secondary" onclick="openForwardComposer()" title="Forward">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 17 20 12 15 7"></polyline>
+                        <path d="M4 18v-5a4 4 0 0 1 4-4h12"></path>
+                    </svg>
+                    Forward
                 </button>
-                <button class="btn btn-danger btn-small" onclick="deleteCurrentEmail()" title="Delete this email">
-                    <span class="btn-icon">🗑️</span> Delete
+                <button class="email-action-btn email-action-secondary" onclick="archiveEmail()" title="Archive">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="9" y1="9" x2="15" y2="9"></line>
+                        <line x1="9" y1="15" x2="15" y2="15"></line>
+                    </svg>
+                    Archive
                 </button>
-                <button class="btn btn-secondary btn-small" onclick="archiveEmail()" title="Archive this email">
-                    <span class="btn-icon">📁</span> Archive
+                <button class="email-action-btn email-action-secondary" onclick="markAsUnread()" title="Mark as Unread">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                        <polyline points="22,6 12,13 2,6"></polyline>
+                    </svg>
+                    Mark Unread
                 </button>
-                <button class="btn btn-secondary btn-small" onclick="markAsUnread()" title="Mark as unread">
-                    <span class="btn-icon">✉️</span> Mark Unread
+                <button class="email-action-btn email-action-danger" onclick="deleteCurrentEmail()" title="Delete">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                    Delete
                 </button>
             </div>
             
-            <div class="modal-body">
-                <div class="thread-container" id="threadContainer">
-                    <!-- Thread messages will be populated here -->
+            <!-- Spam Warning Banner (optional) -->
+            <div class="email-modal-spam-warning" id="modalSpamWarning" style="display: none;">
+                <div class="spam-warning-content">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                        <line x1="12" y1="9" x2="12" y2="13"></line>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                    <span>This message looks suspicious. Be careful with links and attachments.</span>
                 </div>
-                
-                <div class="email-body-section" id="singleEmailSection" style="display: none;">
-                    <h3>Original Email</h3>
-                    <div id="modalAttachments" style="margin-bottom: 16px;"></div>
-                    <div class="email-body" id="modalBody"></div>
+                <div class="spam-warning-actions">
+                    <button class="spam-action-btn spam-action-mark" onclick="markAsSpam()">Mark as spam & archive</button>
+                    <button class="spam-action-btn spam-action-not" onclick="markAsNotSpam()">Not spam</button>
                 </div>
-                
-                <!-- Rich Composer Section -->
-                <div class="composer-section" id="composerSection" style="display: none;">
-                    <h3 id="composerTitle">Reply</h3>
-                    <div class="composer-form">
-                        <div class="composer-field">
-                            <label>To:</label>
-                            <input type="email" id="composerTo" class="form-control" placeholder="recipient@example.com">
-                        </div>
-                        <div class="cc-bcc-toggle">
-                            <button class="btn btn-small btn-text" onclick="toggleCCBCC()">Cc/Bcc</button>
-                        </div>
-                        <div class="cc-bcc-fields" id="ccBccFields" style="display: none;">
-                            <div class="composer-field">
-                                <label>Cc:</label>
-                                <input type="email" id="composerCc" class="form-control" placeholder="cc@example.com">
-                            </div>
-                            <div class="composer-field">
-                                <label>Bcc:</label>
-                                <input type="email" id="composerBcc" class="form-control" placeholder="bcc@example.com">
-                            </div>
-                        </div>
-                        <div class="composer-field">
-                            <label>Subject:</label>
-                            <input type="text" id="composerSubject" class="form-control" placeholder="Email subject">
-                        </div>
-                        <div class="composer-toolbar">
-                            <button class="btn btn-small btn-icon" onclick="applyFormatting('bold')" title="Bold"><b>B</b></button>
-                            <button class="btn btn-small btn-icon" onclick="applyFormatting('italic')" title="Italic"><i>I</i></button>
-                            <button class="btn btn-small btn-icon" onclick="applyFormatting('underline')" title="Underline"><u>U</u></button>
-                            <span class="toolbar-divider"></span>
-                            <label class="btn btn-small btn-icon" title="Attach files">
-                                📎
-                                <input type="file" id="composerFileInput" multiple style="display: none;" onchange="handleAttachmentUpload(event)">
-                            </label>
-                        </div>
-                        <div class="composer-field">
-                            <textarea id="composerBody" class="form-control composer-textarea" rows="10" placeholder="Write your message..."></textarea>
-                        </div>
-                        <div class="attachment-preview-list" id="attachmentPreviewList"></div>
-                        <div class="composer-actions">
-                            <button class="btn btn-primary" onclick="sendComposedEmail()">
-                                ✉️ Send
-                            </button>
-                            <button class="btn btn-secondary" onclick="closeComposer()">
-                                Cancel
-                            </button>
-                        </div>
+            </div>
+            
+            <!-- Email Body Area -->
+            <div class="email-modal-body">
+                <div class="email-body-content">
+                    <div class="thread-container" id="threadContainer">
+                        <!-- Thread messages will be populated here -->
+                    </div>
+                    
+                    <div class="email-body-section" id="singleEmailSection" style="display: none;">
+                        <div id="modalAttachments" style="margin-bottom: 16px;"></div>
+                        <div class="email-body" id="modalBody"></div>
                     </div>
                 </div>
-                
-                <div class="reply-section" id="replySection" style="display: none;">
-                    <h3>AI Generated Reply</h3>
-                    <div class="reply-controls">
-                        <button class="btn btn-small btn-primary" onclick="generateReply()">
-                            🤖 Generate Reply
+            </div>
+            
+            <!-- Rich Composer Section -->
+            <div class="composer-section" id="composerSection" style="display: none;">
+                <h3 id="composerTitle">Reply</h3>
+                <div class="composer-form">
+                    <div class="composer-field">
+                        <label>To:</label>
+                        <input type="email" id="composerTo" class="form-control" placeholder="recipient@example.com">
+                    </div>
+                    <div class="cc-bcc-toggle">
+                        <button class="btn btn-small btn-text" onclick="toggleCCBCC()">Cc/Bcc</button>
+                    </div>
+                    <div class="cc-bcc-fields" id="ccBccFields" style="display: none;">
+                        <div class="composer-field">
+                            <label>Cc:</label>
+                            <input type="email" id="composerCc" class="form-control" placeholder="cc@example.com">
+                        </div>
+                        <div class="composer-field">
+                            <label>Bcc:</label>
+                            <input type="email" id="composerBcc" class="form-control" placeholder="bcc@example.com">
+                        </div>
+                    </div>
+                    <div class="composer-field">
+                        <label>Subject:</label>
+                        <input type="text" id="composerSubject" class="form-control" placeholder="Email subject">
+                    </div>
+                    <div class="composer-toolbar">
+                        <button class="btn btn-small btn-icon" onclick="applyFormatting('bold')" title="Bold"><b>B</b></button>
+                        <button class="btn btn-small btn-icon" onclick="applyFormatting('italic')" title="Italic"><i>I</i></button>
+                        <button class="btn btn-small btn-icon" onclick="applyFormatting('underline')" title="Underline"><u>U</u></button>
+                        <span class="toolbar-divider"></span>
+                        <label class="btn btn-small btn-icon" title="Attach files">
+                            📎
+                            <input type="file" id="composerFileInput" multiple style="display: none;" onchange="handleAttachmentUpload(event)">
+                        </label>
+                    </div>
+                    <div class="composer-field">
+                        <textarea id="composerBody" class="form-control composer-textarea" rows="10" placeholder="Write your message..."></textarea>
+                    </div>
+                    <div class="attachment-preview-list" id="attachmentPreviewList"></div>
+                    <div class="composer-actions">
+                        <button class="btn btn-primary" onclick="sendComposedEmail()">
+                            ✉️ Send
+                        </button>
+                        <button class="btn btn-secondary" onclick="closeComposer()">
+                            Cancel
                         </button>
                     </div>
-                    <div class="reply-loading" id="replyLoading" style="display: none;">
+                </div>
+            </div>
+            
+            <!-- AI Reply Section -->
+            <div class="email-modal-footer">
+                <div class="ai-reply-card">
+                    <div class="ai-reply-header">
+                        <div class="ai-reply-label">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <line x1="9" y1="9" x2="15" y2="9"></line>
+                                <line x1="9" y1="15" x2="15" y2="15"></line>
+                            </svg>
+                            AI REPLY
+                        </div>
+                        <span class="ai-reply-status" id="aiReplyStatus">Ready</span>
+                    </div>
+                    <div class="ai-reply-content" id="replyContent" style="display: none;"></div>
+                    <div class="ai-reply-loading" id="replyLoading" style="display: none;">
                         <div class="spinner-small"></div>
-                        <p>AI is generating a reply...</p>
+                        <span>Generating reply...</span>
                     </div>
-                    <div class="reply-content" id="replyContent"></div>
-                    <textarea class="reply-editor" id="replyEditor" style="display: none;"></textarea>
-                    <div class="reply-actions" id="replyActions" style="display: none;">
-                        <button class="btn btn-success" onclick="sendReply()">
-                            ✉️ Send Reply
+                    <div class="ai-reply-actions">
+                        <button class="ai-reply-generate-btn" onclick="generateReply()" id="generateReplyBtn">
+                            Generate reply
                         </button>
-                        <button class="btn btn-secondary" onclick="editReply()">
-                            ✏️ Edit
-                        </button>
-                        <button class="btn btn-danger" onclick="markAsRead()">
-                            ✓ Mark as Read (Skip)
-                        </button>
+                        <div class="ai-reply-helper" id="replyActions" style="display: none;">
+                            <button class="ai-reply-send-btn" onclick="sendReply()">Send Reply</button>
+                            <button class="ai-reply-edit-btn" onclick="editReply()">Edit</button>
+                            <button class="ai-reply-skip-btn" onclick="markAsRead()">Skip</button>
+                        </div>
                     </div>
+                    <p class="ai-reply-helper-text">AI will generate a contextual reply based on this email</p>
                 </div>
             </div>
         </div>
-        </main>
     </div>
 
 
