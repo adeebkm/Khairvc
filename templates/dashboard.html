@@ -37,11 +37,14 @@
                     {% endif %}
                     <div class="nav-actions">
                         {% if has_gmail %}
-                        <button class="nav-icon-btn" id="refreshEmailsBtn" onclick="refreshEmails()" title="Refresh emails">
-                            <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-                            </svg>
-                        </button>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <button class="nav-icon-btn" id="refreshEmailsBtn" onclick="refreshEmails()" title="Refresh emails">
+                                <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                                </svg>
+                            </button>
+                            <span id="emailCount" style="font-size: 14px; color: var(--text-secondary); font-weight: 500;"></span>
+                        </div>
                         {% endif %}
                         <button class="nav-icon-btn" onclick="openSettingsModal()" title="Settings">
                             <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -242,16 +245,6 @@
             {% endif %}
             
             {% if has_gmail %}
-            <!-- Compact Header Section -->
-            <div class="compact-header" {% if needs_setup %}style="display: none;"{% endif %}>
-                <!-- Gmail Status (Compact) - Removed, now in navbar -->
-                
-                <!-- Controls -->
-                <div class="controls-compact">
-                    <div class="email-count-compact" id="emailCount"></div>
-                </div>
-            </div>
-
             <!-- Loading Indicator -->
             <div class="loading" id="loading" style="display: none;">
                 <div class="spinner"></div>

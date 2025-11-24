@@ -397,8 +397,6 @@ async function startSetup() {
                 
                 // Hide setup screen
                 if (setupScreen) setupScreen.style.display = 'none';
-                const compactHeader = document.querySelector('.main-content > .compact-header');
-                if (compactHeader) compactHeader.style.display = 'block';
                 const emailList = document.getElementById('emailList');
                 if (emailList) emailList.style.display = 'block';
                 
@@ -635,8 +633,6 @@ async function completeSetupAfterTimer(progressBar, progressText, setupScreen) {
             console.log('✅ Hiding setup screen and showing inbox');
             setupScreen.style.display = 'none';
         }
-        const compactHeader = document.querySelector('.main-content > .compact-header');
-        if (compactHeader) compactHeader.style.display = 'block';
         const emailListEl = document.getElementById('emailList');
         if (emailListEl) emailListEl.style.display = 'block';
         

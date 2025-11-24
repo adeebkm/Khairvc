@@ -565,16 +565,6 @@ body::before {
     }
 }
 
-/* Compact Header - Replaces large header section */
-.compact-header {
-    background: var(--bg-primary);
-    border-radius: 12px;
-    padding: 12px 16px;
-    margin: 16px 0 8px 0;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-    border: 1px solid var(--border-color);
-    flex-shrink: 0;
-}
 
 #contentArea {
     flex: 1;
@@ -639,11 +629,6 @@ body::before {
     box-shadow: 0 2px 4px rgba(99, 102, 241, 0.2);
 }
 
-.controls-compact {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
 
 /* Icon-only Refresh Button */
 /* Modern Navbar Icon Buttons (Linear/Perplexity style) */
@@ -1243,15 +1228,6 @@ body::before {
     }
 }
 
-.email-count-compact {
-    font-weight: 600;
-    color: var(--primary-color);
-    font-size: 12px;
-    padding: 4px 8px;
-    background: rgba(99, 102, 241, 0.1);
-    border-radius: 6px;
-    white-space: nowrap;
-}
 
 .checkbox-compact {
     display: flex;
