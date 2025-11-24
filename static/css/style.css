@@ -2230,24 +2230,9 @@ body::before {
     margin-right: 8px; /* Space between label and count */
 }
 
-/* Sidebar unread count badges (Superhuman style) */
+/* Sidebar unread count badges (hidden) */
 .sidebar-unread-count {
-    margin-left: auto;
-    background: #EEF2FF;
-    color: #4338CA;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 9999px;
-    line-height: 1.5;
-    min-width: 20px;
-    text-align: center;
-    flex-shrink: 0; /* Prevent badge from shrinking */
-}
-
-.sidebar-item.active .sidebar-unread-count {
-    background: #E0E7FF;
-    color: #3730A3;
+    display: none !important; /* Hide all unread count badges */
 }
 
 /* Modern toast notifications (Superhuman style) */
