@@ -2973,9 +2973,13 @@ function displayEmails(emails) {
         const unreadClass = isUnread ? 'unread' : '';
         const attachmentClass = hasAttachments ? 'has-attachment' : '';
         
+        // Check if this is a draft email
+        const isDraft = email.is_draft || email.classification?.category === 'DRAFT';
+        const onclickHandler = isDraft ? `openDraft(${globalIndex})` : `openEmail(${globalIndex})`;
+        
         return `
             <div class="email-card ${unreadClass} ${attachmentClass}" 
-                 onclick="openEmail(${globalIndex})" 
+                 onclick="${onclickHandler}" 
                  oncontextmenu="event.preventDefault(); showContextMenu(event, ${globalIndex});"
                  data-email-index="${globalIndex}"
                  data-thread-id="${escapeHtml(email.thread_id || '')}">
@@ -4375,6 +4379,53 @@ function clearDraftState() {
     }
 }
 
+function openDraft(draftIndex) {
+    // Get the draft email from filteredEmails
+    const draftEmail = filteredEmails[draftIndex];
+    
+    if (!draftEmail || !draftEmail.is_draft) {
+        showAlert('error', 'Draft not found');
+        return;
+    }
+    
+    console.log('📝 Opening draft for editing:', draftEmail);
+    
+    // Set current email to the draft
+    currentEmail = draftEmail;
+    
+    // Clear previous draft state
+    clearDraftState();
+    
+    // Set composer mode based on draft type
+    composerMode = draftEmail.in_reply_to ? 'reply' : 'compose';
+    
+    // Open composer
+    const composerSection = document.getElementById('composerSection');
+    const composerTitle = document.getElementById('composerTitle');
+    const composerTo = document.getElementById('composerTo');
+    const composerSubject = document.getElementById('composerSubject');
+    const composerBody = document.getElementById('composerBody');
+    
+    // Set title
+    composerTitle.textContent = composerMode === 'reply' ? 'Edit Draft Reply' : 'Edit Draft';
+    
+    // Populate fields with draft data
+    composerTo.value = draftEmail.to || '';
+    composerSubject.value = draftEmail.subject || '';
+    composerBody.value = draftEmail.body || draftEmail.body_html || '';
+    
+    // Store draft ID for later update/deletion
+    currentDraftId = draftEmail.draft_id || draftEmail.id;
+    console.log(`📝 Editing draft ID: ${currentDraftId}`);
+    
+    // Show composer
+    composerSection.style.display = 'block';
+    composerBody.focus();
+    
+    // Scroll to composer
+    composerSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function openReplyComposer() {
     if (!currentEmail) {
         showAlert('error', 'No email selected');
@@ -5117,82 +5168,6 @@ function openComposeModal() {
 
 function closeComposeModal() {
     document.getElementById('composeModal').style.display = 'none';
-}
-
-async function sendComposedEmail() {
-    const to = document.getElementById('composeTo').value.trim();
-    const subject = document.getElementById('composeSubject').value.trim();
-    const body = document.getElementById('composeBody').value.trim();
-    
-    if (!to || !subject || !body) {
-        alert('Please fill in all fields: To, Subject, and Message');
-        return;
-    }
-    
-    // Validate email format (basic)
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(to)) {
-        alert('Please enter a valid email address');
-        return;
-    }
-    
-    const sendBtn = document.getElementById('sendComposeBtn');
-    const sendBtnText = document.getElementById('sendComposeBtnText');
-    const sendBtnSpinner = document.getElementById('sendComposeBtnSpinner');
-    
-    // Show loading state
-    sendBtn.disabled = true;
-    sendBtnText.style.display = 'none';
-    sendBtnSpinner.style.display = 'inline-block';
-    
-    try {
-        const response = await fetch('/api/send-email', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                to: to,
-                subject: subject,
-                body: body
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            // Show success message
-            const alert = document.createElement('div');
-            alert.className = 'alert alert-success';
-            alert.style.position = 'fixed';
-            alert.style.top = '20px';
-            alert.style.right = '20px';
-            alert.style.zIndex = '10000';
-            alert.innerHTML = '✓ Email sent successfully';
-            document.body.appendChild(alert);
-            
-            setTimeout(() => {
-                alert.remove();
-            }, 3000);
-            
-            // Close modal and clear fields
-            closeComposeModal();
-            
-            // Refresh sent emails if on sent tab
-            if (currentTab === 'sent') {
-                fetchSentEmails();
-            }
-        } else {
-            alert('Error: ' + (data.error || 'Failed to send email'));
-        }
-    } catch (error) {
-        alert('Error: ' + error.message);
-    } finally {
-        // Reset button state
-        sendBtn.disabled = false;
-        sendBtnText.style.display = 'inline';
-        sendBtnSpinner.style.display = 'none';
-    }
 }
 
 // Keyboard shortcuts
