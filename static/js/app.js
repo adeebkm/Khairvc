@@ -1499,6 +1499,21 @@ function switchTab(tabName) {
     if (tabName === 'deal-flow') {
         emailList.style.display = 'none';
         dealFlowTable.style.display = 'block';
+        
+        // Show cached deals immediately if available (instant load - 0ms)
+        if (dealsCache.length > 0) {
+            console.log(`⚡ [DEALS] Showing ${dealsCache.length} deals from cache (instant)`);
+            displayDeals(dealsCache);
+        } else {
+            // Show loading state immediately
+            const tbody = document.getElementById('dealFlowBody');
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Loading deals...</td></tr>';
+            }
+            console.log('📊 [DEALS] No cache available, will fetch from API');
+        }
+        
+        // Fetch fresh data in background (non-blocking)
         loadDeals();
     } else if (tabName === 'sent') {
         emailList.style.display = 'block';
@@ -2024,32 +2039,39 @@ async function rescoreAllDeals() {
 }
 
 async function loadDeals() {
-    // Show cached deals immediately
-    if (dealsCache.length > 0) {
-        console.log(`⚡ Showing ${dealsCache.length} deals from cache (instant)`);
-        displayDeals(dealsCache);
-    }
+    // Don't show cached deals here - switchTab already does that for instant display
+    // Just fetch fresh data in background
     
-    // Fetch fresh data in background
     try {
+        console.log('📊 [DEALS] Fetching fresh deals from API...');
         const response = await fetch('/api/deals');
         const data = await response.json();
         
         if (data.success) {
+            console.log(`📊 [DEALS] Received ${data.deals.length} deals from API`);
             dealsCache = data.deals;
             saveDealsCacheToStorage();
-            displayDeals(data.deals);
+            
+            // Only update UI if we're still on the deal-flow tab
+            if (currentTab === 'deal-flow') {
+                displayDeals(data.deals);
+            }
         } else {
-            console.error('Error loading deals:', data.error);
+            console.error('❌ [DEALS] Error loading deals:', data.error);
         }
     } catch (error) {
-        console.error('Error loading deals:', error);
+        console.error('❌ [DEALS] Exception loading deals:', error);
     }
 }
 
 // Display Deal Flow deals in table
 function displayDeals(deals) {
     const tbody = document.getElementById('dealFlowBody');
+    
+    if (!tbody) {
+        console.warn('⚠️ [DEALS] dealFlowBody element not found, cannot display deals');
+        return;
+    }
     
     if (deals.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No deals found</td></tr>';
