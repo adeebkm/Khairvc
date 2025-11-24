@@ -530,58 +530,8 @@ def signup_google():
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
-    """User registration"""
-    if request.method == 'POST':
-        username = request.form.get('username')
-        email = request.form.get('email')
-        password = request.form.get('password')
-        confirm_password = request.form.get('confirm_password')
-        whatsapp_enabled = request.form.get('whatsapp_enabled') == 'on'
-        whatsapp_number = request.form.get('whatsapp_number', '').strip()
-        
-        # Validation
-        if password != confirm_password:
-            return render_template('signup.html', error='Passwords do not match')
-        
-        if User.query.filter_by(username=username).first():
-            return render_template('signup.html', error='Username already exists')
-        
-        if User.query.filter_by(email=email).first():
-            return render_template('signup.html', error='Email already registered')
-        
-        # Validate WhatsApp number if enabled
-        if whatsapp_enabled and not whatsapp_number:
-            return render_template('signup.html', error='Please enter a WhatsApp number')
-        
-        if whatsapp_enabled and not whatsapp_number.startswith('+'):
-            return render_template('signup.html', error='WhatsApp number must include country code (e.g., +1234567890)')
-        
-        # Create new user
-        new_user = User(username=username, email=email)
-        new_user.set_password(password)
-        
-        # Set WhatsApp preferences
-        if whatsapp_enabled and whatsapp_number:
-            new_user.whatsapp_enabled = True
-            new_user.whatsapp_number = whatsapp_number
-            print(f"✅ New user {username} signed up with WhatsApp: {whatsapp_number}")
-        else:
-            new_user.whatsapp_enabled = False
-            new_user.whatsapp_number = None
-        
-        db.session.add(new_user)
-        db.session.commit()
-        
-        # Log in the new user
-        login_user(new_user)
-        session.permanent = True
-        session['user_id'] = new_user.id
-        session['username'] = new_user.username
-        
-        # Return success - frontend will show Gmail connection modal
-        return render_template('signup.html', signup_success=True, username=username)
-    
-    return render_template('signup.html', signup_success=False)
+    """Redirect to login - we only use Google OAuth now"""
+    return redirect(url_for('login'))
 
 
 @app.route('/logout')
