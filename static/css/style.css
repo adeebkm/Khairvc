@@ -2547,6 +2547,12 @@ body::before {
     animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Ensure action bar is always visible and not cut off */
+.email-modal-content > .email-modal-action-bar {
+    flex-shrink: 0;
+    z-index: 10;
+}
+
 .modal-content {
     background: var(--bg-primary);
     border-radius: 8px;
@@ -2927,26 +2933,37 @@ body::before {
     background: #f9fafb; /* bg-gray-50 */
     border-top: 1px solid #f3f4f6; /* border-gray-100 */
     border-bottom: 1px solid #f3f4f6; /* border-gray-100 */
+    overflow: visible;
+    min-height: 44px;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .email-action-btn {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
     font-size: 0.75rem; /* text-xs */
     font-weight: 500; /* font-medium */
-    padding: 6px 12px; /* px-3 py-1.5 */
+    padding: 8px 14px; /* Increased padding for better touch targets */
     border-radius: 0.5rem; /* rounded-lg */
     border: none;
     cursor: pointer;
     transition: all 0.2s ease;
     white-space: nowrap;
+    min-width: fit-content;
+    flex-shrink: 0;
+    height: 32px;
+    box-sizing: border-box;
 }
 
 .email-action-btn svg {
     width: 16px;
     height: 16px;
     stroke-width: 1.5;
+    flex-shrink: 0;
+    display: block;
 }
 
 .email-action-primary {
@@ -3840,6 +3857,22 @@ body::before {
     .header-title {
         font-size: 24px;
     }
+    
+    /* Email Modal Action Bar - Responsive */
+    .email-modal-action-bar {
+        padding: 10px 16px;
+        gap: 6px;
+    }
+    
+    .email-action-btn {
+        padding: 6px 10px;
+        font-size: 0.7rem;
+    }
+    
+    .email-action-btn svg {
+        width: 14px;
+        height: 14px;
+    }
 
     .header-content {
         flex-direction: column;
@@ -3908,6 +3941,33 @@ body::before {
     .nav-actions {
         flex-direction: column;
         align-items: flex-end;
+    }
+    
+    /* Email Modal Action Bar - Small Screens */
+    .email-modal-action-bar {
+        padding: 8px 12px;
+        gap: 4px;
+    }
+    
+    .email-action-btn {
+        padding: 6px 8px;
+        font-size: 0.65rem;
+        min-width: auto;
+    }
+    
+    .email-action-btn svg {
+        width: 12px;
+        height: 12px;
+    }
+    
+    /* Hide text on very small screens, show only icons */
+    .email-action-btn:not(.email-action-primary) {
+        padding: 6px;
+    }
+    
+    .email-action-btn:not(.email-action-primary) span,
+    .email-action-btn:not(.email-action-primary) {
+        /* Keep text for primary button, hide for others if needed */
     }
 }
 
