@@ -639,9 +639,15 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                 # Send auto-reply for deal flow emails (only for new emails, not initial sync)
                                 # Check if this is an incremental sync (new email, not initial 200)
                                 if start_history_id is not None:
-                                    # Check if email sending is enabled
+                                    # Check if auto-reply is enabled
+                                    # Default to enabled unless explicitly disabled
+                                    auto_reply_disabled = os.getenv('AUTO_REPLY_DISABLED', 'false').lower() == 'true'
                                     send_emails = os.getenv('SEND_EMAILS', 'false').lower() == 'true'
-                                    if send_emails:
+                                    
+                                    # Auto-reply is enabled if:
+                                    # 1. AUTO_REPLY_DISABLED is not true, AND
+                                    # 2. SEND_EMAILS is true (required for sending emails)
+                                    if not auto_reply_disabled and send_emails:
                                         try:
                                             # Extract sender email
                                             sender_email = email.get('from', '')
@@ -685,7 +691,10 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                             traceback.print_exc()
                                             # Don't fail the whole task if auto-reply fails
                                     else:
-                                        print(f"📧 [TASK] Email sending disabled (SEND_EMAILS=false), skipping auto-reply for deal {deal.id}")
+                                        if not send_emails:
+                                            print(f"📧 [TASK] Email sending disabled (SEND_EMAILS=false), skipping auto-reply for deal {deal.id}")
+                                        else:
+                                            print(f"📧 [TASK] Auto-reply disabled (AUTO_REPLY_DISABLED=true), skipping auto-reply for deal {deal.id}")
                                 else:
                                     print(f"📧 [TASK] Skipping auto-reply for deal {deal.id} (initial sync, not new email)")
                                 
