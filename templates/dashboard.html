@@ -459,7 +459,8 @@
                         </label>
                     </div>
                     <div class="composer-field">
-                        <textarea id="composerBody" class="form-control composer-textarea" rows="10" placeholder="Write your message..."></textarea>
+                        <div id="composerBody" contenteditable="true" class="form-control composer-textarea" data-placeholder="Write your message..." style="min-height: 200px; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; font-family: inherit; background: white; overflow-y: auto; line-height: 1.5;"></div>
+                        <textarea id="composerBodyHidden" style="display: none;"></textarea>
                     </div>
                     <div class="attachment-preview-list" id="attachmentPreviewList"></div>
                     <div class="composer-actions">
@@ -542,7 +543,8 @@
                 </div>
                 <div style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 6px; font-weight: 500; color: var(--text-primary);">Message:</label>
-                    <textarea id="composeBody" class="compose-textarea" placeholder="Type your message here..." style="width: 100%; min-height: 300px; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; font-family: inherit; resize: vertical;"></textarea>
+                    <div id="composeBody" contenteditable="true" class="compose-textarea" data-placeholder="Type your message here..." style="width: 100%; min-height: 300px; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; font-family: inherit; resize: vertical; background: white; overflow-y: auto; line-height: 1.5;"></div>
+                    <textarea id="composeBodyHidden" style="display: none;"></textarea>
                 </div>
                 <div style="margin-bottom: 16px;">
                     <input type="file" id="composeAttachments" multiple style="display: none;" onchange="handleAttachmentSelection(event)">

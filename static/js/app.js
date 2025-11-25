@@ -4154,6 +4154,32 @@ async function loadSignaturePreview(type) {
     return;
 }
 
+// Helper function to get content from contenteditable div or textarea
+function getBodyContent(element) {
+    if (element.contentEditable === 'true') {
+        return element.innerHTML;
+    }
+    return element.value || '';
+}
+
+// Helper function to set content in contenteditable div or textarea
+function setBodyContent(element, content) {
+    if (element.contentEditable === 'true') {
+        element.innerHTML = content;
+    } else {
+        element.value = content;
+    }
+}
+
+// Helper function to check if signature is already in body
+function bodyContainsSignature(bodyContent, signatureHtml) {
+    // Check both HTML and plain text versions
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = signatureHtml;
+    const signatureText = tempDiv.textContent || tempDiv.innerText || '';
+    return bodyContent.includes(signatureText.substring(0, 50)) || bodyContent.includes(signatureHtml.substring(0, 100));
+}
+
 // Insert signature into body (for reply/reply all - at the top)
 async function insertSignatureIntoBody(type) {
     // type can be 'reply' or 'compose'
@@ -4178,26 +4204,20 @@ async function insertSignatureIntoBody(type) {
         
         if (selectedSig && (selectedSig.signatureHtml || selectedSig.signatureRaw)) {
             const signatureHtml = selectedSig.signatureHtml || selectedSig.signatureRaw;
+            const currentBody = getBodyContent(bodyEl);
             
-            // Convert HTML signature to plain text for textarea (strip tags but preserve structure)
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = signatureHtml;
-            const signatureText = tempDiv.textContent || tempDiv.innerText || '';
+            // Check if signature is already in body
+            if (bodyContainsSignature(currentBody, signatureHtml)) {
+                return;
+            }
             
             // For reply/reply all, insert at the top (before quoted text)
             if (type === 'reply') {
-                const currentBody = bodyEl.value;
-                // Check if signature is already in body
-                if (!currentBody.includes(signatureText.substring(0, 50))) {
-                    // Insert signature at the top, then add spacing before quoted text
-                    bodyEl.value = signatureText + '\n\n' + currentBody.trim();
-                }
+                // Insert HTML signature at the top with spacing
+                setBodyContent(bodyEl, signatureHtml + '<br><br>' + currentBody.trim());
             } else {
                 // For compose, append at the end
-                const currentBody = bodyEl.value;
-                if (!currentBody.includes(signatureText.substring(0, 50))) {
-                    bodyEl.value = currentBody + (currentBody ? '\n\n' : '') + signatureText;
-                }
+                setBodyContent(bodyEl, currentBody + (currentBody ? '<br><br>' : '') + signatureHtml);
             }
         }
     } catch (error) {
@@ -4513,17 +4533,23 @@ function getNewComposerContent() {
     const composerBody = document.getElementById('composerBody');
     if (!composerBody) return '';
     
-    const fullBody = composerBody.value || '';
+    const fullBody = getBodyContent(composerBody);
+    
+    // For HTML content, find where quoted text starts (look for "On " in text)
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = fullBody;
+    const textContent = tempDiv.textContent || tempDiv.innerText || '';
     
     // Find where quoted text starts
-    const quotedIndex = fullBody.indexOf(quotedTextStartMarker + 'On ');
+    const quotedIndex = textContent.indexOf('\n\nOn ');
     if (quotedIndex === -1) {
-        // No quoted text found, return full body
-        return fullBody.trim();
+        // No quoted text found, return full body (strip HTML tags for comparison)
+        return textContent.trim();
     }
     
-    // Return only the new content before quoted text
-    return fullBody.substring(0, quotedIndex).trim();
+    // Return only the new content before quoted text (as HTML)
+    const htmlBeforeQuoted = fullBody.substring(0, fullBody.indexOf(textContent.substring(quotedIndex).substring(0, 20)));
+    return htmlBeforeQuoted.trim();
 }
 
 // Check if composer has meaningful new content
@@ -4564,7 +4590,7 @@ async function autosaveDraft() {
     const cc = composerCc && composerCc.value.trim();
     const bcc = composerBcc && composerBcc.value.trim();
     const subject = composerSubject.value.trim();
-    const body = composerBody.value; // Keep full body with quoted text for display
+    const body = getBodyContent(composerBody); // Keep full body with quoted text for display
     
     if (!to) {
         console.log('💾 Skipping autosave: no recipient');
@@ -4808,7 +4834,7 @@ function openDraft(draftIndex) {
     // Populate fields with draft data
     composerTo.value = draftEmail.to || '';
     composerSubject.value = draftEmail.subject || '';
-    composerBody.value = draftEmail.body || draftEmail.body_html || '';
+    setBodyContent(composerBody, draftEmail.body_html || draftEmail.body || '');
     
     // Store draft ID for later update/deletion
     currentDraftId = draftEmail.draft_id || draftEmail.id;
@@ -4857,7 +4883,7 @@ async function openReplyComposer() {
     
     // Set body with quoted text (signature will be inserted at the top)
     const quotedText = formatQuotedText(currentEmail);
-    composerBody.value = `\n\n${quotedText}`;
+    setBodyContent(composerBody, `<br><br>${escapeHtml(quotedText)}`);
     
     // Insert signature at the top of the body
     await insertSignatureIntoBody('reply');
@@ -4920,7 +4946,7 @@ async function openReplyAllComposer() {
     
     // Set body with quoted text (signature will be inserted at the top)
     const quotedText = formatQuotedText(currentEmail);
-    composerBody.value = `\n\n${quotedText}`;
+    setBodyContent(composerBody, `<br><br>${escapeHtml(quotedText)}`);
     
     // Insert signature at the top of the body
     await insertSignatureIntoBody('reply');
@@ -4965,7 +4991,7 @@ function openForwardComposer() {
     
     // Set body with forwarded message
     const forwardedText = formatForwardedMessage(currentEmail);
-    composerBody.value = `\n\n${forwardedText}`;
+    setBodyContent(composerBody, `<br><br>${escapeHtml(forwardedText)}`);
     
     // Include original attachments if any
     composerAttachments = [];
@@ -5065,7 +5091,7 @@ function clearComposerFields() {
     if (composerCc) composerCc.value = '';
     if (composerBcc) composerBcc.value = '';
     if (composerSubject) composerSubject.value = '';
-    if (composerBody) composerBody.value = '';
+    if (composerBody) setBodyContent(composerBody, '');
     
     // Clear attachments
     composerAttachments = [];
@@ -5492,7 +5518,8 @@ async function openComposeModal() {
     document.getElementById('composeCc').value = '';
     document.getElementById('composeBcc').value = '';
     document.getElementById('composeSubject').value = '';
-    document.getElementById('composeBody').value = '';
+    const composeBodyEl = document.getElementById('composeBody');
+    if (composeBodyEl) setBodyContent(composeBodyEl, '');
     composeAttachments = [];
     updateAttachmentList();
     // Hide CC/BCC fields by default
@@ -5607,14 +5634,16 @@ async function sendComposedEmail() {
         cc = document.getElementById('composerCc')?.value.trim() || '';
         bcc = document.getElementById('composerBcc')?.value.trim() || '';
         subject = document.getElementById('composerSubject')?.value.trim() || '';
-        body = document.getElementById('composerBody')?.value.trim() || '';
+        const composerBodyEl = document.getElementById('composerBody');
+        body = getBodyContent(composerBodyEl).trim() || '';
     } else {
         // New compose modal (standalone)
         to = document.getElementById('composeTo')?.value.trim() || '';
         cc = document.getElementById('composeCc')?.value.trim() || '';
         bcc = document.getElementById('composeBcc')?.value.trim() || '';
         subject = document.getElementById('composeSubject')?.value.trim() || '';
-        body = document.getElementById('composeBody')?.value.trim() || '';
+        const composeBodyEl = document.getElementById('composeBody');
+        body = getBodyContent(composeBodyEl).trim() || '';
     }
     
     if (!to) {

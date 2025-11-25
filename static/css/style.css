@@ -1772,6 +1772,18 @@ body::before {
     border-color: var(--primary-color);
 }
 
+/* Contenteditable placeholder styling */
+[contenteditable="true"][data-placeholder]:empty:before {
+    content: attr(data-placeholder);
+    color: #9ca3af;
+    pointer-events: none;
+}
+
+[contenteditable="true"][data-placeholder]:empty:focus:before {
+    content: attr(data-placeholder);
+    color: #9ca3af;
+}
+
 .composer-textarea {
     min-height: 150px;
     resize: vertical;
