@@ -698,6 +698,18 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                 else:
                                     print(f"📧 [TASK] Skipping auto-reply for deal {deal.id} (initial sync, not new email)")
                                 
+                                # Trigger scheduled email generation for new deal flow emails
+                                # Only for incremental sync (new emails), not initial 200
+                                if start_history_id is not None:
+                                    try:
+                                        # Use celery.send_task to avoid circular import
+                                        from celery_config import celery
+                                        celery.send_task('tasks.generate_scheduled_email', args=[deal.id])
+                                        print(f"📅 [TASK] Triggered scheduled email generation for deal {deal.id}")
+                                    except Exception as schedule_error:
+                                        print(f"⚠️  [TASK] Failed to trigger scheduled email generation for deal {deal.id}: {str(schedule_error)}")
+                                        # Don't fail the whole task if scheduling fails
+                                
                                 break
                             except Exception as commit_error:
                                 if 'EOF' in str(commit_error) or 'SSL SYSCALL' in str(commit_error) or 'connection' in str(commit_error).lower():
@@ -1237,6 +1249,46 @@ def send_whatsapp_followups():
                     if not user or not user.whatsapp_enabled or not user.whatsapp_number:
                         continue
                     
+                    # Check if first email in thread has been replied to
+                    try:
+                        from gmail_client import GmailClient
+                        from auth import decrypt_token
+                        
+                        if not user.gmail_token:
+                            print(f"⚠️  [WHATSAPP] No Gmail token for user {user.id}, skipping deal {deal.id}")
+                            continue
+                        
+                        token_json = decrypt_token(user.gmail_token.encrypted_token)
+                        gmail = GmailClient(token_json=token_json)
+                        
+                        # Get thread messages
+                        thread_messages = gmail.get_thread_messages(deal.thread_id)
+                        
+                        if not thread_messages:
+                            print(f"⚠️  [WHATSAPP] Could not fetch thread messages for deal {deal.id}")
+                            continue
+                        
+                        # Check if any message in thread is from user (sent by us)
+                        has_reply = False
+                        user_email = user.email.lower()
+                        
+                        for message in thread_messages:
+                            from_header = message.get('from', '').lower()
+                            # Check if message is from user (sent by us)
+                            if user_email in from_header or f'<{user_email}>' in from_header:
+                                has_reply = True
+                                print(f"⏭️  [WHATSAPP] Skipping follow-up for deal {deal.id} - reply already sent (found in thread)")
+                                break
+                        
+                        if has_reply:
+                            continue
+                            
+                    except Exception as check_error:
+                        print(f"⚠️  [WHATSAPP] Error checking thread for deal {deal.id}: {str(check_error)}")
+                        # Continue anyway - don't block follow-up if check fails
+                        import traceback
+                        traceback.print_exc()
+                    
                     deal.whatsapp_followup_count += 1
                     deal.whatsapp_last_followup_at = datetime.utcnow()
                     
@@ -1263,6 +1315,233 @@ def send_whatsapp_followups():
     except Exception as e:
         error_msg = f"WhatsApp follow-up task failed: {str(e)}"
         print(f"❌ [WHATSAPP] {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return {'status': 'error', 'error': error_msg}
+
+
+@celery.task(name='tasks.generate_scheduled_email')
+def generate_scheduled_email(deal_id):
+    """
+    Generate scheduled email for a deal using Lambda/Kimi AI
+    Creates a scheduled email that will be sent after 6 hours if no reply is sent
+    """
+    try:
+        from app import app, db
+    except ImportError:
+        import sys
+        import os
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, current_dir)
+        from app import app, db
+    
+    from models import Deal, User, ScheduledEmail
+    from gmail_client import GmailClient
+    from lambda_client import LambdaClient
+    from auth import decrypt_token
+    
+    try:
+        with app.app_context():
+            deal = Deal.query.get(deal_id)
+            if not deal:
+                return {'status': 'error', 'error': 'Deal not found'}
+            
+            user = User.query.get(deal.user_id)
+            if not user or not user.gmail_token:
+                return {'status': 'error', 'error': 'User or Gmail token not found'}
+            
+            # Check if scheduled email already exists for this deal
+            existing = ScheduledEmail.query.filter_by(
+                deal_id=deal.id,
+                status='pending'
+            ).first()
+            
+            if existing:
+                print(f"⏭️  [SCHEDULED] Scheduled email already exists for deal {deal.id}")
+                return {'status': 'skipped', 'reason': 'Already exists'}
+            
+            # Get Gmail client
+            token_json = decrypt_token(user.gmail_token.encrypted_token)
+            gmail = GmailClient(token_json=token_json)
+            
+            # Get first email in thread
+            thread_messages = gmail.get_thread_messages(deal.thread_id)
+            if not thread_messages:
+                return {'status': 'error', 'error': 'Thread not found'}
+            
+            first_email = thread_messages[0]  # First email in thread
+            
+            # Extract email data
+            email_subject = first_email.get('subject', deal.subject or 'No Subject')
+            email_body = first_email.get('body', '')
+            email_sender = first_email.get('from', deal.founder_email or '')
+            
+            # Call Lambda to generate email
+            try:
+                lambda_client = LambdaClient()
+                generated_body = lambda_client.generate_scheduled_email(
+                    subject=email_subject,
+                    body=email_body,
+                    sender=email_sender,
+                    founder_name=deal.founder_name,
+                    thread_id=deal.thread_id,
+                    user_id=str(user.id)
+                )
+            except Exception as lambda_error:
+                print(f"❌ [SCHEDULED] Lambda error for deal {deal.id}: {str(lambda_error)}")
+                return {'status': 'error', 'error': f'Lambda error: {str(lambda_error)}'}
+            
+            # Create scheduled email
+            scheduled_at = datetime.utcnow() + timedelta(hours=6)
+            scheduled_email = ScheduledEmail(
+                user_id=user.id,
+                deal_id=deal.id,
+                thread_id=deal.thread_id,
+                to_email=deal.founder_email or email_sender,
+                subject=f"Re: {email_subject}" if not email_subject.startswith('Re:') else email_subject,
+                body=generated_body,
+                scheduled_at=scheduled_at,
+                status='pending'
+            )
+            
+            db.session.add(scheduled_email)
+            db.session.commit()
+            
+            print(f"✅ [SCHEDULED] Generated scheduled email for deal {deal.id}, scheduled for {scheduled_at}")
+            
+            return {
+                'status': 'success',
+                'scheduled_email_id': scheduled_email.id,
+                'scheduled_at': scheduled_at.isoformat()
+            }
+            
+    except Exception as e:
+        error_msg = f"Scheduled email generation failed: {str(e)}"
+        print(f"❌ [SCHEDULED] {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return {'status': 'error', 'error': error_msg}
+
+
+@celery.task(name='tasks.send_scheduled_emails')
+def send_scheduled_emails():
+    """
+    Send scheduled emails that are due
+    Runs periodically via Celery Beat
+    Checks if reply has been sent, cancels if so, otherwise sends the email
+    """
+    try:
+        from app import app, db
+    except ImportError:
+        import sys
+        import os
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, current_dir)
+        from app import app, db
+    
+    from models import ScheduledEmail, User, Deal
+    from gmail_client import GmailClient
+    from auth import decrypt_token
+    
+    try:
+        with app.app_context():
+            now = datetime.utcnow()
+            
+            # Get scheduled emails that are due and pending
+            scheduled_emails = ScheduledEmail.query.filter(
+                ScheduledEmail.status == 'pending',
+                ScheduledEmail.scheduled_at <= now
+            ).all()
+            
+            print(f"📧 [SCHEDULED] Checking {len(scheduled_emails)} scheduled emails...")
+            
+            sent_count = 0
+            cancelled_count = 0
+            failed_count = 0
+            errors = []
+            
+            for scheduled_email in scheduled_emails:
+                try:
+                    user = User.query.get(scheduled_email.user_id)
+                    if not user or not user.gmail_token:
+                        print(f"⚠️  [SCHEDULED] User or Gmail token not found for scheduled email {scheduled_email.id}")
+                        continue
+                    
+                    # Check if reply has been sent (same logic as WhatsApp follow-up)
+                    try:
+                        token_json = decrypt_token(user.gmail_token.encrypted_token)
+                        gmail = GmailClient(token_json=token_json)
+                        
+                        thread_messages = gmail.get_thread_messages(scheduled_email.thread_id)
+                        
+                        if not thread_messages:
+                            print(f"⚠️  [SCHEDULED] Could not fetch thread for scheduled email {scheduled_email.id}")
+                            continue
+                        
+                        # Check if any message is from user
+                        has_reply = False
+                        user_email = user.email.lower()
+                        
+                        for message in thread_messages:
+                            from_header = message.get('from', '').lower()
+                            if user_email in from_header or f'<{user_email}>' in from_header:
+                                has_reply = True
+                                break
+                        
+                        if has_reply:
+                            # Cancel scheduled email - reply already sent
+                            scheduled_email.status = 'cancelled'
+                            scheduled_email.cancelled_at = datetime.utcnow()
+                            db.session.commit()
+                            cancelled_count += 1
+                            print(f"⏭️  [SCHEDULED] Cancelled scheduled email {scheduled_email.id} - reply already sent")
+                            continue
+                            
+                    except Exception as check_error:
+                        print(f"⚠️  [SCHEDULED] Error checking thread for scheduled email {scheduled_email.id}: {str(check_error)}")
+                        # Continue anyway - try to send
+                    
+                    # Send the scheduled email
+                    selected_email = user.gmail_token.selected_signature_email if user.gmail_token else None
+                    success = gmail.send_reply(
+                        to_email=scheduled_email.to_email,
+                        subject=scheduled_email.subject,
+                        body=scheduled_email.body,
+                        thread_id=scheduled_email.thread_id,
+                        send_as_email=selected_email
+                    )
+                    
+                    if success:
+                        scheduled_email.status = 'sent'
+                        scheduled_email.sent_at = datetime.utcnow()
+                        sent_count += 1
+                        print(f"✅ [SCHEDULED] Sent scheduled email {scheduled_email.id}")
+                    else:
+                        scheduled_email.status = 'failed'
+                        failed_count += 1
+                        print(f"⚠️  [SCHEDULED] Failed to send scheduled email {scheduled_email.id}")
+                    
+                    db.session.commit()
+                    
+                except Exception as e:
+                    error_msg = f"Error processing scheduled email {scheduled_email.id}: {str(e)}"
+                    errors.append(error_msg)
+                    print(f"❌ [SCHEDULED] {error_msg}")
+                    db.session.rollback()
+                    continue
+            
+            print(f"📧 [SCHEDULED] Task complete: {sent_count} sent, {cancelled_count} cancelled, {failed_count} failed, {len(errors)} errors")
+            return {
+                'status': 'complete',
+                'sent': sent_count,
+                'cancelled': cancelled_count,
+                'failed': failed_count,
+                'errors': errors[:10]
+            }
+            
+    except Exception as e:
+        error_msg = f"Scheduled email sending task failed: {str(e)}"
+        print(f"❌ [SCHEDULED] {error_msg}")
         import traceback
         traceback.print_exc()
         return {'status': 'error', 'error': error_msg}

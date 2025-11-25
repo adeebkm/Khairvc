@@ -37,6 +37,8 @@ celery.conf.task_routes = {
     'tasks.sync_user_emails': {'queue': 'email_sync'},
     'tasks.classify_email_task': {'queue': 'email_sync'},
     'tasks.send_whatsapp_followups': {'queue': 'email_sync'},
+    'tasks.generate_scheduled_email': {'queue': 'email_sync'},
+    'tasks.send_scheduled_emails': {'queue': 'email_sync'},
     'tasks.process_pubsub_notification': {'queue': 'pubsub_notifications'},
 }
 
@@ -48,6 +50,10 @@ celery.conf.beat_schedule = {
     'send-whatsapp-followups': {
         'task': 'tasks.send_whatsapp_followups',
         'schedule': crontab(minute='*/30'),  # Every 30 minutes (checks if 6 hours passed)
+    },
+    'send-scheduled-emails': {
+        'task': 'tasks.send_scheduled_emails',
+        'schedule': crontab(minute='*/30'),  # Every 30 minutes (sends scheduled emails that are due)
     },
 }
 celery.conf.timezone = 'UTC'

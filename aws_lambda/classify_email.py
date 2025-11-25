@@ -296,24 +296,117 @@ Return ONLY the JSON object. No additional text."""
     return final_result
 
 
+def generate_email_with_kimi(email_data: Dict[str, Any]) -> str:
+    """
+    Generate scheduled email using Kimi AI
+    This function does NOT log email content or API requests/responses
+    """
+    # Extract email components
+    subject = email_data.get('subject', '')
+    body = email_data.get('body', '')
+    sender = email_data.get('sender', '')
+    founder_name = email_data.get('founder_name', '')
+    
+    # Build email generation prompt
+    prompt = f"""Generate a professional follow-up email for a deal flow opportunity.
+
+Original Email:
+Subject: {subject}
+From: {sender}
+Founder: {founder_name}
+Body: {body[:1000]}...
+
+Generate a warm, professional email that:
+- Acknowledges receiving their email
+- Shows genuine interest in learning more about their startup
+- Asks relevant questions about their venture (team, traction, market, etc.)
+- Maintains a friendly but professional tone
+- Is concise but engaging (2-3 paragraphs)
+- Ends with a clear call to action
+
+Return ONLY the email body in HTML format. Use <p> tags for paragraphs. Do not include subject line or signature."""
+
+    # Get API key from Secrets Manager
+    api_key = get_openai_api_key()
+    
+    # Create OpenAI-compatible client for Moonshot API
+    import httpx
+    client = OpenAI(
+        base_url="https://api.moonshot.ai/v1",
+        api_key=api_key,
+        timeout=httpx.Timeout(110.0, connect=10.0)
+    )
+    
+    # Call Kimi API with retry logic
+    import time
+    max_retries = 3
+    retry_delay = 2
+    
+    response = None
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model="kimi-k2-turbo-preview",
+                messages=[
+                    {"role": "system", "content": "You are a professional email writer for a venture capital firm. Return ONLY the email body in HTML format. No markdown, no explanation, no additional text."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=1500
+            )
+            # Success - break out of retry loop
+            break
+        except Exception as api_error:
+            last_error = api_error
+            error_type = type(api_error).__name__
+            error_msg = str(api_error)
+            
+            if attempt < max_retries - 1:
+                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                logger.warning(f"Kimi API error (attempt {attempt + 1}/{max_retries}): {error_type}")
+                time.sleep(wait_time)
+                continue
+            else:
+                logger.error(f"Kimi API failed after {max_retries} attempts: {error_type}")
+                raise Exception(f"Kimi API error: {error_msg}")
+    
+    if not response:
+        raise Exception(f"Failed to generate email: {last_error}")
+    
+    # Extract generated email body
+    generated_email = response.choices[0].message.content.strip()
+    
+    # Ensure it's HTML format (wrap in <p> tags if plain text)
+    if not generated_email.startswith('<'):
+        # Convert plain text to HTML
+        paragraphs = generated_email.split('\n\n')
+        generated_email = ''.join([f'<p>{p.strip()}</p>' for p in paragraphs if p.strip()])
+    
+    return generated_email
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Lambda handler function
     - Receives encrypted email content
+    - Supports two actions: 'classify' (default) and 'generate_email'
     - Decrypts email
-    - Classifies using OpenAI (no logging)
+    - Processes using OpenAI/Kimi (no logging)
     - Encrypts result
-    - Returns encrypted classification
+    - Returns encrypted result
     """
     try:
         # Extract metadata for logging (NO email content)
         thread_id = event.get('thread_id', 'unknown')
         user_id = event.get('user_id', 'unknown')
         request_id = getattr(context, "aws_request_id", None)
+        action = event.get('action', 'classify')  # Default to classify for backward compatibility
         
-        # ✅ Structured audit log: classification request (metadata only)
+        # ✅ Structured audit log: request (metadata only)
         logger.info(json.dumps({
-            "event": "classification_request",
+            "event": f"{action}_request",
             "thread_id": thread_id,
             "user_id": user_id,
             "request_id": request_id
@@ -334,45 +427,81 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         email_content = decrypt_email_content(encrypted_email, encryption_key)
         email_data = json.loads(email_content)
         
-        # Classify email using OpenAI (NO logging of content - disabled above)
-        classification_result = classify_email_with_openai(email_data)
-        
-        # Encrypt result (NO logging)
-        result_json = json.dumps(classification_result)
-        encrypted_result = encrypt_result(result_json, user_encryption_key)
-        
-        # ✅ Structured audit log: classification result (metadata only)
-        try:
-            logger.info(json.dumps({
-                "event": "classification_result",
-                "thread_id": thread_id,
-                "user_id": user_id,
-                "request_id": request_id,
-                "label": classification_result.get("label"),
-                "confidence": classification_result.get("confidence"),
-                "deterministic_category": email_data.get("deterministic_category"),
-                "has_pdf_attachment": email_data.get("has_pdf_attachment", False)
-            }))
-        except Exception:
-            # Never fail the function because of logging
-            pass
-        
-        # Clear sensitive data from memory (results already summarized above)
-        del email_content
-        del email_data
-        del classification_result
-        del result_json
-        
-        # ✅ OK - Log success (metadata only)
-        logger.info(f"Classification completed - Thread: {thread_id}")
-        
-        return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'success': True,
-                'encrypted_result': encrypted_result
-            })
-        }
+        # Handle different actions
+        if action == 'generate_email':
+            # Generate email using Kimi AI (NO logging of content - disabled above)
+            generated_email = generate_email_with_kimi(email_data)
+            
+            # Encrypt result (NO logging)
+            encrypted_result = encrypt_result(generated_email, user_encryption_key)
+            
+            # ✅ Structured audit log: email generation result (metadata only)
+            try:
+                logger.info(json.dumps({
+                    "event": "email_generated",
+                    "thread_id": thread_id,
+                    "user_id": user_id,
+                    "request_id": request_id
+                }))
+            except Exception:
+                # Never fail the function because of logging
+                pass
+            
+            # Clear sensitive data from memory
+            del email_content
+            del email_data
+            del generated_email
+            
+            # ✅ OK - Log success (metadata only)
+            logger.info(f"Email generation completed - Thread: {thread_id}")
+            
+            return {
+                'statusCode': 200,
+                'body': json.dumps({
+                    'success': True,
+                    'encrypted_email_body': encrypted_result
+                })
+            }
+        else:
+            # Default: Classify email using OpenAI (NO logging of content - disabled above)
+            classification_result = classify_email_with_openai(email_data)
+            
+            # Encrypt result (NO logging)
+            result_json = json.dumps(classification_result)
+            encrypted_result = encrypt_result(result_json, user_encryption_key)
+            
+            # ✅ Structured audit log: classification result (metadata only)
+            try:
+                logger.info(json.dumps({
+                    "event": "classification_result",
+                    "thread_id": thread_id,
+                    "user_id": user_id,
+                    "request_id": request_id,
+                    "label": classification_result.get("label"),
+                    "confidence": classification_result.get("confidence"),
+                    "deterministic_category": email_data.get("deterministic_category"),
+                    "has_pdf_attachment": email_data.get("has_pdf_attachment", False)
+                }))
+            except Exception:
+                # Never fail the function because of logging
+                pass
+            
+            # Clear sensitive data from memory (results already summarized above)
+            del email_content
+            del email_data
+            del classification_result
+            del result_json
+            
+            # ✅ OK - Log success (metadata only)
+            logger.info(f"Classification completed - Thread: {thread_id}")
+            
+            return {
+                'statusCode': 200,
+                'body': json.dumps({
+                    'success': True,
+                    'encrypted_result': encrypted_result
+                })
+            }
         
     except Exception as e:
         # ✅ Structured audit log: error (no content)

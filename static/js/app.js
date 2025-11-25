@@ -1540,6 +1540,18 @@ function switchTab(tabName) {
         
         // Fetch fresh data in background (non-blocking)
         loadDeals();
+    } else if (tabName === 'scheduled') {
+        emailList.style.display = 'block';
+        dealFlowTable.style.display = 'none';
+        
+        // Show loading state
+        const emailListEl = document.getElementById('emailList');
+        if (emailListEl) {
+            emailListEl.innerHTML = '<div class="empty-state"><div class="spinner"></div><p>Loading scheduled emails...</p></div>';
+        }
+        
+        // Fetch scheduled emails
+        fetchScheduledEmails();
     } else if (tabName === 'sent') {
         emailList.style.display = 'block';
         dealFlowTable.style.display = 'none';
@@ -1675,6 +1687,206 @@ function switchTab(tabName) {
             // No cache - just filter (will show empty state)
             applyFilters(); // Use applyFilters to include search query
         }
+    }
+}
+
+// Fetch scheduled emails
+async function fetchScheduledEmails() {
+    try {
+        const response = await fetch('/api/scheduled-emails');
+        const data = await response.json();
+        
+        if (data.success) {
+            displayScheduledEmails(data.scheduled_emails || []);
+        } else {
+            console.error('Error fetching scheduled emails:', data.error);
+            const emailList = document.getElementById('emailList');
+            if (emailList) {
+                emailList.innerHTML = `<div class="empty-state"><p>Error loading scheduled emails: ${data.error || 'Unknown error'}</p></div>`;
+            }
+        }
+    } catch (error) {
+        console.error('Error fetching scheduled emails:', error);
+        const emailList = document.getElementById('emailList');
+        if (emailList) {
+            emailList.innerHTML = `<div class="empty-state"><p>Error loading scheduled emails. Please try again.</p></div>`;
+        }
+    }
+}
+
+// Display scheduled emails
+function displayScheduledEmails(scheduledEmails) {
+    const emailList = document.getElementById('emailList');
+    if (!emailList) return;
+    
+    if (scheduledEmails.length === 0) {
+        emailList.innerHTML = '<div class="empty-state"><p>No scheduled emails</p></div>';
+        const emailCountEl = document.getElementById('emailCount');
+        if (emailCountEl) {
+            emailCountEl.textContent = '0 scheduled emails';
+        }
+        return;
+    }
+    
+    // Update email count
+    const emailCountEl = document.getElementById('emailCount');
+    if (emailCountEl) {
+        emailCountEl.textContent = `${scheduledEmails.length} scheduled email${scheduledEmails.length !== 1 ? 's' : ''}`;
+    }
+    
+    // Format scheduled emails to look like regular emails for display
+    const formattedEmails = scheduledEmails.map((scheduled, index) => {
+        const scheduledDate = new Date(scheduled.scheduled_at);
+        const now = new Date();
+        const timeUntil = scheduledDate - now;
+        const hoursUntil = Math.floor(timeUntil / (1000 * 60 * 60));
+        const minutesUntil = Math.floor((timeUntil % (1000 * 60 * 60)) / (1000 * 60));
+        
+        let timeText = '';
+        if (timeUntil <= 0) {
+            timeText = 'Due now';
+        } else if (hoursUntil > 0) {
+            timeText = `In ${hoursUntil}h ${minutesUntil}m`;
+        } else {
+            timeText = `In ${minutesUntil}m`;
+        }
+        
+        return {
+            id: `scheduled-${scheduled.id}`,
+            scheduled_id: scheduled.id,
+            thread_id: scheduled.thread_id,
+            subject: scheduled.subject,
+            from: scheduled.to,
+            to: scheduled.to,
+            snippet: scheduled.body.replace(/<[^>]*>/g, '').substring(0, 100) + '...',
+            date: scheduled.scheduled_at,
+            scheduled_at: scheduled.scheduled_at,
+            time_until: timeText,
+            founder_name: scheduled.founder_name,
+            deal_subject: scheduled.deal_subject,
+            is_scheduled: true
+        };
+    });
+    
+    // Display emails
+    emailList.innerHTML = formattedEmails.map((email, index) => {
+        const date = new Date(email.scheduled_at);
+        const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        
+        return `
+            <div class="email-card" onclick="openScheduledEmail(${email.scheduled_id})" style="cursor: pointer;">
+                <div class="email-header">
+                    <div class="email-sender">
+                        <strong>${escapeHtml(email.to || 'Unknown')}</strong>
+                        ${email.founder_name ? `<span class="email-meta"> - ${escapeHtml(email.founder_name)}</span>` : ''}
+                    </div>
+                    <div class="email-date">${dateStr}</div>
+                </div>
+                <div class="email-subject">${escapeHtml(email.subject || 'No Subject')}</div>
+                <div class="email-snippet">${escapeHtml(email.snippet || '')}</div>
+                <div class="email-meta" style="margin-top: 8px; color: var(--primary-color); font-weight: 500;">
+                    ⏰ Scheduled: ${email.time_until}
+                </div>
+                <div style="margin-top: 8px;">
+                    <button class="btn btn-small btn-secondary" onclick="event.stopPropagation(); cancelScheduledEmail(${email.scheduled_id})" style="margin-right: 8px;">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Open scheduled email in modal
+async function openScheduledEmail(scheduledId) {
+    try {
+        const response = await fetch(`/api/scheduled-email/${scheduledId}`);
+        const data = await response.json();
+        
+        if (data.success && data.scheduled_email) {
+            const email = data.scheduled_email;
+            
+            // Create a mock email object for the modal
+            currentEmail = {
+                id: `scheduled-${email.id}`,
+                scheduled_id: email.id,
+                thread_id: email.thread_id,
+                subject: email.subject,
+                from: email.to,
+                to: email.to,
+                body: email.body,
+                scheduled_at: email.scheduled_at,
+                founder_name: email.founder_name,
+                deal_subject: email.deal_subject,
+                is_scheduled: true
+            };
+            
+            // Open email modal
+            const emailModal = document.getElementById('emailModal');
+            if (emailModal) {
+                emailModal.style.display = 'flex';
+            }
+            
+            // Populate modal with scheduled email data
+            const modalSubject = document.getElementById('modalSubject');
+            const modalSender = document.getElementById('modalSender');
+            const modalDate = document.getElementById('modalDate');
+            const threadContainer = document.getElementById('threadContainer');
+            
+            if (modalSubject) modalSubject.textContent = email.subject || 'No Subject';
+            if (modalSender) modalSender.textContent = email.to || 'Unknown';
+            if (modalDate) {
+                const date = new Date(email.scheduled_at);
+                modalDate.textContent = `Scheduled: ${date.toLocaleString()}`;
+            }
+            
+            if (threadContainer) {
+                threadContainer.innerHTML = `
+                    <div class="email-body" style="padding: 20px; background: white; border-radius: 8px; margin-bottom: 16px;">
+                        <div style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border-color);">
+                            <div style="color: var(--primary-color); font-weight: 600; margin-bottom: 8px;">📅 Scheduled Email</div>
+                            <div style="color: var(--text-secondary); font-size: 14px;">
+                                This email will be sent automatically if no reply is sent before the scheduled time.
+                            </div>
+                        </div>
+                        <div style="white-space: pre-wrap; line-height: 1.6;">${email.body}</div>
+                    </div>
+                `;
+            }
+        } else {
+            showToast('Error loading scheduled email', 'error');
+        }
+    } catch (error) {
+        console.error('Error opening scheduled email:', error);
+        showToast('Error loading scheduled email', 'error');
+    }
+}
+
+// Cancel scheduled email
+async function cancelScheduledEmail(scheduledId) {
+    if (!confirm('Are you sure you want to cancel this scheduled email?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/scheduled-email/${scheduledId}/cancel`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('Scheduled email cancelled', 'success');
+            // Refresh scheduled emails list
+            if (currentTab === 'scheduled') {
+                fetchScheduledEmails();
+            }
+        } else {
+            showToast(data.error || 'Failed to cancel scheduled email', 'error');
+        }
+    } catch (error) {
+        console.error('Error cancelling scheduled email:', error);
+        showToast('Error cancelling scheduled email', 'error');
     }
 }
 

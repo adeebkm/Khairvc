@@ -7,6 +7,7 @@ import os
 import json
 import requests
 from threading import Semaphore
+from datetime import datetime
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session, send_file, Response, stream_with_context
 from werkzeug.utils import secure_filename
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
@@ -298,6 +299,52 @@ def run_lazy_migrations():
         except Exception as e:
             db.session.rollback()
             print(f"⚠️  WhatsApp migration error: {e}")
+        
+        # ScheduledEmail table migration
+        try:
+            # Check if scheduled_emails table exists
+            table_exists = db.session.execute(text("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'scheduled_emails'
+                )
+            """)).scalar()
+            
+            if not table_exists:
+                # Create scheduled_emails table
+                db.session.execute(text("""
+                    CREATE TABLE scheduled_emails (
+                        id SERIAL PRIMARY KEY,
+                        user_id INTEGER NOT NULL REFERENCES users(id),
+                        deal_id INTEGER NOT NULL REFERENCES deals(id),
+                        thread_id VARCHAR(255) NOT NULL,
+                        to_email VARCHAR(255) NOT NULL,
+                        subject VARCHAR(500) NOT NULL,
+                        body TEXT NOT NULL,
+                        status VARCHAR(50) DEFAULT 'pending',
+                        scheduled_at TIMESTAMP NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        sent_at TIMESTAMP,
+                        cancelled_at TIMESTAMP
+                    )
+                """))
+                
+                # Create indexes
+                db.session.execute(text("""
+                    CREATE INDEX idx_scheduled_user_status ON scheduled_emails(user_id, status)
+                """))
+                db.session.execute(text("""
+                    CREATE INDEX idx_scheduled_thread ON scheduled_emails(thread_id)
+                """))
+                db.session.execute(text("""
+                    CREATE INDEX idx_scheduled_at ON scheduled_emails(scheduled_at)
+                """))
+                
+                db.session.commit()
+                print("✅ ScheduledEmail table migration completed")
+        except Exception as e:
+            db.session.rollback()
+            print(f"⚠️  ScheduledEmail migration error: {e}")
         
         # Pub/Sub migrations
         try:
@@ -3239,6 +3286,28 @@ def send_reply():
         # Send reply (don't mark as read automatically - keep as unread)
         success = gmail.send_reply(to_email, subject, body, thread_id, send_as_email=selected_email)
         
+        # Cancel any scheduled emails for this thread if reply was sent successfully
+        if success and thread_id:
+            try:
+                from models import ScheduledEmail
+                scheduled_emails = ScheduledEmail.query.filter_by(
+                    user_id=current_user.id,
+                    thread_id=thread_id,
+                    status='pending'
+                ).all()
+                
+                for scheduled_email in scheduled_emails:
+                    scheduled_email.status = 'cancelled'
+                    scheduled_email.cancelled_at = datetime.utcnow()
+                
+                if scheduled_emails:
+                    db.session.commit()
+                    print(f"✅ Cancelled {len(scheduled_emails)} scheduled email(s) for thread {thread_id}")
+            except Exception as cancel_error:
+                print(f"⚠️  Error cancelling scheduled emails: {str(cancel_error)}")
+                # Don't fail the reply if cancellation fails
+                db.session.rollback()
+        
         # Don't automatically mark as read - let user decide
         # if success and email_id:
         #     gmail.mark_as_read(email_id)
@@ -3489,6 +3558,98 @@ def get_signatures():
         })
     
     except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/scheduled-emails', methods=['GET'])
+@login_required
+def get_scheduled_emails():
+    """Get all scheduled emails for current user"""
+    try:
+        from models import ScheduledEmail
+        
+        # Get all pending scheduled emails for current user
+        scheduled_emails = ScheduledEmail.query.filter_by(
+            user_id=current_user.id,
+            status='pending'
+        ).order_by(ScheduledEmail.scheduled_at).all()
+        
+        return jsonify({
+            'success': True,
+            'scheduled_emails': [{
+                'id': email.id,
+                'deal_id': email.deal_id,
+                'thread_id': email.thread_id,
+                'to': email.to_email,
+                'subject': email.subject,
+                'body': email.body,
+                'scheduled_at': email.scheduled_at.isoformat() if email.scheduled_at else None,
+                'created_at': email.created_at.isoformat() if email.created_at else None,
+                'deal_subject': email.deal.subject if email.deal else None,
+                'founder_name': email.deal.founder_name if email.deal else None
+            } for email in scheduled_emails]
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/scheduled-email/<int:email_id>', methods=['GET'])
+@login_required
+def get_scheduled_email(email_id):
+    """Get specific scheduled email details"""
+    try:
+        from models import ScheduledEmail
+        
+        scheduled_email = ScheduledEmail.query.get(email_id)
+        if not scheduled_email or scheduled_email.user_id != current_user.id:
+            return jsonify({'success': False, 'error': 'Not found'}), 404
+        
+        return jsonify({
+            'success': True,
+            'scheduled_email': {
+                'id': scheduled_email.id,
+                'deal_id': scheduled_email.deal_id,
+                'thread_id': scheduled_email.thread_id,
+                'to': scheduled_email.to_email,
+                'subject': scheduled_email.subject,
+                'body': scheduled_email.body,
+                'status': scheduled_email.status,
+                'scheduled_at': scheduled_email.scheduled_at.isoformat() if scheduled_email.scheduled_at else None,
+                'created_at': scheduled_email.created_at.isoformat() if scheduled_email.created_at else None,
+                'sent_at': scheduled_email.sent_at.isoformat() if scheduled_email.sent_at else None,
+                'cancelled_at': scheduled_email.cancelled_at.isoformat() if scheduled_email.cancelled_at else None,
+                'deal_subject': scheduled_email.deal.subject if scheduled_email.deal else None,
+                'founder_name': scheduled_email.deal.founder_name if scheduled_email.deal else None
+            }
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/scheduled-email/<int:email_id>/cancel', methods=['POST'])
+@login_required
+def cancel_scheduled_email(email_id):
+    """Cancel a scheduled email"""
+    try:
+        from models import ScheduledEmail
+        
+        scheduled_email = ScheduledEmail.query.get(email_id)
+        if not scheduled_email or scheduled_email.user_id != current_user.id:
+            return jsonify({'success': False, 'error': 'Not found'}), 404
+        
+        if scheduled_email.status != 'pending':
+            return jsonify({'success': False, 'error': f'Cannot cancel email with status: {scheduled_email.status}'}), 400
+        
+        scheduled_email.status = 'cancelled'
+        scheduled_email.cancelled_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': 'Scheduled email cancelled'})
+    
+    except Exception as e:
+        db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

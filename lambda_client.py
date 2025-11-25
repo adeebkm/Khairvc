@@ -176,4 +176,71 @@ class LambdaClient:
             print(f"Error calling Lambda: {str(e)}")
             # Fallback to deterministic classification
             return (deterministic_category, 0.5)
+    
+    def generate_scheduled_email(
+        self,
+        subject: str,
+        body: str,
+        sender: str,
+        founder_name: str = None,
+        thread_id: str = None,
+        user_id: str = None
+    ) -> str:
+        """
+        Generate scheduled email using Lambda/Kimi AI
+        Returns: Generated email body (HTML)
+        """
+        try:
+            # Prepare email data
+            email_data = {
+                'subject': subject,
+                'body': body[:5000],  # Limit body length
+                'sender': sender,
+                'founder_name': founder_name or ''
+            }
+            
+            # Encrypt email data with one-time key
+            encrypted_email, one_time_key = self._encrypt_email_data(email_data)
+            
+            # Get user encryption key for result encryption
+            user_key = os.getenv('ENCRYPTION_KEY')
+            
+            # Prepare Lambda payload
+            payload = {
+                'encrypted_email': encrypted_email,
+                'encryption_key': one_time_key,  # One-time key for decryption
+                'user_encryption_key': user_key,  # User's key for result encryption
+                'thread_id': thread_id or 'unknown',
+                'user_id': user_id or 'unknown',
+                'action': 'generate_email'  # Tell Lambda this is email generation
+            }
+            
+            # Invoke Lambda function
+            response = self.lambda_client.invoke(
+                FunctionName=self.function_arn,
+                InvocationType='RequestResponse',
+                Payload=json.dumps(payload)
+            )
+            
+            # Parse response
+            response_payload = json.loads(response['Payload'].read())
+            
+            if response_payload.get('statusCode') != 200:
+                error_msg = response_payload.get('body', 'Unknown error')
+                raise Exception(f"Lambda error: {error_msg}")
+            
+            body_data = json.loads(response_payload['body'])
+            
+            if not body_data.get('success'):
+                raise Exception(f"Email generation failed: {body_data.get('error', 'Unknown error')}")
+            
+            # Decrypt result
+            encrypted_result = body_data['encrypted_email_body']
+            decrypted_result = self.cipher.decrypt(encrypted_result.encode())
+            
+            return decrypted_result.decode()
+            
+        except Exception as e:
+            print(f"Error calling Lambda for email generation: {str(e)}")
+            raise
 
