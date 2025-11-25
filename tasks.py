@@ -641,62 +641,83 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                 # Use new_history_id for Pub/Sub notifications, fallback to start_history_id for regular syncs
                                 is_incremental_sync = (new_history_id is not None) or (start_history_id is not None)
                                 if is_incremental_sync:
-                                    # Check if auto-reply is enabled
-                                    # Default to enabled unless explicitly disabled
-                                    auto_reply_disabled = os.getenv('AUTO_REPLY_DISABLED', 'false').lower() == 'true'
-                                    send_emails = os.getenv('SEND_EMAILS', 'false').lower() == 'true'
+                                    # Before sending, check if we've already auto-replied for this thread
+                                    try:
+                                        from models import EmailClassification  # Local import to avoid circulars
+                                        existing_auto_reply = EmailClassification.query.filter_by(
+                                            user_id=user_id,
+                                            thread_id=email.get('thread_id', ''),
+                                            reply_sent=True
+                                        ).first()
+                                    except Exception:
+                                        existing_auto_reply = None
                                     
-                                    # Auto-reply is enabled if:
-                                    # 1. AUTO_REPLY_DISABLED is not true, AND
-                                    # 2. SEND_EMAILS is true (required for sending emails)
-                                    if not auto_reply_disabled and send_emails:
-                                        try:
-                                            # Extract sender email
-                                            sender_email = email.get('from', '')
-                                            if '<' in sender_email and '>' in sender_email:
-                                                sender_email = sender_email.split('<')[1].split('>')[0]
-                                            
-                                            # Generate nice "we'll reply soon" message
-                                            reply_subject = email.get('subject', 'No Subject')
-                                            if not reply_subject.startswith('Re:'):
-                                                reply_subject = f"Re: {reply_subject}"
-                                            
-                                            # Create a professional, warm auto-reply message (HTML format to preserve signature)
-                                            founder_greeting = founder_name if founder_name else 'there'
-                                            reply_body = f"""<p>Hi {founder_greeting},</p>
+                                    if existing_auto_reply:
+                                        print(f"📧 [TASK] Skipping auto-reply for deal {deal.id} - reply already sent for thread {email.get('thread_id', '')}")
+                                    else:
+                                        # Check if auto-reply is enabled
+                                        # Default to enabled unless explicitly disabled
+                                        auto_reply_disabled = os.getenv('AUTO_REPLY_DISABLED', 'false').lower() == 'true'
+                                        send_emails = os.getenv('SEND_EMAILS', 'false').lower() == 'true'
+                                        
+                                        # Auto-reply is enabled if:
+                                        # 1. AUTO_REPLY_DISABLED is not true, AND
+                                        # 2. SEND_EMAILS is true (required for sending emails)
+                                        if not auto_reply_disabled and send_emails:
+                                            try:
+                                                # Extract sender email
+                                                sender_email = email.get('from', '')
+                                                if '<' in sender_email and '>' in sender_email:
+                                                    sender_email = sender_email.split('<')[1].split('>')[0]
+                                                
+                                                # Generate nice "we'll reply soon" message
+                                                reply_subject = email.get('subject', 'No Subject')
+                                                if not reply_subject.startswith('Re:'):
+                                                    reply_subject = f"Re: {reply_subject}"
+                                                
+                                                # Create a professional, warm auto-reply message (HTML format to preserve signature)
+                                                founder_greeting = founder_name if founder_name else 'there'
+                                                reply_body = f"""<p>Hi {founder_greeting},</p>
 <p>Thank you for reaching out and sharing your opportunity with us. We've received your email and are currently reviewing it.</p>
 <p>We appreciate you taking the time to connect, and we'll get back to you soon with our thoughts and next steps.</p>
 <p>Looking forward to learning more about your venture.</p>
 <p>Best regards</p>"""
-                                            
-                                            # Get user's selected signature email preference
-                                            selected_email = user.gmail_token.selected_signature_email if user.gmail_token else None
-                                            
-                                            # Send the auto-reply
-                                            print(f"📧 [TASK] Sending auto-reply for deal {deal.id} to {sender_email}")
-                                            success = gmail.send_reply(
-                                                to_email=sender_email,
-                                                subject=reply_subject,
-                                                body=reply_body,
-                                                thread_id=email.get('thread_id', ''),
-                                                send_as_email=selected_email
-                                            )
-                                            
-                                            if success:
-                                                print(f"✅ [TASK] Auto-reply sent successfully for deal {deal.id}")
-                                            else:
-                                                print(f"⚠️  [TASK] Failed to send auto-reply for deal {deal.id}")
-                                        except Exception as reply_error:
-                                            error_msg = str(reply_error)
-                                            print(f"❌ [TASK] Auto-reply failed for deal {deal.id}: {error_msg}")
-                                            import traceback
-                                            traceback.print_exc()
-                                            # Don't fail the whole task if auto-reply fails
-                                    else:
-                                        if not send_emails:
-                                            print(f"📧 [TASK] Email sending disabled (SEND_EMAILS=false), skipping auto-reply for deal {deal.id}")
+                                                
+                                                # Get user's selected signature email preference
+                                                selected_email = user.gmail_token.selected_signature_email if user.gmail_token else None
+                                                
+                                                # Send the auto-reply
+                                                print(f"📧 [TASK] Sending auto-reply for deal {deal.id} to {sender_email}")
+                                                success = gmail.send_reply(
+                                                    to_email=sender_email,
+                                                    subject=reply_subject,
+                                                    body=reply_body,
+                                                    thread_id=email.get('thread_id', ''),
+                                                    send_as_email=selected_email
+                                                )
+                                                
+                                                if success:
+                                                    print(f"✅ [TASK] Auto-reply sent successfully for deal {deal.id}")
+                                                    # Mark classification as replied so we never auto-reply this thread again
+                                                    try:
+                                                        new_classification.reply_sent = True
+                                                        db.session.commit()
+                                                    except Exception as mark_error:
+                                                        print(f\"⚠️  [TASK] Failed to mark auto-reply as sent for deal {deal.id}: {mark_error}\")
+                                                        db.session.rollback()
+                                                else:
+                                                    print(f"⚠️  [TASK] Failed to send auto-reply for deal {deal.id}")
+                                            except Exception as reply_error:
+                                                error_msg = str(reply_error)
+                                                print(f"❌ [TASK] Auto-reply failed for deal {deal.id}: {error_msg}")
+                                                import traceback
+                                                traceback.print_exc()
+                                                # Don't fail the whole task if auto-reply fails
                                         else:
-                                            print(f"📧 [TASK] Auto-reply disabled (AUTO_REPLY_DISABLED=true), skipping auto-reply for deal {deal.id}")
+                                            if not send_emails:
+                                                print(f"📧 [TASK] Email sending disabled (SEND_EMAILS=false), skipping auto-reply for deal {deal.id}")
+                                            else:
+                                                print(f"📧 [TASK] Auto-reply disabled (AUTO_REPLY_DISABLED=true), skipping auto-reply for deal {deal.id}")
                                 else:
                                     print(f"📧 [TASK] Skipping auto-reply for deal {deal.id} (initial sync, not new email)")
                                 
