@@ -1187,7 +1187,49 @@ class GmailClient:
                 format='full'
             ).execute()
             
-            return self._extract_message_data(message)
+            email_data = self._extract_message_data(message)
+            
+            # If subject is missing or "No Subject", try to get it from the thread's first message
+            if email_data and (not email_data.get('subject') or email_data.get('subject') == 'No Subject'):
+                thread_id = email_data.get('thread_id')
+                if thread_id:
+                    try:
+                        # Get the thread to find the first message with a subject
+                        thread = self.service.users().threads().get(
+                            userId='me',
+                            id=thread_id,
+                            format='full'
+                        ).execute()
+                        
+                        messages = thread.get('messages', [])
+                        if messages:
+                            # Find first message with a non-empty subject
+                            for msg in messages:
+                                headers = msg.get('payload', {}).get('headers', [])
+                                subject_header = next((h['value'] for h in headers if h['name'] == 'Subject'), None)
+                                if subject_header and subject_header.strip() and subject_header.strip() != 'No Subject':
+                                    # Decode the subject
+                                    from email.header import decode_header
+                                    import html
+                                    try:
+                                        decoded_parts = decode_header(subject_header)
+                                        decoded_subject = ''.join([
+                                            part[0].decode(part[1] or 'utf-8') if isinstance(part[0], bytes) else part[0]
+                                            for part in decoded_parts
+                                        ])
+                                        decoded_subject = html.unescape(decoded_subject).strip()
+                                        if decoded_subject:
+                                            email_data['subject'] = decoded_subject
+                                            print(f"✅ [SENT] Found subject from thread: {decoded_subject[:50]}")
+                                            break
+                                    except Exception:
+                                        if subject_header.strip():
+                                            email_data['subject'] = subject_header.strip()
+                                            break
+                    except Exception as e:
+                        print(f"⚠️  [SENT] Could not get subject from thread {thread_id}: {str(e)}")
+            
+            return email_data
         except Exception as e:
             print(f"Error fetching email details for {message_id}: {str(e)}")
             return None
