@@ -1969,6 +1969,15 @@ async function fetchSentEmails() {
         
         console.log(`📤 [FRONTEND] Response status: ${response.status}`);
         console.log(`📤 [FRONTEND] Response ok: ${response.ok}`);
+        console.log(`📤 [FRONTEND] Content-Type: ${response.headers.get('content-type')}`);
+        
+        // Check if response is JSON before parsing
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            const errorText = await response.text();
+            console.error(`❌ [FRONTEND] Expected JSON but got ${contentType}. Response:`, errorText.substring(0, 500));
+            throw new Error(`Server returned ${contentType} instead of JSON. Status: ${response.status}`);
+        }
         
         if (!response.ok) {
             const errorText = await response.text();
