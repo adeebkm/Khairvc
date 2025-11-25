@@ -4355,6 +4355,12 @@ function hasNewContent() {
 
 // Autosave draft to Gmail
 async function autosaveDraft() {
+    // Don't autosave if email is currently being sent
+    if (isSendingEmail) {
+        console.log('💾 Skipping autosave: email is being sent');
+        return;
+    }
+    
     // Clear any pending autosave
     if (autosaveTimeout) {
         clearTimeout(autosaveTimeout);
@@ -5348,8 +5354,23 @@ function removeAttachment(index) {
     updateAttachmentList();
 }
 
+// Track if email is currently being sent to prevent multiple sends
+let isSendingEmail = false;
+
 // Send composed email
 async function sendComposedEmail() {
+    // Prevent multiple simultaneous sends
+    if (isSendingEmail) {
+        console.log('⚠️ Email send already in progress, ignoring duplicate click');
+        return;
+    }
+    
+    // Cancel any pending autosave to prevent draft creation during send
+    if (autosaveTimeout) {
+        clearTimeout(autosaveTimeout);
+        autosaveTimeout = null;
+    }
+    
     // Detect which modal is active (old composer or new compose modal)
     const composerSection = document.getElementById('composerSection');
     const composeModal = document.getElementById('composeModal');
@@ -5393,77 +5414,181 @@ async function sendComposedEmail() {
     
     // Handle old composer (Reply/Reply All/Forward)
     if (isOldComposer) {
-        try {
-            let response;
+        // Set sending flag
+        isSendingEmail = true;
+        
+        // Disable send button to prevent multiple clicks
+        const sendBtn = document.querySelector('#composerSection .btn-primary');
+        if (sendBtn) {
+            sendBtn.disabled = true;
+            const originalText = sendBtn.textContent;
+            sendBtn.textContent = 'Sending...';
             
-            if (composerMode === 'forward') {
-                // Forward email
-                response = await fetch('/api/forward-email', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
+            try {
+                let response;
+                
+                if (composerMode === 'forward') {
+                    // Forward email
+                    response = await fetch('/api/forward-email', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            to: to,
+                            subject: subject,
+                            body: body,
+                            original_message_id: currentEmail.id,
+                            include_attachments: true
+                        })
+                    });
+                } else {
+                    // Reply or Reply All
+                    const endpoint = composerAttachments.length > 0 ? 
+                        '/api/send-reply-with-attachments' : '/api/send-reply';
+                    
+                    const payload = {
+                        email_id: currentEmail.id,
                         to: to,
                         subject: subject,
                         body: body,
-                        original_message_id: currentEmail.id,
-                        include_attachments: true
-                    })
-                });
-            } else {
-                // Reply or Reply All
-                const endpoint = composerAttachments.length > 0 ? 
-                    '/api/send-reply-with-attachments' : '/api/send-reply';
-                
-                const payload = {
-                    email_id: currentEmail.id,
-                    to: to,
-                    subject: subject,
-                    body: body,
-                    thread_id: currentEmail.thread_id
-                };
-                
-                if (composerAttachments.length > 0) {
-                    payload.attachments = composerAttachments;
+                        thread_id: currentEmail.thread_id
+                    };
+                    
+                    if (composerAttachments.length > 0) {
+                        payload.attachments = composerAttachments;
+                    }
+                    
+                    if (cc) payload.cc = cc;
+                    if (bcc) payload.bcc = bcc;
+                    
+                    response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
                 }
                 
-                if (cc) payload.cc = cc;
-                if (bcc) payload.bcc = bcc;
+                const data = await response.json();
                 
-                response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-            }
-            
-            const data = await response.json();
-            
-            if (data.success) {
-                showAlert('success', '✉️ Email sent successfully!');
-                
-                // Delete the draft if it exists
-                if (currentDraftId) {
-                    try {
-                        await fetch(`/api/drafts/${currentDraftId}`, { method: 'DELETE' });
-                        console.log(`🗑️  Deleted draft ${currentDraftId} after sending`);
-                    } catch (error) {
-                        console.error('Error deleting draft:', error);
+                if (data.success) {
+                    showAlert('success', '✉️ Email sent successfully!');
+                    
+                    // Delete the draft if it exists (prevent it from being saved)
+                    if (currentDraftId) {
+                        try {
+                            await fetch(`/api/drafts/${currentDraftId}`, { method: 'DELETE' });
+                            console.log(`🗑️  Deleted draft ${currentDraftId} after sending`);
+                            currentDraftId = null; // Clear draft ID
+                        } catch (error) {
+                            console.error('Error deleting draft:', error);
+                        }
+                    }
+                    
+                    // Clear draft state
+                    clearDraftState();
+                    
+                    // Close composer and modal immediately
+                    closeComposer();
+                    // Small delay before closing modal to show success message
+                    setTimeout(() => {
+                        closeModal();
+                        isSendingEmail = false; // Reset flag after modal closes
+                    }, 500);
+                } else {
+                    showAlert('error', data.error || 'Failed to send email');
+                    isSendingEmail = false; // Reset flag on error
+                    if (sendBtn) {
+                        sendBtn.disabled = false;
+                        sendBtn.textContent = originalText;
                     }
                 }
-                
-                closeComposer();
-                closeModal();
-            } else {
-                showAlert('error', data.error || 'Failed to send email');
+            } catch (error) {
+                console.error('Error sending email:', error);
+                showAlert('error', 'Failed to send email: ' + error.message);
+                isSendingEmail = false; // Reset flag on error
+                if (sendBtn) {
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = originalText;
+                }
             }
-        } catch (error) {
-            console.error('Error sending email:', error);
-            showAlert('error', 'Failed to send email: ' + error.message);
+        } else {
+            // If send button not found, still try to send but reset flag on error
+            try {
+                let response;
+                
+                if (composerMode === 'forward') {
+                    response = await fetch('/api/forward-email', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            to: to,
+                            subject: subject,
+                            body: body,
+                            original_message_id: currentEmail.id,
+                            include_attachments: true
+                        })
+                    });
+                } else {
+                    const endpoint = composerAttachments.length > 0 ? 
+                        '/api/send-reply-with-attachments' : '/api/send-reply';
+                    
+                    const payload = {
+                        email_id: currentEmail.id,
+                        to: to,
+                        subject: subject,
+                        body: body,
+                        thread_id: currentEmail.thread_id
+                    };
+                    
+                    if (composerAttachments.length > 0) {
+                        payload.attachments = composerAttachments;
+                    }
+                    
+                    if (cc) payload.cc = cc;
+                    if (bcc) payload.bcc = bcc;
+                    
+                    response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showAlert('success', '✉️ Email sent successfully!');
+                    
+                    if (currentDraftId) {
+                        try {
+                            await fetch(`/api/drafts/${currentDraftId}`, { method: 'DELETE' });
+                            currentDraftId = null;
+                        } catch (error) {
+                            console.error('Error deleting draft:', error);
+                        }
+                    }
+                    
+                    clearDraftState();
+                    closeComposer();
+                    setTimeout(() => {
+                        closeModal();
+                        isSendingEmail = false;
+                    }, 500);
+        } else {
+                    showAlert('error', data.error || 'Failed to send email');
+                    isSendingEmail = false;
+        }
+    } catch (error) {
+                console.error('Error sending email:', error);
+                showAlert('error', 'Failed to send email: ' + error.message);
+                isSendingEmail = false;
+            }
         }
         return;
     }
     
     // Handle new compose modal (standalone)
+    isSendingEmail = true;
+    
     const sendBtn = document.getElementById('sendComposeBtn');
     const sendBtnText = document.getElementById('sendComposeBtnText');
     const sendBtnSpinner = document.getElementById('sendComposeBtnSpinner');
@@ -5499,17 +5624,21 @@ async function sendComposedEmail() {
         
         if (data.success) {
             showToast('Email sent successfully', 'success');
+            // Close modal immediately after successful send
             closeComposeModal();
+            isSendingEmail = false;
         } else {
             showToast(data.error || 'Failed to send email', 'error');
+            isSendingEmail = false;
         }
     } catch (error) {
         console.error('Error sending email:', error);
         showToast('Error sending email', 'error');
+        isSendingEmail = false;
     } finally {
-        // Re-enable button
-        if (sendBtn) {
-            sendBtn.disabled = false;
+        // Re-enable button only if send failed
+        if (!isSendingEmail && sendBtn) {
+        sendBtn.disabled = false;
             if (sendBtnText) sendBtnText.style.display = 'inline';
             if (sendBtnSpinner) sendBtnSpinner.style.display = 'none';
         }
