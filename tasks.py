@@ -703,7 +703,7 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                                         new_classification.reply_sent = True
                                                         db.session.commit()
                                                     except Exception as mark_error:
-                                                        print(f\"⚠️  [TASK] Failed to mark auto-reply as sent for deal {deal.id}: {mark_error}\")
+                                                        print(f"⚠️  [TASK] Failed to mark auto-reply as sent for deal {deal.id}: {mark_error}")
                                                         db.session.rollback()
                                                 else:
                                                     print(f"⚠️  [TASK] Failed to send auto-reply for deal {deal.id}")
