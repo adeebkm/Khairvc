@@ -2040,10 +2040,9 @@ async function fetchSentEmails() {
             // Only update UI if we're still on the sent tab
             if (currentTab === 'sent') {
                 console.log(`📤 [FRONTEND] Updating UI with ${sentEmails.length} sent emails`);
-                // CRITICAL: Set allEmails to sent emails BEFORE applyFilters
-                // This ensures applyFilters uses sent emails, not inbox emails
-                allEmails = sentEmails;
-                applyFilters(); // Apply filters including search
+                // CRITICAL: Don't set allEmails - applyFilters will use sentEmailsCache directly
+                // This prevents inbox emails from overwriting sent emails
+                applyFilters(); // Apply filters including search (uses sentEmailsCache, not allEmails)
                 
                 console.log(`📤 [FRONTEND] After applyFilters: ${filteredEmails.length} filtered emails`);
                 console.log(`📤 [FRONTEND] Sample email:`, sentEmails[0]);
