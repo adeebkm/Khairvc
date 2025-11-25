@@ -3667,6 +3667,12 @@ async function openEmail(indexOrEmail) {
     // Reset sending flag when opening a new email
     isSendingEmail = false;
     
+    // Reset send button state if composer is visible (in case it was disabled from previous send)
+    const composerSection = document.getElementById('composerSection');
+    if (composerSection && composerSection.style.display !== 'none') {
+        resetSendButtonState();
+    }
+    
     const threadId = currentEmail.thread_id;
     
     // Show modal immediately with correct email data
@@ -4590,6 +4596,15 @@ function clearDraftState() {
     }
 }
 
+// Reset send button state (enabled, text back to original)
+function resetSendButtonState() {
+    const sendBtn = document.querySelector('#composerSection .btn-primary');
+    if (sendBtn) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = '✉️ Send';
+    }
+}
+
 function openDraft(draftIndex) {
     // Get the draft email from filteredEmails
     const draftEmail = filteredEmails[draftIndex];
@@ -4646,6 +4661,9 @@ function openReplyComposer() {
     // Reset sending flag when opening reply composer
     isSendingEmail = false;
     
+    // Reset send button state (in case it was disabled from previous send)
+    resetSendButtonState();
+    
     // Clear draft state for new compose
     clearDraftState();
     
@@ -4691,6 +4709,9 @@ function openReplyAllComposer() {
     
     // Reset sending flag when opening reply all composer
     isSendingEmail = false;
+    
+    // Reset send button state (in case it was disabled from previous send)
+    resetSendButtonState();
     
     // Clear draft state for new compose
     clearDraftState();
@@ -4845,6 +4866,8 @@ function closeComposer() {
     clearDraftState();
     // Reset sending flag when closing composer
     isSendingEmail = false;
+    // Reset send button state
+    resetSendButtonState();
 }
 
 function clearComposer() {
