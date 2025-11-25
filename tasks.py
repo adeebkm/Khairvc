@@ -638,7 +638,9 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                 
                                 # Send auto-reply for deal flow emails (only for new emails, not initial sync)
                                 # Check if this is an incremental sync (new email, not initial 200)
-                                if start_history_id is not None:
+                                # Use new_history_id for Pub/Sub notifications, fallback to start_history_id for regular syncs
+                                is_incremental_sync = (new_history_id is not None) or (start_history_id is not None)
+                                if is_incremental_sync:
                                     # Check if auto-reply is enabled
                                     # Default to enabled unless explicitly disabled
                                     auto_reply_disabled = os.getenv('AUTO_REPLY_DISABLED', 'false').lower() == 'true'
@@ -700,7 +702,8 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                 
                                 # Trigger scheduled email generation for new deal flow emails
                                 # Only for incremental sync (new emails), not initial 200
-                                if start_history_id is not None:
+                                # Use new_history_id for Pub/Sub notifications, fallback to start_history_id for regular syncs
+                                if is_incremental_sync:
                                     try:
                                         # Use celery.send_task to avoid circular import
                                         from celery_config import celery
