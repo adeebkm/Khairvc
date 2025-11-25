@@ -4117,6 +4117,10 @@ async function selectSignature(email) {
         if (data.success) {
             // Reload signatures to show updated selection
             loadSignatures();
+            // Also reload in settings if modal is open
+            if (document.getElementById('settingsModal')?.style.display !== 'none') {
+                loadSignaturesInSettings();
+            }
             
             // Show success message
             const alert = document.createElement('div');
@@ -4136,6 +4140,106 @@ async function selectSignature(email) {
         }
     } catch (error) {
         alert('Error: ' + error.message);
+    }
+}
+
+// Load signatures in settings modal
+async function loadSignaturesInSettings() {
+    const signatureListContainer = document.getElementById('signatureListContainer');
+    const signatureListSettings = document.getElementById('signatureListSettings');
+    const selectedSignatureDisplay = document.getElementById('selectedSignatureDisplay');
+    
+    if (!signatureListContainer || !signatureListSettings || !selectedSignatureDisplay) {
+        return;
+    }
+    
+    // Always load and update the selected signature display first
+    try {
+        const response = await fetch('/api/signatures');
+        const data = await response.json();
+        
+        if (data.success) {
+            const signatures = data.signatures || [];
+            const selected = data.selected;
+            
+            if (signatures.length > 0) {
+                // Update selected signature display
+                const selectedSig = signatures.find(sig => (!selected && sig.isPrimary) || (selected === sig.email)) || signatures[0];
+                if (selectedSig) {
+                    selectedSignatureDisplay.textContent = `${selectedSig.displayName || selectedSig.email}${selectedSig.isPrimary ? ' (Primary)' : ''}`;
+                }
+            } else {
+                selectedSignatureDisplay.textContent = 'No signatures available';
+            }
+        }
+    } catch (error) {
+        selectedSignatureDisplay.textContent = 'Error loading signatures';
+    }
+    
+    // Toggle visibility of signature list
+    const isVisible = signatureListContainer.style.display !== 'none';
+    if (isVisible) {
+        signatureListContainer.style.display = 'none';
+        return;
+    }
+    
+    signatureListContainer.style.display = 'block';
+    signatureListSettings.innerHTML = '<div class="spinner-small"></div><p style="text-align: center; color: #6B7280; margin-top: 8px;">Loading signatures...</p>';
+    
+    try {
+        const response = await fetch('/api/signatures');
+        const data = await response.json();
+        
+        if (!data.success) {
+            signatureListSettings.innerHTML = `<div style="padding: 12px; background: #FEE2E2; color: #DC2626; border-radius: 8px; font-size: 14px;">${escapeHtml(data.error)}</div>`;
+            return;
+        }
+        
+        const signatures = data.signatures || [];
+        const selected = data.selected;
+        
+        if (signatures.length === 0) {
+            signatureListSettings.innerHTML = '<div style="padding: 12px; background: #FEF3C7; color: #92400E; border-radius: 8px; font-size: 14px;">No signatures found. Please set up a signature in Gmail settings.</div>';
+            return;
+        }
+        
+        // Render signature list
+        let html = '';
+        signatures.forEach(sig => {
+            const isSelected = (!selected && sig.isPrimary) || (selected === sig.email);
+            const hasSignature = sig.hasSignature || (sig.signatureRaw && sig.signatureRaw.trim().length > 0);
+            const signatureToShow = sig.signature || (sig.signatureRaw ? 'Raw signature available but could not be processed' : '');
+            
+            html += `
+                <div style="border: 1px solid #E5E7EB; border-radius: 8px; padding: 16px; background: #FFFFFF; ${isSelected ? 'border-color: #3B82F6; border-width: 2px;' : ''}">
+                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+                        <div style="flex: 1;">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                <strong style="color: #111827; font-size: 14px;">${escapeHtml(sig.displayName || sig.email)}</strong>
+                                ${sig.isPrimary ? '<span style="font-size: 11px; padding: 2px 6px; background: #F3F4F6; color: #6B7280; border-radius: 4px;">Primary</span>' : ''}
+                                ${isSelected ? '<span style="font-size: 11px; padding: 2px 6px; background: #DBEAFE; color: #1E40AF; border-radius: 4px; font-weight: 500;">Selected</span>' : ''}
+                            </div>
+                            <div style="font-size: 12px; color: #6B7280;">${escapeHtml(sig.email)}</div>
+                        </div>
+                        <button 
+                            onclick="selectSignature('${sig.email}')" 
+                            style="padding: 6px 12px; font-size: 13px; border-radius: 6px; border: 1px solid #D1D5DB; background: ${isSelected ? '#3B82F6' : '#FFFFFF'}; color: ${isSelected ? '#FFFFFF' : '#374151'}; cursor: ${isSelected ? 'default' : 'pointer'}; font-weight: 500;"
+                            ${isSelected ? 'disabled' : ''}
+                        >
+                            ${isSelected ? 'Selected' : 'Select'}
+                        </button>
+                    </div>
+                    ${hasSignature ? 
+                        `<div style="margin-top: 12px; padding: 12px; background: #F9FAFB; border-radius: 6px; font-size: 13px; color: #374151; white-space: pre-wrap; max-height: 120px; overflow-y: auto; border: 1px solid #E5E7EB;">${escapeHtml(signatureToShow.substring(0, 200))}${signatureToShow.length > 200 ? '...' : ''}</div>` :
+                        '<div style="margin-top: 12px; padding: 12px; background: #F9FAFB; border-radius: 6px; font-size: 12px; color: #9CA3AF; font-style: italic; border: 1px dashed #E5E7EB;">No signature set in Gmail settings</div>'
+                    }
+                </div>
+            `;
+        });
+        
+        signatureListSettings.innerHTML = html;
+    } catch (error) {
+        signatureListSettings.innerHTML = `<div style="padding: 12px; background: #FEE2E2; color: #DC2626; border-radius: 8px; font-size: 14px;">Error loading signatures: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -6098,6 +6202,11 @@ function switchSettingsTab(tabName) {
         // Show save button for WhatsApp and User tabs (editable)
         const editableTabs = ['whatsapp', 'user'];
         saveBtn.style.display = editableTabs.includes(tabName) ? 'block' : 'none';
+    }
+    
+    // Load signatures when Gmail tab is opened
+    if (tabName === 'gmail') {
+        loadSignaturesInSettings();
     }
 }
 

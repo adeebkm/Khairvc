@@ -1401,9 +1401,16 @@ class GmailClient:
                 body_clean = body.strip()
                 
                 # Only append if signature is not already at the end of the body
-                if not body_clean.endswith(signature_clean):
+                # Use a more lenient check - check if signature text appears in the last part of body
+                body_end = body_clean[-len(signature_clean):] if len(body_clean) >= len(signature_clean) else ""
+                if signature_clean.lower() not in body_end.lower():
                     # Append signature with proper spacing
                     body = f"{body}\n\n{signature}"
+                    print(f"✓ Signature appended to reply ({len(signature)} chars)")
+                else:
+                    print(f"Note: Signature already present in reply body, skipping append")
+            else:
+                print("Note: No signature found or signature is empty for reply")
             
             message = MIMEText(body)
             message['to'] = to_email
@@ -1601,8 +1608,15 @@ class GmailClient:
                 body_clean = body.strip()
                 
                 # Only append if signature is not already at the end of the body
-                if not body_clean.endswith(signature_clean):
+                # Use a more lenient check - check if signature text appears in the last part of body
+                body_end = body_clean[-len(signature_clean):] if len(body_clean) >= len(signature_clean) else ""
+                if signature_clean.lower() not in body_end.lower():
                     body = f"{body}\n\n{signature}"
+                    print(f"✓ Signature appended to email ({len(signature)} chars)")
+                else:
+                    print(f"Note: Signature already present in body, skipping append")
+            else:
+                print("Note: No signature found or signature is empty")
             
             # Use MIMEMultipart if there are attachments, otherwise MIMEText
             if attachments and len(attachments) > 0:
@@ -1738,8 +1752,14 @@ class GmailClient:
             # Debug logging
             if signature:
                 print(f"✓ Signature fetched: {len(signature)} characters")
+                print(f"  Signature preview: {signature[:100]}..." if len(signature) > 100 else f"  Signature: {signature}")
             else:
-                print("Note: No signature found in Gmail settings")
+                print("⚠️  No signature found in Gmail settings")
+                if selected_alias:
+                    print(f"  Alias found: {selected_alias.get('sendAsEmail', 'unknown')}")
+                    print(f"  Alias has signature field: {'signature' in selected_alias}")
+                else:
+                    print("  No alias found")
             
             return signature if signature else None
             

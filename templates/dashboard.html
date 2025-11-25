@@ -759,6 +759,37 @@
                         
                         <div id="gmailStatus" class="modern-status-message" style="display: none;"></div>
                     </div>
+                    
+                    {% if has_gmail %}
+                    <!-- Signature Settings Section -->
+                    <div class="modern-settings-section" style="margin-top: 32px; border-top: 1px solid #E5E7EB; padding-top: 24px;">
+                        <h3 class="modern-section-title">Email Signature</h3>
+                        <p class="modern-section-description">
+                            Choose which signature to use for your email replies and new messages.
+                        </p>
+                        
+                        <div class="modern-settings-item">
+                            <label class="modern-input-label">Selected Signature</label>
+                            <div id="signatureSelectorContainer" style="margin-top: 8px;">
+                                <div class="modern-readonly-field" style="padding: 12px; background: #F9FAFB; border-radius: 8px; min-height: 40px; display: flex; align-items: center; justify-content: space-between;">
+                                    <span id="selectedSignatureDisplay" style="color: #6B7280; font-size: 14px;">Loading signatures...</span>
+                                    <button class="modern-btn-secondary" onclick="loadSignaturesInSettings()" style="padding: 6px 12px; font-size: 13px; white-space: nowrap;">
+                                        Change Signature
+                                    </button>
+                                </div>
+                            </div>
+                            <p class="modern-helper-text" style="margin-top: 8px;">
+                                Your signature will be automatically appended to all outgoing emails
+                            </p>
+                        </div>
+                        
+                        <div id="signatureListContainer" style="display: none; margin-top: 16px;">
+                            <div id="signatureListSettings" style="display: flex; flex-direction: column; gap: 12px; max-height: 300px; overflow-y: auto; padding: 12px; background: #F9FAFB; border-radius: 8px; border: 1px solid #E5E7EB;">
+                                <!-- Signatures will be loaded here -->
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
                 
                 <!-- User Settings Tab -->

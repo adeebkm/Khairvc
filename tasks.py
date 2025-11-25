@@ -635,6 +635,64 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                     import traceback
                                     traceback.print_exc()
                                     # Don't fail the whole task if WhatsApp fails
+                                
+                                # Send auto-reply for deal flow emails (only for new emails, not initial sync)
+                                # Check if this is an incremental sync (new email, not initial 200)
+                                if start_history_id is not None:
+                                    # Check if email sending is enabled
+                                    send_emails = os.getenv('SEND_EMAILS', 'false').lower() == 'true'
+                                    if send_emails:
+                                        try:
+                                            # Extract sender email
+                                            sender_email = email.get('from', '')
+                                            if '<' in sender_email and '>' in sender_email:
+                                                sender_email = sender_email.split('<')[1].split('>')[0]
+                                            
+                                            # Generate nice "we'll reply soon" message
+                                            reply_subject = email.get('subject', 'No Subject')
+                                            if not reply_subject.startswith('Re:'):
+                                                reply_subject = f"Re: {reply_subject}"
+                                            
+                                            # Create a professional, warm auto-reply message
+                                            founder_greeting = founder_name if founder_name else 'there'
+                                            reply_body = f"""Hi {founder_greeting},
+
+Thank you for reaching out and sharing your opportunity with us. We've received your email and are currently reviewing it.
+
+We appreciate you taking the time to connect, and we'll get back to you soon with our thoughts and next steps.
+
+Looking forward to learning more about your venture.
+
+Best regards"""
+                                            
+                                            # Get user's selected signature email preference
+                                            selected_email = user.gmail_token.selected_signature_email if user.gmail_token else None
+                                            
+                                            # Send the auto-reply
+                                            print(f"📧 [TASK] Sending auto-reply for deal {deal.id} to {sender_email}")
+                                            success = gmail.send_reply(
+                                                to_email=sender_email,
+                                                subject=reply_subject,
+                                                body=reply_body,
+                                                thread_id=email.get('thread_id', ''),
+                                                send_as_email=selected_email
+                                            )
+                                            
+                                            if success:
+                                                print(f"✅ [TASK] Auto-reply sent successfully for deal {deal.id}")
+                                            else:
+                                                print(f"⚠️  [TASK] Failed to send auto-reply for deal {deal.id}")
+                                        except Exception as reply_error:
+                                            error_msg = str(reply_error)
+                                            print(f"❌ [TASK] Auto-reply failed for deal {deal.id}: {error_msg}")
+                                            import traceback
+                                            traceback.print_exc()
+                                            # Don't fail the whole task if auto-reply fails
+                                    else:
+                                        print(f"📧 [TASK] Email sending disabled (SEND_EMAILS=false), skipping auto-reply for deal {deal.id}")
+                                else:
+                                    print(f"📧 [TASK] Skipping auto-reply for deal {deal.id} (initial sync, not new email)")
+                                
                                 break
                             except Exception as commit_error:
                                 if 'EOF' in str(commit_error) or 'SSL SYSCALL' in str(commit_error) or 'connection' in str(commit_error).lower():
