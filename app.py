@@ -7,7 +7,6 @@ import os
 import json
 import requests
 from threading import Semaphore
-from datetime import datetime
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session, send_file, Response, stream_with_context
 from werkzeug.utils import secure_filename
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
@@ -300,52 +299,6 @@ def run_lazy_migrations():
             db.session.rollback()
             print(f"⚠️  WhatsApp migration error: {e}")
         
-        # ScheduledEmail table migration
-        try:
-            # Check if scheduled_emails table exists
-            table_exists = db.session.execute(text("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_name = 'scheduled_emails'
-                )
-            """)).scalar()
-            
-            if not table_exists:
-                # Create scheduled_emails table
-                db.session.execute(text("""
-                    CREATE TABLE scheduled_emails (
-                        id SERIAL PRIMARY KEY,
-                        user_id INTEGER NOT NULL REFERENCES users(id),
-                        deal_id INTEGER NOT NULL REFERENCES deals(id),
-                        thread_id VARCHAR(255) NOT NULL,
-                        to_email VARCHAR(255) NOT NULL,
-                        subject VARCHAR(500) NOT NULL,
-                        body TEXT NOT NULL,
-                        status VARCHAR(50) DEFAULT 'pending',
-                        scheduled_at TIMESTAMP NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        sent_at TIMESTAMP,
-                        cancelled_at TIMESTAMP
-                    )
-                """))
-                
-                # Create indexes
-                db.session.execute(text("""
-                    CREATE INDEX idx_scheduled_user_status ON scheduled_emails(user_id, status)
-                """))
-                db.session.execute(text("""
-                    CREATE INDEX idx_scheduled_thread ON scheduled_emails(thread_id)
-                """))
-                db.session.execute(text("""
-                    CREATE INDEX idx_scheduled_at ON scheduled_emails(scheduled_at)
-                """))
-                
-                db.session.commit()
-                print("✅ ScheduledEmail table migration completed")
-        except Exception as e:
-            db.session.rollback()
-            print(f"⚠️  ScheduledEmail migration error: {e}")
-        
         # Pub/Sub migrations
         try:
             result = db.session.execute(text("""
@@ -392,7 +345,28 @@ def run_lazy_migrations():
             if not constraint_exists:
                 print("🔄 Running lazy migration: Adding unique constraint on (user_id, message_id)...")
                 try:
-                    # First, ensure no duplicates exist (should be handled by cleanup script)
+                    # First, clean up any duplicates (keep the oldest record for each user_id + message_id pair)
+                    print("🧹 Cleaning up duplicate email classifications...")
+                    cleanup_result = db.session.execute(text("""
+                        DELETE FROM email_classifications
+                        WHERE id NOT IN (
+                            SELECT MIN(id)
+                            FROM email_classifications
+                            GROUP BY user_id, message_id
+                        )
+                        AND (user_id, message_id) IN (
+                            SELECT user_id, message_id
+                            FROM email_classifications
+                            GROUP BY user_id, message_id
+                            HAVING COUNT(*) > 1
+                        )
+                    """))
+                    duplicates_removed = cleanup_result.rowcount
+                    if duplicates_removed > 0:
+                        print(f"✅ Removed {duplicates_removed} duplicate email classification(s)")
+                        db.session.commit()
+                    
+                    # Now add the unique constraint
                     db.session.execute(text("""
                         ALTER TABLE email_classifications 
                         ADD CONSTRAINT uq_user_message 
@@ -403,8 +377,8 @@ def run_lazy_migrations():
                 except Exception as e:
                     db.session.rollback()
                     # If constraint fails due to existing duplicates, warn but continue
-                    if 'duplicate key' in str(e).lower() or 'unique constraint' in str(e).lower():
-                        print(f"⚠️  Unique constraint migration skipped: Duplicates exist. Run cleanup_duplicates.py first.")
+                    if 'duplicate key' in str(e).lower() or 'unique constraint' in str(e).lower() or 'uq_user_message' in str(e):
+                        print(f"⚠️  Unique constraint migration skipped: Duplicates still exist after cleanup. Run cleanup_duplicates.py manually.")
                     else:
                         print(f"⚠️  Unique constraint migration error: {e}")
         except Exception as e:
@@ -479,22 +453,12 @@ def get_user_gmail_client(user):
         
         # Create Gmail client with user's token
         gmail_client = GmailClient(token_json=token_json)
-        
-        # Only return client if authentication succeeded (has service)
-        if gmail_client and gmail_client.service:
-            print(f"✅ Successfully created Gmail client for user {user.id}")
-            return gmail_client
-        else:
-            print(f"❌ Failed to create Gmail client for user {user.id} - OAuth token expired or invalid")
-            print(f"   User {user.id} needs to reconnect Gmail account via /connect-gmail")
-            return None
+        print(f"✅ Successfully created Gmail client for user {user.id}")
+        return gmail_client
     except Exception as e:
-        error_msg = str(e)
-        print(f"❌ Error getting Gmail client for user {user.id}: {error_msg}")
-        # Don't print full traceback for known token errors
-        if 'gcloud auth application-default' not in error_msg and 'invalid_grant' not in error_msg.lower():
-            import traceback
-            traceback.print_exc()
+        print(f"❌ Error getting Gmail client for user {user.id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -587,8 +551,58 @@ def signup_google():
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
-    """Redirect to login - we only use Google OAuth now"""
-    return redirect(url_for('login'))
+    """User registration"""
+    if request.method == 'POST':
+        username = request.form.get('username')
+        email = request.form.get('email')
+        password = request.form.get('password')
+        confirm_password = request.form.get('confirm_password')
+        whatsapp_enabled = request.form.get('whatsapp_enabled') == 'on'
+        whatsapp_number = request.form.get('whatsapp_number', '').strip()
+        
+        # Validation
+        if password != confirm_password:
+            return render_template('signup.html', error='Passwords do not match')
+        
+        if User.query.filter_by(username=username).first():
+            return render_template('signup.html', error='Username already exists')
+        
+        if User.query.filter_by(email=email).first():
+            return render_template('signup.html', error='Email already registered')
+        
+        # Validate WhatsApp number if enabled
+        if whatsapp_enabled and not whatsapp_number:
+            return render_template('signup.html', error='Please enter a WhatsApp number')
+        
+        if whatsapp_enabled and not whatsapp_number.startswith('+'):
+            return render_template('signup.html', error='WhatsApp number must include country code (e.g., +1234567890)')
+        
+        # Create new user
+        new_user = User(username=username, email=email)
+        new_user.set_password(password)
+        
+        # Set WhatsApp preferences
+        if whatsapp_enabled and whatsapp_number:
+            new_user.whatsapp_enabled = True
+            new_user.whatsapp_number = whatsapp_number
+            print(f"✅ New user {username} signed up with WhatsApp: {whatsapp_number}")
+        else:
+            new_user.whatsapp_enabled = False
+            new_user.whatsapp_number = None
+        
+        db.session.add(new_user)
+        db.session.commit()
+        
+        # Log in the new user
+        login_user(new_user)
+        session.permanent = True
+        session['user_id'] = new_user.id
+        session['username'] = new_user.username
+        
+        # Return success - frontend will show Gmail connection modal
+        return render_template('signup.html', signup_success=True, username=username)
+    
+    return render_template('signup.html', signup_success=False)
 
 
 @app.route('/logout')
@@ -738,18 +752,6 @@ def connect_gmail():
             
             db.session.commit()
             
-            # Trigger email sync after connecting Gmail to fetch any emails received
-            if CELERY_AVAILABLE:
-                try:
-                    task = sync_user_emails.delay(
-                        user_id=current_user.id,
-                        max_emails=200,
-                        force_full_sync=False  # Use incremental sync
-                    )
-                    print(f"✅ Auto-sync triggered after Gmail connection: task {task.id}")
-                except Exception as sync_error:
-                    print(f"⚠️  Auto-sync error (non-critical): {sync_error}")
-            
             # Redirect with parameter to trigger auto-fetch
             return redirect(url_for('dashboard') + '?connected=true')
     
@@ -848,18 +850,6 @@ def handle_google_signup_callback(creds):
             except Exception as pubsub_error:
                 print(f"⚠️  Pub/Sub auto-setup error (non-critical): {pubsub_error}")
         
-        # Trigger email sync after login to fetch any emails received while logged out
-        if CELERY_AVAILABLE:
-            try:
-                task = sync_user_emails.delay(
-                    user_id=current_user_obj.id,
-                    max_emails=200,
-                    force_full_sync=False  # Use incremental sync
-                )
-                print(f"✅ Auto-sync triggered after Google signup: task {task.id}")
-            except Exception as sync_error:
-                print(f"⚠️  Auto-sync error (non-critical): {sync_error}")
-        
         return redirect(url_for('dashboard') + '?auto_setup=true')
     except Exception as e:
         import traceback
@@ -915,18 +905,14 @@ def oauth2callback():
         # If state is None, try to get it from the request (fallback)
         if not state and request_state:
             print(f"⚠️  Session state missing, but request has state. This might be a session persistence issue.")
-            print(f"⚠️  Session keys: {list(session.keys())}, Session ID: {session.get('_id', 'None')}")
             # For now, allow it if we're in production and state matches format
             # This is a workaround - ideally session should persist
-            # The state validation is mainly for CSRF protection, but since we're checking user by email/google_id
-            # it's acceptable to proceed if state format is valid
             if len(request_state) > 10:  # Basic validation
-                print(f"⚠️  Allowing OAuth to proceed without session state (workaround - will verify user by email/google_id)")
-                # Continue without state validation - we'll verify user by email/google_id instead
+                print(f"⚠️  Allowing OAuth to proceed without session state (workaround)")
+                # Continue without state validation (less secure but works)
             else:
                 return f"Invalid state parameter. Session state: {state}, Request state: {request_state}", 400
-        elif state and state != request_state:
-            print(f"⚠️  State mismatch: Session state: {state}, Request state: {request_state}")
+        elif state != request_state:
             return f"Invalid state parameter. Session state: {state}, Request state: {request_state}", 400
         
         # Get credentials from environment or file
@@ -1014,41 +1000,6 @@ def oauth2callback():
         if 'creds' not in locals():
             creds = flow.credentials
         
-        # Ensure we have a refresh token - Google only provides it with prompt='consent' or first authorization
-        # If refresh_token is missing, we need to force reconnection
-        if not creds.refresh_token:
-            print(f"⚠️  No refresh token received. This token will expire in 1 hour.")
-            print(f"   User should reconnect with prompt='consent' to get a refresh token.")
-            # Note: We'll still store the token, but it will expire quickly
-            # The user will need to reconnect when it expires
-        
-        # Get token JSON and verify refresh_token is included
-        token_json = creds.to_json()
-        token_data = json.loads(token_json)
-        
-        # If no refresh_token in new token, try to preserve existing refresh_token from stored token
-        if 'refresh_token' not in token_data or not token_data.get('refresh_token'):
-            # Check if user has existing token with refresh_token
-            if current_user.is_authenticated:
-                existing_token = GmailToken.query.filter_by(user_id=current_user.id).first()
-                if existing_token:
-                    try:
-                        existing_token_json = decrypt_token(existing_token.encrypted_token)
-                        existing_token_data = json.loads(existing_token_json)
-                        if existing_token_data.get('refresh_token'):
-                            # Preserve existing refresh_token
-                            token_data['refresh_token'] = existing_token_data['refresh_token']
-                            token_json = json.dumps(token_data)
-                            print(f"✅ Preserved existing refresh_token from stored token")
-                        else:
-                            print(f"⚠️  WARNING: No refresh_token in new or existing token!")
-                            print(f"   Token will expire in ~1 hour. User should reconnect Gmail with prompt='consent'.")
-                    except:
-                        pass
-            else:
-                print(f"⚠️  WARNING: Refresh token missing from new token!")
-                print(f"   Token will expire in ~1 hour. User should reconnect Gmail with prompt='consent'.")
-        
         # Check if this is a signup flow (user not logged in yet)
         is_signup = session.get('oauth_signup', False)
         session.pop('oauth_signup', None)
@@ -1075,14 +1026,9 @@ def oauth2callback():
                     print(f"🔍 User not found (email: {email}, google_id: {google_id}), treating as signup")
                     return handle_google_signup_callback(creds)
                 else:
-                    # User exists but not logged in - log them in automatically
-                    print(f"🔍 User exists but not authenticated, logging in automatically (email: {email})")
-                    login_user(existing_user)
-                    session.permanent = True
-                    session['user_id'] = existing_user.id
-                    session['username'] = existing_user.username
-                    print(f"✅ Logged in user {existing_user.id} ({existing_user.email})")
-                    # Continue with Gmail connection flow below
+                    # User exists but not logged in - redirect to login
+                    print(f"🔍 User exists but not authenticated, redirecting to login")
+                    return redirect(url_for('login'))
             except Exception as check_error:
                 print(f"⚠️  Error checking if user exists: {check_error}")
                 # If we can't check, fall through to regular flow
@@ -1095,31 +1041,8 @@ def oauth2callback():
         if not current_user.is_authenticated:
             return redirect(url_for('login'))
         
-        # Get token JSON (use the one we already processed above with refresh_token preservation if available)
-        if 'token_json' not in locals():
-            token_json = creds.to_json()
-            token_data = json.loads(token_json)
-            
-            # If no refresh_token in new token, try to preserve existing refresh_token from stored token
-            if 'refresh_token' not in token_data or not token_data.get('refresh_token'):
-                existing_token = GmailToken.query.filter_by(user_id=current_user.id).first()
-                if existing_token:
-                    try:
-                        existing_token_json = decrypt_token(existing_token.encrypted_token)
-                        existing_token_data = json.loads(existing_token_json)
-                        if existing_token_data.get('refresh_token'):
-                            # Preserve existing refresh_token
-                            token_data['refresh_token'] = existing_token_data['refresh_token']
-                            token_json = json.dumps(token_data)
-                            print(f"✅ Preserved existing refresh_token from stored token")
-                        else:
-                            print(f"⚠️  WARNING: No refresh_token in new or existing token!")
-                            print(f"   Token will expire in ~1 hour. User should reconnect Gmail with prompt='consent'.")
-                    except Exception as preserve_error:
-                        print(f"⚠️  Could not preserve refresh_token: {preserve_error}")
-                else:
-                    print(f"⚠️  WARNING: Refresh token missing from new token!")
-                    print(f"   Token will expire in ~1 hour. User should reconnect Gmail with prompt='consent'.")
+        # Get token JSON
+        token_json = creds.to_json()
         
         # Encrypt and store token
         encrypted_token = encrypt_token(token_json)
@@ -1167,18 +1090,6 @@ def oauth2callback():
         # Check if this is from signup (auto-start setup)
         from_signup = request.args.get('from_signup') == 'true' or session.get('from_signup', False)
         session.pop('from_signup', None)
-        
-        # Trigger email sync after login to fetch any emails received while logged out
-        if CELERY_AVAILABLE:
-            try:
-                task = sync_user_emails.delay(
-                    user_id=current_user.id,
-                    max_emails=200,
-                    force_full_sync=False  # Use incremental sync
-                )
-                print(f"✅ Auto-sync triggered after OAuth login: task {task.id}")
-            except Exception as sync_error:
-                print(f"⚠️  Auto-sync error (non-critical): {sync_error}")
         
         # Redirect to dashboard - setup screen will show automatically if setup_completed is False
         if from_signup:
@@ -2546,14 +2457,7 @@ def get_starred_emails():
 @login_required
 def get_sent_emails():
     """Get user's sent emails"""
-    print("=" * 60)
-    print(f"📤 [SENT] ===== SENT EMAILS ENDPOINT CALLED =====")
-    print(f"📤 [SENT] User ID: {current_user.id if current_user.is_authenticated else 'NOT AUTHENTICATED'}")
-    print(f"📤 [SENT] User email: {current_user.email if current_user.is_authenticated else 'N/A'}")
-    print("=" * 60)
-    
     if not current_user.gmail_token:
-        print(f"❌ [SENT] User {current_user.id} has no Gmail token")
         return jsonify({
             'success': False,
             'error': 'Gmail not connected. Please connect your Gmail account.'
@@ -2562,26 +2466,16 @@ def get_sent_emails():
     try:
         gmail = get_user_gmail_client(current_user)
         if not gmail:
-            print(f"❌ [SENT] Failed to get Gmail client for user {current_user.id}")
             return jsonify({
                 'success': False,
                 'error': 'Failed to connect to Gmail'
             }), 500
         
-        if not gmail.service:
-            print(f"❌ [SENT] Gmail service not initialized for user {current_user.id}")
-            return jsonify({
-                'success': False,
-                'error': 'Gmail service not available'
-            }), 500
-        
         # Get max emails from query parameter
-        max_emails = min(request.args.get('max', default=20, type=int), 200)
-        print(f"📤 [SENT] Requesting {max_emails} sent emails")
+        max_emails = min(request.args.get('max', default=20, type=int), 200)  # Cap at 200 emails max (user can select 20, 50, 100, or 200)
         
         # Fetch sent emails
         sent_emails = gmail.get_sent_emails(max_results=max_emails)
-        print(f"📤 [SENT] Received {len(sent_emails)} sent emails from Gmail API")
         
         # Format sent emails for frontend (similar to received emails)
         formatted_emails = []
@@ -2602,7 +2496,6 @@ def get_sent_emails():
                 'is_sent': True
             })
         
-        print(f"✅ [SENT] Returning {len(formatted_emails)} formatted sent emails")
         return jsonify({
             'success': True,
             'count': len(formatted_emails),
@@ -3354,28 +3247,6 @@ def send_reply():
         # Send reply (don't mark as read automatically - keep as unread)
         success = gmail.send_reply(to_email, subject, body, thread_id, send_as_email=selected_email)
         
-        # Cancel any scheduled emails for this thread if reply was sent successfully
-        if success and thread_id:
-            try:
-                from models import ScheduledEmail
-                scheduled_emails = ScheduledEmail.query.filter_by(
-                    user_id=current_user.id,
-                    thread_id=thread_id,
-                    status='pending'
-                ).all()
-                
-                for scheduled_email in scheduled_emails:
-                    scheduled_email.status = 'cancelled'
-                    scheduled_email.cancelled_at = datetime.utcnow()
-                
-                if scheduled_emails:
-                    db.session.commit()
-                    print(f"✅ Cancelled {len(scheduled_emails)} scheduled email(s) for thread {thread_id}")
-            except Exception as cancel_error:
-                print(f"⚠️  Error cancelling scheduled emails: {str(cancel_error)}")
-                # Don't fail the reply if cancellation fails
-                db.session.rollback()
-        
         # Don't automatically mark as read - let user decide
         # if success and email_id:
         #     gmail.mark_as_read(email_id)
@@ -3496,7 +3367,7 @@ def forward_email():
 @app.route('/api/send-email', methods=['POST'])
 @login_required
 def send_email():
-    """Send a new email (not a reply) with optional attachments"""
+    """Send a new email (not a reply)"""
     if not current_user.gmail_token:
         return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
     
@@ -3518,24 +3389,12 @@ def send_email():
         if not gmail:
             return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
         
-        # Handle both JSON and FormData (for attachments)
-        if request.content_type and 'multipart/form-data' in request.content_type:
-            # FormData with attachments
-            to_email = request.form.get('to')
-            subject = request.form.get('subject')
-            body = request.form.get('body')
-            cc = request.form.get('cc')
-            bcc = request.form.get('bcc')
-            attachments = request.files.getlist('attachments')
-        else:
-            # JSON without attachments
-            data = request.json
-            to_email = data.get('to')
-            subject = data.get('subject')
-            body = data.get('body')
-            cc = data.get('cc')
-            bcc = data.get('bcc')
-            attachments = []
+        data = request.json
+        to_email = data.get('to')
+        subject = data.get('subject')
+        body = data.get('body')
+        cc = data.get('cc')
+        bcc = data.get('bcc')
         
         if not all([to_email, subject, body]):
             return jsonify({'success': False, 'error': 'Missing required fields: to, subject, body'}), 400
@@ -3543,8 +3402,8 @@ def send_email():
         # Get selected signature email preference
         selected_email = current_user.gmail_token.selected_signature_email if current_user.gmail_token else None
         
-        # Send email with attachments
-        success = gmail.send_email(to_email, subject, body, send_as_email=selected_email, cc=cc, bcc=bcc, attachments=attachments)
+        # Send email
+        success = gmail.send_email(to_email, subject, body, send_as_email=selected_email, cc=cc, bcc=bcc)
         
         return jsonify({
             'success': success,
@@ -3579,15 +3438,14 @@ def get_signatures():
         signatures = []
         
         for alias in send_as_list:
-            signature_html = alias.get('signature', '')
-            signature_raw = signature_html  # Keep raw HTML for display
+            signature_text = alias.get('signature', '')
+            signature_raw = signature_text  # Keep raw for debugging
             
-            # Also create plain text version for fallback
-            signature_text = ''
-            if signature_html:
+            # Strip HTML for preview
+            if signature_text:
                 import re
                 # Convert HTML breaks to newlines
-                signature_text = re.sub(r'<br\s*/?>', '\n', signature_html, flags=re.IGNORECASE)
+                signature_text = re.sub(r'<br\s*/?>', '\n', signature_text, flags=re.IGNORECASE)
                 signature_text = re.sub(r'</p>', '\n\n', signature_text, flags=re.IGNORECASE)
                 signature_text = re.sub(r'<p[^>]*>', '', signature_text, flags=re.IGNORECASE)
                 # Remove all other HTML tags
@@ -3610,10 +3468,9 @@ def get_signatures():
                 'email': alias.get('sendAsEmail', ''),
                 'displayName': alias.get('displayName', ''),
                 'isPrimary': alias.get('isPrimary', False),
-                'signature': signature_text,  # Plain text version
-                'signatureHtml': signature_html,  # Raw HTML version for proper display
-                'hasSignature': bool(signature_html),
-                'signatureRaw': signature_raw  # Keep for backward compatibility
+                'signature': signature_text,
+                'hasSignature': bool(signature_text),
+                'signatureRaw': signature_raw  # Include raw for debugging
             })
         
         # Get currently selected signature
@@ -3626,98 +3483,6 @@ def get_signatures():
         })
     
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/scheduled-emails', methods=['GET'])
-@login_required
-def get_scheduled_emails():
-    """Get all scheduled emails for current user"""
-    try:
-        from models import ScheduledEmail
-        
-        # Get all pending scheduled emails for current user
-        scheduled_emails = ScheduledEmail.query.filter_by(
-            user_id=current_user.id,
-            status='pending'
-        ).order_by(ScheduledEmail.scheduled_at).all()
-        
-        return jsonify({
-            'success': True,
-            'scheduled_emails': [{
-                'id': email.id,
-                'deal_id': email.deal_id,
-                'thread_id': email.thread_id,
-                'to': email.to_email,
-                'subject': email.subject,
-                'body': email.body,
-                'scheduled_at': email.scheduled_at.isoformat() if email.scheduled_at else None,
-                'created_at': email.created_at.isoformat() if email.created_at else None,
-                'deal_subject': email.deal.subject if email.deal else None,
-                'founder_name': email.deal.founder_name if email.deal else None
-            } for email in scheduled_emails]
-        })
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/scheduled-email/<int:email_id>', methods=['GET'])
-@login_required
-def get_scheduled_email(email_id):
-    """Get specific scheduled email details"""
-    try:
-        from models import ScheduledEmail
-        
-        scheduled_email = ScheduledEmail.query.get(email_id)
-        if not scheduled_email or scheduled_email.user_id != current_user.id:
-            return jsonify({'success': False, 'error': 'Not found'}), 404
-        
-        return jsonify({
-            'success': True,
-            'scheduled_email': {
-                'id': scheduled_email.id,
-                'deal_id': scheduled_email.deal_id,
-                'thread_id': scheduled_email.thread_id,
-                'to': scheduled_email.to_email,
-                'subject': scheduled_email.subject,
-                'body': scheduled_email.body,
-                'status': scheduled_email.status,
-                'scheduled_at': scheduled_email.scheduled_at.isoformat() if scheduled_email.scheduled_at else None,
-                'created_at': scheduled_email.created_at.isoformat() if scheduled_email.created_at else None,
-                'sent_at': scheduled_email.sent_at.isoformat() if scheduled_email.sent_at else None,
-                'cancelled_at': scheduled_email.cancelled_at.isoformat() if scheduled_email.cancelled_at else None,
-                'deal_subject': scheduled_email.deal.subject if scheduled_email.deal else None,
-                'founder_name': scheduled_email.deal.founder_name if scheduled_email.deal else None
-            }
-        })
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/scheduled-email/<int:email_id>/cancel', methods=['POST'])
-@login_required
-def cancel_scheduled_email(email_id):
-    """Cancel a scheduled email"""
-    try:
-        from models import ScheduledEmail
-        
-        scheduled_email = ScheduledEmail.query.get(email_id)
-        if not scheduled_email or scheduled_email.user_id != current_user.id:
-            return jsonify({'success': False, 'error': 'Not found'}), 404
-        
-        if scheduled_email.status != 'pending':
-            return jsonify({'success': False, 'error': f'Cannot cancel email with status: {scheduled_email.status}'}), 400
-        
-        scheduled_email.status = 'cancelled'
-        scheduled_email.cancelled_at = datetime.utcnow()
-        db.session.commit()
-        
-        return jsonify({'success': True, 'message': 'Scheduled email cancelled'})
-    
-    except Exception as e:
-        db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -4156,8 +3921,8 @@ def download_attachment(message_id, attachment_id):
         response = make_response(file_data)
         response.headers['Content-Type'] = mime_type
         
-        # For PDFs and images, set inline so browser displays them; for others, download
-        if mime_type == 'application/pdf' or (mime_type and mime_type.startswith('image/')):
+        # For PDFs, set inline so browser displays them; for others, download
+        if mime_type == 'application/pdf':
             response.headers['Content-Disposition'] = f'inline; filename="{filename}"'
         else:
             response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
