@@ -162,15 +162,15 @@ async function autoFetchNewEmails() {
                     // Only update allEmails and applyFilters if we're on the inbox tab
                     // Don't interfere with sent/drafts/starred tabs
                     if (currentTab === 'all' || currentTab === 'deal-flow') {
-                        allEmails = emailCache.data;
-                        
-                        // Apply filters and update display
-                        applyFilters();
-                        
-                        // Show notification
-                        showAlert('success', `📧 ${uniqueNewEmails.length} new email${uniqueNewEmails.length !== 1 ? 's' : ''} detected!`);
-                        
-                        console.log(`✅ Auto-fetch: Updated UI with ${uniqueNewEmails.length} new email(s), total: ${allEmails.length}`);
+                    allEmails = emailCache.data;
+                    
+                    // Apply filters and update display
+                    applyFilters();
+                    
+                    // Show notification
+                    showAlert('success', `📧 ${uniqueNewEmails.length} new email${uniqueNewEmails.length !== 1 ? 's' : ''} detected!`);
+                    
+                    console.log(`✅ Auto-fetch: Updated UI with ${uniqueNewEmails.length} new email(s), total: ${allEmails.length}`);
                     } else {
                         // Just update the cache, don't change the display
                         console.log(`ℹ️  Auto-fetch: Found ${uniqueNewEmails.length} new email(s), but on ${currentTab} tab - not updating display`);
@@ -1719,6 +1719,21 @@ function switchTab(tabName) {
 async function fetchScheduledEmails() {
     try {
         const response = await fetch('/api/scheduled-emails');
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ [FRONTEND] HTTP ${response.status} error:`, errorText);
+            // Check if the response is HTML (e.g., Flask error page)
+            if (errorText.startsWith('<')) {
+                throw new Error(`Server returned text/html instead of JSON. Status: ${response.status}`);
+            }
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const contentType = response.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+            const errorText = await response.text();
+            console.error(`❌ [FRONTEND] Expected JSON, but received:`, contentType, errorText);
+            throw new Error(`Server returned ${contentType || 'unknown content type'} instead of JSON.`);
+        }
         const data = await response.json();
         
         if (data.success) {
@@ -1826,6 +1841,20 @@ function displayScheduledEmails(scheduledEmails) {
 async function openScheduledEmail(scheduledId) {
     try {
         const response = await fetch(`/api/scheduled-email/${scheduledId}`);
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ [FRONTEND] HTTP ${response.status} error:`, errorText);
+            if (errorText.startsWith('<')) {
+                throw new Error(`Server returned text/html instead of JSON. Status: ${response.status}`);
+            }
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const contentType = response.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+            const errorText = await response.text();
+            console.error(`❌ [FRONTEND] Expected JSON, but received:`, contentType, errorText);
+            throw new Error(`Server returned ${contentType || 'unknown content type'} instead of JSON.`);
+        }
         const data = await response.json();
         
         if (data.success && data.scheduled_email) {
@@ -1898,6 +1927,20 @@ async function cancelScheduledEmail(scheduledId) {
             method: 'POST'
         });
         
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ [FRONTEND] HTTP ${response.status} error:`, errorText);
+            if (errorText.startsWith('<')) {
+                throw new Error(`Server returned text/html instead of JSON. Status: ${response.status}`);
+            }
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const contentType = response.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+            const errorText = await response.text();
+            console.error(`❌ [FRONTEND] Expected JSON, but received:`, contentType, errorText);
+            throw new Error(`Server returned ${contentType || 'unknown content type'} instead of JSON.`);
+        }
         const data = await response.json();
         
         if (data.success) {
@@ -2063,8 +2106,8 @@ async function fetchSentEmails() {
                     // Only show "no emails" if we actually have no emails
                     console.log(`📤 [FRONTEND] No sent emails found, showing empty state`);
                     displayEmails([]);
-                }
-            } else {
+            }
+        } else {
                 console.log(`📤 [FRONTEND] Not on sent tab (currentTab=${currentTab}), skipping UI update`);
             }
         } else {
