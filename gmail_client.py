@@ -90,13 +90,46 @@ class GmailClient:
                         raise
             
             # Refresh if expired
-            if creds.expired and creds.refresh_token:
-                creds.refresh(Request())
+            if creds.expired:
+                if creds.refresh_token:
+                    try:
+                        creds.refresh(Request())
+                        # After successful refresh, update the stored token if possible
+                        # (This helps keep tokens fresh, but we can't update DB here without user context)
+                    except Exception as refresh_error:
+                        error_msg = str(refresh_error)
+                        # Token refresh failed - user needs to reconnect
+                        if 'invalid_grant' in error_msg.lower() or 'token has been revoked' in error_msg.lower():
+                            print(f"❌ OAuth token expired or revoked. User needs to reconnect Gmail account.")
+                            print(f"   Go to /connect-gmail to get a new token with refresh_token.")
+                        elif 'gcloud auth application-default' in error_msg:
+                            # This is a misleading error from Google's library trying application-default credentials
+                            # But if refresh failed, the token is likely invalid anyway
+                            print(f"❌ OAuth token refresh failed. User needs to reconnect Gmail account.")
+                            print(f"   Go to /connect-gmail to get a new token with refresh_token.")
+                        else:
+                            print(f"❌ Error refreshing OAuth token: {error_msg}")
+                            print(f"   User needs to reconnect Gmail account at /connect-gmail")
+                        return False
+                else:
+                    print(f"❌ OAuth token expired and no refresh token available.")
+                    print(f"   User needs to reconnect Gmail account at /connect-gmail")
+                    print(f"   Make sure to use prompt='consent' to get a refresh_token.")
+                    return False
             
             self.service = build('gmail', 'v1', credentials=creds)
             return True
         except Exception as e:
-            print(f"Error authenticating from token: {str(e)}")
+            error_msg = str(e)
+            # Check if this is a token expiration/revocation error
+            if 'invalid_grant' in error_msg.lower() or 'token has been revoked' in error_msg.lower() or 'reauthentication' in error_msg.lower():
+                print(f"❌ OAuth token expired or revoked. User needs to reconnect Gmail account.")
+            elif 'gcloud auth application-default' in error_msg:
+                # This error appears when Google's library tries application-default credentials as fallback
+                # This usually means the OAuth token is invalid
+                print(f"❌ OAuth token invalid. User needs to reconnect Gmail account.")
+            else:
+                print(f"❌ Error authenticating from token: {error_msg}")
             return False
     
     def authenticate(self):

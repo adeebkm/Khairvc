@@ -479,12 +479,22 @@ def get_user_gmail_client(user):
         
         # Create Gmail client with user's token
         gmail_client = GmailClient(token_json=token_json)
-        print(f"✅ Successfully created Gmail client for user {user.id}")
-        return gmail_client
+        
+        # Only return client if authentication succeeded (has service)
+        if gmail_client and gmail_client.service:
+            print(f"✅ Successfully created Gmail client for user {user.id}")
+            return gmail_client
+        else:
+            print(f"❌ Failed to create Gmail client for user {user.id} - OAuth token expired or invalid")
+            print(f"   User {user.id} needs to reconnect Gmail account via /connect-gmail")
+            return None
     except Exception as e:
-        print(f"❌ Error getting Gmail client for user {user.id}: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        error_msg = str(e)
+        print(f"❌ Error getting Gmail client for user {user.id}: {error_msg}")
+        # Don't print full traceback for known token errors
+        if 'gcloud auth application-default' not in error_msg and 'invalid_grant' not in error_msg.lower():
+            import traceback
+            traceback.print_exc()
         return None
 
 
@@ -1004,6 +1014,41 @@ def oauth2callback():
         if 'creds' not in locals():
             creds = flow.credentials
         
+        # Ensure we have a refresh token - Google only provides it with prompt='consent' or first authorization
+        # If refresh_token is missing, we need to force reconnection
+        if not creds.refresh_token:
+            print(f"⚠️  No refresh token received. This token will expire in 1 hour.")
+            print(f"   User should reconnect with prompt='consent' to get a refresh token.")
+            # Note: We'll still store the token, but it will expire quickly
+            # The user will need to reconnect when it expires
+        
+        # Get token JSON and verify refresh_token is included
+        token_json = creds.to_json()
+        token_data = json.loads(token_json)
+        
+        # If no refresh_token in new token, try to preserve existing refresh_token from stored token
+        if 'refresh_token' not in token_data or not token_data.get('refresh_token'):
+            # Check if user has existing token with refresh_token
+            if current_user.is_authenticated:
+                existing_token = GmailToken.query.filter_by(user_id=current_user.id).first()
+                if existing_token:
+                    try:
+                        existing_token_json = decrypt_token(existing_token.encrypted_token)
+                        existing_token_data = json.loads(existing_token_json)
+                        if existing_token_data.get('refresh_token'):
+                            # Preserve existing refresh_token
+                            token_data['refresh_token'] = existing_token_data['refresh_token']
+                            token_json = json.dumps(token_data)
+                            print(f"✅ Preserved existing refresh_token from stored token")
+                        else:
+                            print(f"⚠️  WARNING: No refresh_token in new or existing token!")
+                            print(f"   Token will expire in ~1 hour. User should reconnect Gmail with prompt='consent'.")
+                    except:
+                        pass
+            else:
+                print(f"⚠️  WARNING: Refresh token missing from new token!")
+                print(f"   Token will expire in ~1 hour. User should reconnect Gmail with prompt='consent'.")
+        
         # Check if this is a signup flow (user not logged in yet)
         is_signup = session.get('oauth_signup', False)
         session.pop('oauth_signup', None)
@@ -1050,8 +1095,31 @@ def oauth2callback():
         if not current_user.is_authenticated:
             return redirect(url_for('login'))
         
-        # Get token JSON
-        token_json = creds.to_json()
+        # Get token JSON (use the one we already processed above with refresh_token preservation if available)
+        if 'token_json' not in locals():
+            token_json = creds.to_json()
+            token_data = json.loads(token_json)
+            
+            # If no refresh_token in new token, try to preserve existing refresh_token from stored token
+            if 'refresh_token' not in token_data or not token_data.get('refresh_token'):
+                existing_token = GmailToken.query.filter_by(user_id=current_user.id).first()
+                if existing_token:
+                    try:
+                        existing_token_json = decrypt_token(existing_token.encrypted_token)
+                        existing_token_data = json.loads(existing_token_json)
+                        if existing_token_data.get('refresh_token'):
+                            # Preserve existing refresh_token
+                            token_data['refresh_token'] = existing_token_data['refresh_token']
+                            token_json = json.dumps(token_data)
+                            print(f"✅ Preserved existing refresh_token from stored token")
+                        else:
+                            print(f"⚠️  WARNING: No refresh_token in new or existing token!")
+                            print(f"   Token will expire in ~1 hour. User should reconnect Gmail with prompt='consent'.")
+                    except Exception as preserve_error:
+                        print(f"⚠️  Could not preserve refresh_token: {preserve_error}")
+                else:
+                    print(f"⚠️  WARNING: Refresh token missing from new token!")
+                    print(f"   Token will expire in ~1 hour. User should reconnect Gmail with prompt='consent'.")
         
         # Encrypt and store token
         encrypted_token = encrypt_token(token_json)
