@@ -39,6 +39,7 @@ celery.conf.task_routes = {
     'tasks.send_whatsapp_followups': {'queue': 'email_sync'},
     'tasks.generate_scheduled_email': {'queue': 'email_sync'},
     'tasks.send_scheduled_emails': {'queue': 'email_sync'},
+    'tasks.send_delayed_auto_reply': {'queue': 'email_sync'},
     'tasks.process_pubsub_notification': {'queue': 'pubsub_notifications'},
 }
 

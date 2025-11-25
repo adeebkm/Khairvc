@@ -664,6 +664,7 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                         # 1. AUTO_REPLY_DISABLED is not true, AND
                                         # 2. SEND_EMAILS is true (required for sending emails)
                                         if not auto_reply_disabled and send_emails:
+                                            # Schedule auto-reply to send after 10 minutes instead of immediately
                                             try:
                                                 # Extract sender email
                                                 sender_email = email.get('from', '')
@@ -683,36 +684,20 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
 <p>Looking forward to learning more about your venture.</p>
 <p>Best regards</p>"""
                                                 
-                                                # Get user's selected signature email preference
-                                                selected_email = user.gmail_token.selected_signature_email if user.gmail_token else None
-                                                
-                                                # Send the auto-reply
-                                                print(f"📧 [TASK] Sending auto-reply for deal {deal.id} to {sender_email}")
-                                                success = gmail.send_reply(
-                                                    to_email=sender_email,
-                                                    subject=reply_subject,
-                                                    body=reply_body,
-                                                    thread_id=email.get('thread_id', ''),
-                                                    send_as_email=selected_email
+                                                # Schedule delayed auto-reply (10 minutes = 600 seconds)
+                                                from celery_config import celery
+                                                celery.send_task(
+                                                    'tasks.send_delayed_auto_reply',
+                                                    args=[user_id, deal.id, sender_email, reply_subject, reply_body, email.get('thread_id', ''), new_classification.id],
+                                                    countdown=600  # 10 minutes delay
                                                 )
-                                                
-                                                if success:
-                                                    print(f"✅ [TASK] Auto-reply sent successfully for deal {deal.id}")
-                                                    # Mark classification as replied so we never auto-reply this thread again
-                                                    try:
-                                                        new_classification.reply_sent = True
-                                                        db.session.commit()
-                                                    except Exception as mark_error:
-                                                        print(f"⚠️  [TASK] Failed to mark auto-reply as sent for deal {deal.id}: {mark_error}")
-                                                        db.session.rollback()
-                                                else:
-                                                    print(f"⚠️  [TASK] Failed to send auto-reply for deal {deal.id}")
-                                            except Exception as reply_error:
-                                                error_msg = str(reply_error)
-                                                print(f"❌ [TASK] Auto-reply failed for deal {deal.id}: {error_msg}")
+                                                print(f"📧 [TASK] Scheduled auto-reply for deal {deal.id} to {sender_email} (will send in 10 minutes)")
+                                            except Exception as schedule_error:
+                                                error_msg = str(schedule_error)
+                                                print(f"❌ [TASK] Failed to schedule auto-reply for deal {deal.id}: {error_msg}")
                                                 import traceback
                                                 traceback.print_exc()
-                                                # Don't fail the whole task if auto-reply fails
+                                                # Don't fail the whole task if scheduling fails
                                         else:
                                             if not send_emails:
                                                 print(f"📧 [TASK] Email sending disabled (SEND_EMAILS=false), skipping auto-reply for deal {deal.id}")
@@ -1339,6 +1324,82 @@ def send_whatsapp_followups():
     except Exception as e:
         error_msg = f"WhatsApp follow-up task failed: {str(e)}"
         print(f"❌ [WHATSAPP] {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return {'status': 'error', 'error': error_msg}
+
+
+@celery.task(name='tasks.send_delayed_auto_reply')
+def send_delayed_auto_reply(user_id, deal_id, sender_email, reply_subject, reply_body, thread_id, classification_id):
+    """
+    Send delayed auto-reply (10 minutes after email received)
+    This task is scheduled with countdown=600 (10 minutes)
+    """
+    try:
+        from app import app, db
+    except ImportError:
+        import sys
+        import os
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, current_dir)
+        from app import app, db
+    
+    from models import User, EmailClassification
+    from gmail_client import GmailClient
+    from auth import decrypt_token
+    
+    try:
+        with app.app_context():
+            # Check if reply was already sent manually (don't send if user already replied)
+            classification = EmailClassification.query.get(classification_id)
+            if not classification:
+                print(f"⚠️  [AUTO-REPLY] Classification {classification_id} not found, skipping auto-reply")
+                return {'status': 'skipped', 'reason': 'Classification not found'}
+            
+            # Check if reply was already sent (either manually or by another auto-reply)
+            if classification.reply_sent:
+                print(f"📧 [AUTO-REPLY] Skipping auto-reply for deal {deal_id} - reply already sent")
+                return {'status': 'skipped', 'reason': 'Reply already sent'}
+            
+            user = User.query.get(user_id)
+            if not user or not user.gmail_token:
+                print(f"⚠️  [AUTO-REPLY] User {user_id} or Gmail token not found")
+                return {'status': 'error', 'error': 'User or Gmail token not found'}
+            
+            # Get Gmail client
+            token_json = decrypt_token(user.gmail_token.encrypted_token)
+            gmail = GmailClient(token_json=token_json)
+            
+            # Get user's selected signature email preference
+            selected_email = user.gmail_token.selected_signature_email if user.gmail_token else None
+            
+            # Send the auto-reply
+            print(f"📧 [AUTO-REPLY] Sending delayed auto-reply for deal {deal_id} to {sender_email}")
+            success = gmail.send_reply(
+                to_email=sender_email,
+                subject=reply_subject,
+                body=reply_body,
+                thread_id=thread_id,
+                send_as_email=selected_email
+            )
+            
+            if success:
+                print(f"✅ [AUTO-REPLY] Auto-reply sent successfully for deal {deal_id}")
+                # Mark classification as replied so we never auto-reply this thread again
+                try:
+                    classification.reply_sent = True
+                    db.session.commit()
+                except Exception as mark_error:
+                    print(f"⚠️  [AUTO-REPLY] Failed to mark auto-reply as sent for deal {deal_id}: {mark_error}")
+                    db.session.rollback()
+                return {'status': 'success', 'deal_id': deal_id}
+            else:
+                print(f"⚠️  [AUTO-REPLY] Failed to send auto-reply for deal {deal_id}")
+                return {'status': 'error', 'error': 'Failed to send email'}
+                
+    except Exception as e:
+        error_msg = f"Delayed auto-reply failed: {str(e)}"
+        print(f"❌ [AUTO-REPLY] {error_msg}")
         import traceback
         traceback.print_exc()
         return {'status': 'error', 'error': error_msg}
