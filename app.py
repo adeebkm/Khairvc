@@ -1026,9 +1026,13 @@ def oauth2callback():
                     print(f"🔍 User not found (email: {email}, google_id: {google_id}), treating as signup")
                     return handle_google_signup_callback(creds)
                 else:
-                    # User exists but not logged in - redirect to login
-                    print(f"🔍 User exists but not authenticated, redirecting to login")
-                    return redirect(url_for('login'))
+                    # User exists but not logged in - log them in automatically
+                    print(f"🔍 User exists but not authenticated, logging in automatically")
+                    login_user(existing_user)
+                    session.permanent = True
+                    session['user_id'] = existing_user.id
+                    session['username'] = existing_user.username
+                    # Continue with Gmail connection flow below
             except Exception as check_error:
                 print(f"⚠️  Error checking if user exists: {check_error}")
                 # If we can't check, fall through to regular flow
@@ -1037,9 +1041,33 @@ def oauth2callback():
             # Handle Google signup - create account and connect Gmail
             return handle_google_signup_callback(creds)
         
-        # Regular flow - user is already logged in, just connecting Gmail
+        # Regular flow - user should be logged in by now (either was already logged in, or we just logged them in above)
         if not current_user.is_authenticated:
-            return redirect(url_for('login'))
+            # This shouldn't happen, but if it does, try to find and log in the user
+            try:
+                from googleapiclient.discovery import build
+                userinfo_service = build('oauth2', 'v2', credentials=creds)
+                user_info = userinfo_service.userinfo().get().execute()
+                email = user_info.get('email')
+                google_id = user_info.get('id')
+                
+                existing_user = None
+                if google_id:
+                    existing_user = User.query.filter_by(google_id=google_id).first()
+                if not existing_user and email:
+                    existing_user = User.query.filter_by(email=email).first()
+                
+                if existing_user:
+                    login_user(existing_user)
+                    session.permanent = True
+                    session['user_id'] = existing_user.id
+                    session['username'] = existing_user.username
+                else:
+                    print(f"⚠️  User not found and not authenticated, redirecting to login")
+                    return redirect(url_for('login'))
+            except Exception as e:
+                print(f"⚠️  Error in fallback login: {e}")
+                return redirect(url_for('login'))
         
         # Get token JSON
         token_json = creds.to_json()

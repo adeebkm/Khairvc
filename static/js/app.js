@@ -5966,27 +5966,49 @@ async function loadContacts() {
                 contactsCache.data = data.contacts;
                 contactsCache.loaded = true;
                 console.log(`✅ Loaded ${contactsCache.data.length} contacts for autocomplete`);
+            } else {
+                console.warn('⚠️ Contacts API returned success=false:', data);
+                if (data.error && data.error.includes('scope')) {
+                    console.warn('💡 You may need to re-authenticate to grant contacts permission');
+                }
+            }
+        } else {
+            const errorText = await response.text();
+            console.error(`❌ Contacts API error (${response.status}):`, errorText);
+            // Try to parse as JSON for better error message
+            try {
+                const errorData = JSON.parse(errorText);
+                if (errorData.error && errorData.error.includes('scope')) {
+                    console.warn('💡 You may need to re-authenticate to grant contacts permission');
+                }
+            } catch (e) {
+                // Not JSON, that's okay
             }
         }
     } catch (error) {
-        console.error('Error loading contacts:', error);
+        console.error('❌ Error loading contacts:', error);
     } finally {
         contactsCache.loading = false;
     }
     
-    return contactsCache.data;
+    return contactsCache.data || [];
 }
 
 // Initialize autocomplete for an input field (People API only)
 function initEmailAutocomplete(inputId) {
     const input = document.getElementById(inputId);
-    if (!input) return;
+    if (!input) {
+        console.warn(`⚠️ Autocomplete: Input element '${inputId}' not found`);
+        return;
+    }
     
     // Check if already initialized
     if (input.dataset.autocompleteInitialized === 'true') {
+        console.log(`ℹ️ Autocomplete already initialized for '${inputId}'`);
         return;
     }
     input.dataset.autocompleteInitialized = 'true';
+    console.log(`✅ Initializing autocomplete for '${inputId}'`);
     
     let autocompleteList = null;
     let selectedIndex = -1;
@@ -6008,12 +6030,16 @@ function initEmailAutocomplete(inputId) {
             overflow-y: auto;
             z-index: 10000;
             display: none;
-            width: 100%;
+            width: ${input.offsetWidth}px;
             margin-top: 4px;
+            left: 0;
+            top: 100%;
         `;
         const parent = input.parentElement;
         if (parent) {
-            parent.style.position = 'relative';
+            if (getComputedStyle(parent).position === 'static') {
+                parent.style.position = 'relative';
+            }
             parent.appendChild(autocompleteList);
         }
     };
@@ -6090,7 +6116,11 @@ function initEmailAutocomplete(inputId) {
     // Handle input
     const handleInput = async (e) => {
         const query = input.value.trim();
-        await showSuggestions(query);
+        if (query.length >= 1) {
+            await showSuggestions(query);
+        } else {
+            if (autocompleteList) autocompleteList.style.display = 'none';
+        }
     };
     
     // Handle keyboard navigation
@@ -6122,20 +6152,38 @@ function initEmailAutocomplete(inputId) {
         }
     };
     
-    // Handle clicks
+    // Handle clicks (scoped to this input's autocomplete)
     const handleClick = (e) => {
+        if (!autocompleteList) return;
+        
         const item = e.target.closest('.autocomplete-item');
-        if (item) {
+        if (item && autocompleteList.contains(item)) {
             selectSuggestion(item);
-        } else if (!autocompleteList.contains(e.target) && e.target !== input) {
-            if (autocompleteList) autocompleteList.style.display = 'none';
+        } else if (e.target !== input && !autocompleteList.contains(e.target)) {
+            autocompleteList.style.display = 'none';
         }
     };
     
     // Add event listeners
     input.addEventListener('input', handleInput);
     input.addEventListener('keydown', handleKeydown);
-    document.addEventListener('click', handleClick);
+    // Use capture phase to handle clicks before they bubble
+    document.addEventListener('click', handleClick, true);
+    
+    // Clean up on input removal (if modal is closed)
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            mutation.removedNodes.forEach((node) => {
+                if (node === input || (node.contains && node.contains(input))) {
+                    document.removeEventListener('click', handleClick, true);
+                    observer.disconnect();
+                }
+            });
+        });
+    });
+    if (input.parentElement) {
+        observer.observe(input.parentElement, { childList: true, subtree: true });
+    }
     
     // Preload contacts in background
     loadContacts();
