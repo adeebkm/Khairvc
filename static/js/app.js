@@ -319,7 +319,18 @@ function toggleAutoFetch(enabled) {
     autoFetchNewEmails();
     autoFetchInterval = setInterval(autoFetchNewEmails, 30 * 1000); // 30 seconds
     
+    // Auto-fetch sent emails in background (every 2 minutes)
+    fetchSentEmails(); // Fetch immediately
+    const sentEmailsInterval = setInterval(() => {
+        // Only auto-fetch if not currently on sent tab (to avoid interrupting user)
+        // If on sent tab, fetchSentEmails will be called when user switches to it
+        if (currentTab !== 'sent') {
+            fetchSentEmails();
+        }
+    }, 2 * 60 * 1000); // 2 minutes
+    
     console.log('✅ Auto-fetch enabled - polling database every 30 seconds for new emails synced by Pub/Sub');
+    console.log('✅ Auto-fetch sent emails enabled - fetching every 2 minutes');
     // No polling needed - Pub/Sub will trigger background sync when new emails arrive
 }
 
@@ -1569,10 +1580,11 @@ function switchTab(tabName) {
         emailList.style.display = 'block';
         dealFlowTable.style.display = 'none';
         
+        // CRITICAL: Don't set allEmails for sent tab - use sentEmailsCache directly
         // Show cached data immediately if available (instant load)
         if (sentEmailsCache.length > 0) {
             console.log(`⚡ Showing ${sentEmailsCache.length} sent emails from cache (instant)`);
-            allEmails = sentEmailsCache;
+            // Don't set allEmails - applyFilters will use sentEmailsCache directly
             applyFilters();
             const emailCountEl = document.getElementById('emailCount');
             if (emailCountEl) {
@@ -2257,7 +2269,26 @@ function applyFilters() {
         allEmails = [];
     }
     
-    let filtered = allEmails;
+    // CRITICAL: For sent/drafts/starred tabs, use their dedicated caches, NOT allEmails
+    // allEmails is for inbox emails only - don't mix them!
+    let filtered;
+    
+    if (currentTab === 'sent') {
+        // Use sentEmailsCache directly - never use allEmails for sent emails
+        filtered = sentEmailsCache || [];
+        console.log(`🔍 [FILTER] Sent tab: Using ${filtered.length} emails from sentEmailsCache (NOT allEmails)`);
+    } else if (currentTab === 'drafts') {
+        // Use draftsCache directly
+        filtered = draftsCache || [];
+        console.log(`🔍 [FILTER] Drafts tab: Using ${filtered.length} emails from draftsCache (NOT allEmails)`);
+    } else if (currentTab === 'starred') {
+        // Use starredEmailsCache directly
+        filtered = starredEmailsCache || [];
+        console.log(`🔍 [FILTER] Starred tab: Using ${filtered.length} emails from starredEmailsCache (NOT allEmails)`);
+    } else {
+        // For inbox and category tabs, use allEmails
+        filtered = allEmails;
+    }
     
     // Apply category filter - check both email.category and email.classification?.category
     if (currentTab === 'networking') {
@@ -2284,14 +2315,6 @@ function applyFilters() {
         filtered = allEmails.filter(e => {
             const cat = e.category || e.classification?.category || '';
             return cat.toLowerCase() === 'dealflow' || cat.toLowerCase() === 'deal_flow';
-        });
-    } else if (currentTab === 'sent') {
-        filtered = allEmails.filter(e => {
-            // Check multiple ways an email can be identified as sent
-            return e.from_me === true || 
-                   e.is_sent === true || 
-                   e.category === 'SENT' ||
-                   (e.classification && e.classification.category === 'SENT');
         });
     } else if (currentTab === 'starred') {
         filtered = allEmails.filter(e => {
