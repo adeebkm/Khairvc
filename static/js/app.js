@@ -1136,6 +1136,9 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Initialize autosave listeners for composer
     initAutosaveListeners();
     
+    // Pre-load signature for instant access when composing/replying
+    preloadSignature();
+    
     // Start polling for Gmail label changes (real-time bidirectional sync)
     startLabelChangePolling();
     
@@ -4183,40 +4186,62 @@ function bodyContainsSignature(bodyContent, signatureHtml) {
 // Cache signature to avoid repeated API calls
 let cachedSignature = null;
 let signatureCacheTime = 0;
+let signatureLoadPromise = null; // Track ongoing load to avoid duplicate requests
 const SIGNATURE_CACHE_DURATION = 60000; // 1 minute cache
 
-// Get signature (with caching)
+// Pre-load signature on page load for instant access
+function preloadSignature() {
+    // Don't wait for it, just start loading in background
+    getSignature();
+}
+
+// Get signature (with caching and instant return if cached)
 async function getSignature() {
-    // Check cache first
+    // Check cache first - return instantly if available
     const now = Date.now();
     if (cachedSignature && (now - signatureCacheTime) < SIGNATURE_CACHE_DURATION) {
         return cachedSignature;
     }
     
-    try {
-        const response = await fetch('/api/signatures');
-        const data = await response.json();
-        
-        if (!data.success || !data.signatures || data.signatures.length === 0) {
-            return null;
-        }
-        
-        const signatures = data.signatures;
-        const selected = data.selected;
-        
-        // Find selected signature (or primary if none selected)
-        const selectedSig = signatures.find(sig => (!selected && sig.isPrimary) || (selected === sig.email)) || signatures[0];
-        
-        if (selectedSig && (selectedSig.signatureHtml || selectedSig.signatureRaw)) {
-            cachedSignature = selectedSig.signatureHtml || selectedSig.signatureRaw;
-            signatureCacheTime = now;
-            return cachedSignature;
-        }
-    } catch (error) {
-        console.error('Error fetching signature:', error);
+    // If already loading, return the existing promise
+    if (signatureLoadPromise) {
+        return signatureLoadPromise;
     }
     
-    return null;
+    // Start loading
+    signatureLoadPromise = (async () => {
+        try {
+            const response = await fetch('/api/signatures');
+            const data = await response.json();
+            
+            if (!data.success || !data.signatures || data.signatures.length === 0) {
+                signatureLoadPromise = null;
+                return null;
+            }
+            
+            const signatures = data.signatures;
+            const selected = data.selected;
+            
+            // Find selected signature (or primary if none selected)
+            const selectedSig = signatures.find(sig => (!selected && sig.isPrimary) || (selected === sig.email)) || signatures[0];
+            
+            if (selectedSig && (selectedSig.signatureHtml || selectedSig.signatureRaw)) {
+                cachedSignature = selectedSig.signatureHtml || selectedSig.signatureRaw;
+                signatureCacheTime = Date.now();
+                signatureLoadPromise = null;
+                return cachedSignature;
+            }
+            
+            signatureLoadPromise = null;
+            return null;
+        } catch (error) {
+            console.error('Error fetching signature:', error);
+            signatureLoadPromise = null;
+            return null;
+        }
+    })();
+    
+    return signatureLoadPromise;
 }
 
 // Insert signature into body (for reply/reply all - a bit down from top)
@@ -4227,7 +4252,7 @@ async function insertSignatureIntoBody(type) {
     
     if (!bodyEl) return;
     
-    // Get signature (uses cache if available)
+    // Get signature (uses cache if available - should be instant if preloaded)
     const signatureHtml = await getSignature();
     
     if (!signatureHtml) {
@@ -4256,8 +4281,23 @@ async function insertSignatureIntoBody(type) {
             setBodyContent(bodyEl, trimmedBody + '<br><br>' + signatureHtml + '<br><br>');
         }
     } else {
-        // For compose, append at the end
-        setBodyContent(bodyEl, currentBody + (currentBody ? '<br><br>' : '') + signatureHtml);
+        // For compose, always append at the very bottom (end) of the body
+        const trimmedBody = currentBody.trim();
+        
+        // Check if signature is already in body
+        if (bodyContainsSignature(trimmedBody, signatureHtml)) {
+            return;
+        }
+        
+        // Always add signature at the bottom, even if body is empty
+        // This way it's ready and visible at the bottom
+        if (trimmedBody) {
+            // User has typed something, append signature at the end
+            setBodyContent(bodyEl, trimmedBody + '<br><br>' + signatureHtml);
+        } else {
+            // Body is empty, add signature at the bottom (user will type above it)
+            setBodyContent(bodyEl, '<br><br>' + signatureHtml);
+        }
     }
 }
 
@@ -5561,8 +5601,8 @@ async function openComposeModal() {
     // Hide CC/BCC fields by default
     document.getElementById('composeCcBcc').style.display = 'none';
     
-    // Insert signature into compose body (loads in background)
-    insertSignatureIntoBody('compose'); // Don't await - let it load in background
+    // Insert signature immediately at the bottom (loads in background if not cached yet)
+    insertSignatureIntoBody('compose');
     
     // Focus on To field
     setTimeout(() => {
@@ -5680,6 +5720,15 @@ async function sendComposedEmail() {
         subject = document.getElementById('composeSubject')?.value.trim() || '';
         const composeBodyEl = document.getElementById('composeBody');
         body = getBodyContent(composeBodyEl).trim() || '';
+        
+        // Ensure signature is added before sending (if not already present)
+        if (body && composeBodyEl) {
+            const signatureHtml = await getSignature();
+            if (signatureHtml && !bodyContainsSignature(body, signatureHtml)) {
+                body = body + '<br><br>' + signatureHtml;
+                setBodyContent(composeBodyEl, body);
+            }
+        }
     }
     
     if (!to) {
