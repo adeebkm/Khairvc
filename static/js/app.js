@@ -5536,6 +5536,9 @@ async function openComposeModal() {
     // Load and display signature preview
     await loadSignaturePreview('compose');
     
+    // Insert signature into compose body
+    await insertSignatureIntoBody('compose');
+    
     // Focus on To field
     setTimeout(() => {
         document.getElementById('composeTo').focus();
