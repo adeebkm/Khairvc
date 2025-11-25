@@ -14,8 +14,8 @@ class WhatsAppService:
     def __init__(self):
         self.phone_number_id = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
         self.access_token = os.getenv('WHATSAPP_ACCESS_TOKEN')
-        self.api_version = os.getenv('WHATSAPP_API_VERSION', 'v21.0')
-        self.template_name = os.getenv('WHATSAPP_TEMPLATE_NAME', 'hello_world')  # Default to hello_world
+        self.api_version = os.getenv('WHATSAPP_API_VERSION', 'v23.0')  # Updated to v23.0
+        self.template_name = os.getenv('WHATSAPP_TEMPLATE_NAME', 'deal_flow_alert')  # Updated to deal_flow_alert
         self.base_url = f"https://graph.facebook.com/{self.api_version}/{self.phone_number_id}"
         
         if not self.phone_number_id or not self.access_token:
@@ -136,13 +136,18 @@ class WhatsAppService:
             if deal_state:
                 details_parts.append(f"State: {deal_state}")
             
-            details_text = "\n".join(details_parts) if details_parts else "No additional details"
+            # Join details with periods/spaces instead of newlines (WhatsApp doesn't allow newlines in parameters)
+            details_text = ". ".join(details_parts) if details_parts else "No additional details"
+            # Remove any remaining newlines or tabs
+            details_text = details_text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
             # Limit total details to 300 chars
             if len(details_text) > 300:
                 details_text = details_text[:297] + "..."
             
             # Try 3-variable format first (most common)
             # Template variables: {{subject}}, {{sender}}, {{details}}
+            # Note: Template uses language 'en' not 'en_US' for deal_flow_alert
+            # IMPORTANT: For NAMED parameter format, must include 'parameter_name' field
             payload = {
                 'messaging_product': 'whatsapp',
                 'to': to_number,
@@ -150,15 +155,15 @@ class WhatsAppService:
                 'template': {
                     'name': self.template_name,
                     'language': {
-                        'code': 'en_US'
+                        'code': 'en'  # Changed from 'en_US' to 'en' for deal_flow_alert template
                     },
                     'components': [
                         {
                             'type': 'body',
                             'parameters': [
-                                {'type': 'text', 'text': subject[:50]},  # {{subject}}
-                                {'type': 'text', 'text': sender[:50]},   # {{sender}}
-                                {'type': 'text', 'text': details_text[:300]}  # {{details}}
+                                {'type': 'text', 'parameter_name': 'subject', 'text': subject[:50]},  # {{subject}}
+                                {'type': 'text', 'parameter_name': 'sender', 'text': sender[:50]},   # {{sender}}
+                                {'type': 'text', 'parameter_name': 'details', 'text': details_text[:300]}  # {{details}}
                             ]
                         }
                     ]
@@ -190,62 +195,26 @@ class WhatsAppService:
             
             return response.json()
         except requests.exceptions.RequestException as e:
-            # Check if template doesn't exist (404 with code 132001)
-            if hasattr(e, 'response') and e.response is not None and e.response.status_code == 404:
-                try:
-                    error_detail = e.response.json()
-                    error_data = error_detail.get('error', {})
-                    error_code = error_data.get('code')
-                    
-                    # Template not found error (code 132001)
-                    if error_code == 132001:
-                        print(f"⚠️  Template '{self.template_name}' not found. Falling back to 'hello_world' template.")
-                        
-                        # Fallback to hello_world template (no parameters)
-                        fallback_payload = {
-                            'messaging_product': 'whatsapp',
-                            'to': to_number,
-                            'type': 'template',
-                            'template': {
-                                'name': 'hello_world',
-                                'language': {
-                                    'code': 'en_US'
-                                }
-                            }
-                        }
-                        
-                        try:
-                            fallback_response = requests.post(url, headers=headers, json=fallback_payload, timeout=10)
-                            fallback_response.raise_for_status()
-                            print(f"📱 Sent WhatsApp template (hello_world fallback) for: {subject}")
-                            print(f"   ⚠️  Note: Create template '{self.template_name}' in Meta platform to use custom template")
-                            return fallback_response.json()
-                        except requests.exceptions.RequestException as fallback_error:
-                            # If fallback also fails, raise original error with helpful message
-                            error_msg = f"Template '{self.template_name}' does not exist in Meta's WhatsApp platform.\n\n"
-                            error_msg += f"To fix this:\n"
-                            error_msg += f"1. Go to https://business.facebook.com/wa/manage/message-templates/\n"
-                            error_msg += f"2. Create a template named '{self.template_name}'\n"
-                            error_msg += f"3. Add 3 text variables in the body: {{subject}}, {{sender}}, {{details}}\n"
-                            error_msg += f"4. Submit for approval\n\n"
-                            error_msg += f"Fallback to 'hello_world' also failed: {str(fallback_error)}"
-                            raise Exception(error_msg)
-                
-                except:
-                    pass  # If we can't parse error, continue to general error handling
-            
-            # General error handling
             error_msg = f"WhatsApp API error: {str(e)}"
             if hasattr(e, 'response') and e.response is not None:
                 try:
                     error_detail = e.response.json()
                     error_msg += f" - {json.dumps(error_detail)}"
                     
-                    # Check for token expiration
+                    error_data = error_detail.get('error', {})
+                    error_code = error_data.get('code')
+                    error_message = error_data.get('message', '')
+                    
+                    # Check for specific error codes
                     if e.response.status_code == 401:
-                        error_data = error_detail.get('error', {})
-                        if 'expired' in str(error_data).lower() or error_data.get('code') == 190:
+                        if 'expired' in str(error_data).lower() or error_code == 190:
                             error_msg = f"WhatsApp access token has EXPIRED. Please get a new token from Meta Developer Console and update WHATSAPP_ACCESS_TOKEN in Railway.\n\nSteps:\n1. Go to https://developers.facebook.com/apps/\n2. Select your app → WhatsApp → API Setup\n3. Generate a new access token\n4. Update WHATSAPP_ACCESS_TOKEN in Railway web service environment variables\n\nOriginal error: {error_msg}"
+                    elif error_code == 100 and 'Parameter name is missing or empty' in error_message:
+                        # This error occurs with MARKETING templates using NAMED parameters
+                        error_msg = f"WhatsApp template error: MARKETING templates with NAMED parameters may have API limitations.\n\nSOLUTION: Recreate the template as UTILITY category with positional parameters ({{1}}, {{2}}, {{3}}) instead of named parameters ({{subject}}, {{sender}}, {{details}}).\n\nTemplate should be:\n- Category: UTILITY (not MARKETING)\n- Parameters: {{1}}, {{2}}, {{3}} (positional, not named)\n- Language: en\n\nOriginal error: {error_msg}"
+                    elif error_code == 132001:
+                        # Template not found
+                        error_msg = f"WhatsApp template '{self.template_name}' not found. Please verify:\n1. Template name is correct\n2. Template is APPROVED (not pending)\n3. Language code matches (use 'en' not 'en_US')\n4. Template is associated with the correct WABA\n\nOriginal error: {error_msg}"
                 except:
                     error_msg += f" - Status: {e.response.status_code}"
             raise Exception(error_msg)
