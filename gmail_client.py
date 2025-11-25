@@ -995,7 +995,7 @@ class GmailClient:
             # If history is too old or invalid, fall back to full sync
             if 'historyId' in error_str or '404' in error_str or 'invalid' in error_str.lower():
                 print(f"⚠️  History ID expired or invalid, falling back to full sync: {error_str}")
-                emails, history_id = self.get_emails(max_results=10, unread_only=unread_only, start_history_id=None)
+                emails, history_id = self.get_emails(max_results=40, unread_only=unread_only, start_history_id=None)
                 return {
                     'new_emails': emails,
                     'deleted_ids': [],
