@@ -653,17 +653,13 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                             if not reply_subject.startswith('Re:'):
                                                 reply_subject = f"Re: {reply_subject}"
                                             
-                                            # Create a professional, warm auto-reply message
+                                            # Create a professional, warm auto-reply message (HTML format to preserve signature)
                                             founder_greeting = founder_name if founder_name else 'there'
-                                            reply_body = f"""Hi {founder_greeting},
-
-Thank you for reaching out and sharing your opportunity with us. We've received your email and are currently reviewing it.
-
-We appreciate you taking the time to connect, and we'll get back to you soon with our thoughts and next steps.
-
-Looking forward to learning more about your venture.
-
-Best regards"""
+                                            reply_body = f"""<p>Hi {founder_greeting},</p>
+<p>Thank you for reaching out and sharing your opportunity with us. We've received your email and are currently reviewing it.</p>
+<p>We appreciate you taking the time to connect, and we'll get back to you soon with our thoughts and next steps.</p>
+<p>Looking forward to learning more about your venture.</p>
+<p>Best regards</p>"""
                                             
                                             # Get user's selected signature email preference
                                             selected_email = user.gmail_token.selected_signature_email if user.gmail_token else None

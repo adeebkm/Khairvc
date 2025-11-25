@@ -1392,27 +1392,38 @@ class GmailClient:
             return False
         
         try:
-            # Fetch and append signature if available and not already in body
-            signature = self.get_signature(send_as_email=send_as_email)
+            # Check if body contains HTML tags
+            body_is_html = '<' in body and '>' in body and any(tag in body.lower() for tag in ['<p>', '<div>', '<br>', '<span>', '<strong>', '<em>', '<a>'])
+            
+            # Convert plain text to HTML if needed (to preserve signature formatting)
+            if not body_is_html:
+                # Convert newlines to <br> and wrap in <p> tags
+                body_html = body.replace('\n\n', '</p><p>').replace('\n', '<br>')
+                body = f"<p>{body_html}</p>"
+                body_is_html = True
+            
+            # Fetch HTML signature (signatures are always HTML in Gmail)
+            signature = self.get_signature(send_as_email=send_as_email, html=True)
             if signature:
                 # Check if signature is already in the body (simple check)
-                # If body already ends with signature (or contains it), don't append again
-                signature_clean = signature.strip()
-                body_clean = body.strip()
+                # Strip HTML tags for comparison
+                import re
+                signature_text = re.sub(r'<[^>]+>', '', signature).strip()
+                body_text = re.sub(r'<[^>]+>', '', body).strip()
                 
                 # Only append if signature is not already at the end of the body
-                # Use a more lenient check - check if signature text appears in the last part of body
-                body_end = body_clean[-len(signature_clean):] if len(body_clean) >= len(signature_clean) else ""
-                if signature_clean.lower() not in body_end.lower():
-                    # Append signature with proper spacing
-                    body = f"{body}\n\n{signature}"
-                    print(f"✓ Signature appended to reply ({len(signature)} chars)")
+                body_end = body_text[-len(signature_text):] if len(body_text) >= len(signature_text) else ""
+                if signature_text.lower() not in body_end.lower():
+                    # Append HTML signature with proper spacing
+                    body = f"{body}<br><br>{signature}"
+                    print(f"✓ Signature appended to reply ({len(signature)} chars, HTML)")
                 else:
                     print(f"Note: Signature already present in reply body, skipping append")
             else:
                 print("Note: No signature found or signature is empty for reply")
             
-            message = MIMEText(body)
+            # Always use HTML format to preserve signature formatting
+            message = MIMEText(body, 'html')
             message['to'] = to_email
             message['subject'] = f"Re: {subject}" if not subject.startswith('Re:') else subject
             
@@ -1465,13 +1476,30 @@ class GmailClient:
             if bcc:
                 message['bcc'] = bcc
             
-            # Fetch and append signature
-            signature = self.get_signature(send_as_email=send_as_email)
-            if signature:
-                body = f"{body}\n\n{signature}"
+            # Check if body contains HTML tags
+            body_is_html = '<' in body and '>' in body and any(tag in body.lower() for tag in ['<p>', '<div>', '<br>', '<span>', '<strong>', '<em>', '<a>'])
             
-            # Add body
-            body_part = MIMEText(body, 'plain')
+            # Convert plain text to HTML if needed (to preserve signature formatting)
+            if not body_is_html:
+                # Convert newlines to <br> and wrap in <p> tags
+                body_html = body.replace('\n\n', '</p><p>').replace('\n', '<br>')
+                body = f"<p>{body_html}</p>"
+                body_is_html = True
+            
+            # Fetch HTML signature (signatures are always HTML in Gmail)
+            signature = self.get_signature(send_as_email=send_as_email, html=True)
+            if signature:
+                # Check if signature is already in the body
+                import re
+                signature_text = re.sub(r'<[^>]+>', '', signature).strip()
+                body_text = re.sub(r'<[^>]+>', '', body).strip()
+                body_end = body_text[-len(signature_text):] if len(body_text) >= len(signature_text) else ""
+                if signature_text.lower() not in body_end.lower():
+                    # Append HTML signature with proper spacing
+                    body = f"{body}<br><br>{signature}"
+            
+            # Always use HTML format to preserve signature formatting
+            body_part = MIMEText(body, 'html')
             message.attach(body_part)
             
             # Add attachments
@@ -1601,29 +1629,43 @@ class GmailClient:
             return False
         
         try:
-            # Fetch and append signature if available and not already in body
-            signature = self.get_signature(send_as_email=send_as_email)
+            # Check if body contains HTML tags
+            body_is_html = '<' in body and '>' in body and any(tag in body.lower() for tag in ['<p>', '<div>', '<br>', '<span>', '<strong>', '<em>', '<a>'])
+            
+            # Convert plain text to HTML if needed (to preserve signature formatting)
+            if not body_is_html:
+                # Convert newlines to <br> and wrap in <p> tags
+                body_html = body.replace('\n\n', '</p><p>').replace('\n', '<br>')
+                body = f"<p>{body_html}</p>"
+                body_is_html = True
+            
+            # Fetch HTML signature (signatures are always HTML in Gmail)
+            signature = self.get_signature(send_as_email=send_as_email, html=True)
             if signature:
-                signature_clean = signature.strip()
-                body_clean = body.strip()
+                # Check if signature is already in the body (simple check)
+                # Strip HTML tags for comparison
+                import re
+                signature_text = re.sub(r'<[^>]+>', '', signature).strip()
+                body_text = re.sub(r'<[^>]+>', '', body).strip()
                 
                 # Only append if signature is not already at the end of the body
-                # Use a more lenient check - check if signature text appears in the last part of body
-                body_end = body_clean[-len(signature_clean):] if len(body_clean) >= len(signature_clean) else ""
-                if signature_clean.lower() not in body_end.lower():
-                    body = f"{body}\n\n{signature}"
-                    print(f"✓ Signature appended to email ({len(signature)} chars)")
+                body_end = body_text[-len(signature_text):] if len(body_text) >= len(signature_text) else ""
+                if signature_text.lower() not in body_end.lower():
+                    # Append HTML signature with proper spacing
+                    body = f"{body}<br><br>{signature}"
+                    print(f"✓ Signature appended to email ({len(signature)} chars, HTML)")
                 else:
                     print(f"Note: Signature already present in body, skipping append")
             else:
                 print("Note: No signature found or signature is empty")
             
             # Use MIMEMultipart if there are attachments, otherwise MIMEText
+            # Always use HTML format to preserve signature formatting
             if attachments and len(attachments) > 0:
                 message = MIMEMultipart()
-                message.attach(MIMEText(body))
+                message.attach(MIMEText(body, 'html'))
             else:
-                message = MIMEText(body)
+                message = MIMEText(body, 'html')
             
             message['subject'] = subject
             
@@ -1677,16 +1719,17 @@ class GmailClient:
             traceback.print_exc()
             return False
     
-    def get_signature(self, send_as_email=None):
+    def get_signature(self, send_as_email=None, html=False):
         """
         Get the user's email signature from a specific or primary send-as alias
         
         Args:
             send_as_email: Optional email address of the send-as alias to use.
                           If None, uses primary alias.
+            html: If True, return HTML signature. If False, return plain text (default).
         
         Returns:
-            str: The signature text (HTML tags stripped for plain text emails)
+            str: The signature text (HTML if html=True, plain text if html=False)
         """
         if not self.service:
             return None
@@ -1722,6 +1765,10 @@ class GmailClient:
                 return None
             
             signature = selected_alias.get('signature', '')
+            
+            # Return HTML signature if requested
+            if html and signature:
+                return signature.strip()
             
             # Strip HTML tags for plain text emails
             if signature:
