@@ -642,6 +642,8 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                 is_incremental_sync = (new_history_id is not None) or (start_history_id is not None)
                                 if is_incremental_sync:
                                     # Before sending, check if we've already auto-replied for this thread
+                                    # CRITICAL: Check if ANY classification in this thread has reply_sent=True
+                                    # This prevents duplicate auto-replies if multiple emails in same thread arrive quickly
                                     try:
                                         from models import EmailClassification  # Local import to avoid circulars
                                         existing_auto_reply = EmailClassification.query.filter_by(
@@ -652,7 +654,10 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                     except Exception:
                                         existing_auto_reply = None
                                     
-                                    if existing_auto_reply:
+                                    # Also check if current classification already has reply_sent (defensive check)
+                                    if new_classification.reply_sent:
+                                        print(f"📧 [TASK] Skipping auto-reply for deal {deal.id} - current classification already marked as replied")
+                                    elif existing_auto_reply:
                                         print(f"📧 [TASK] Skipping auto-reply for deal {deal.id} - reply already sent for thread {email.get('thread_id', '')}")
                                     else:
                                         # Check if auto-reply is enabled
@@ -684,6 +689,12 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
 <p>Looking forward to learning more about your venture.</p>
 <p>Best regards</p>"""
                                                 
+                                                # CRITICAL: Mark reply_sent IMMEDIATELY to prevent duplicate scheduling
+                                                # This prevents race conditions when multiple emails in same thread arrive quickly
+                                                new_classification.reply_sent = True
+                                                db.session.commit()
+                                                print(f"✅ [TASK] Marked classification {new_classification.id} as reply_sent=True to prevent duplicates")
+                                                
                                                 # Schedule delayed auto-reply (10 minutes = 600 seconds)
                                                 from celery_config import celery
                                                 celery.send_task(
@@ -695,6 +706,12 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                             except Exception as schedule_error:
                                                 error_msg = str(schedule_error)
                                                 print(f"❌ [TASK] Failed to schedule auto-reply for deal {deal.id}: {error_msg}")
+                                                # Rollback the reply_sent flag if scheduling failed
+                                                try:
+                                                    new_classification.reply_sent = False
+                                                    db.session.commit()
+                                                except:
+                                                    pass
                                                 import traceback
                                                 traceback.print_exc()
                                                 # Don't fail the whole task if scheduling fails
@@ -1355,17 +1372,15 @@ def send_delayed_auto_reply(user_id, deal_id, sender_email, reply_subject, reply
     
     try:
         with app.app_context():
-            # Check if reply was already sent manually (don't send if user already replied)
+            # Get classification - reply_sent is already True (set when scheduling to prevent duplicates)
+            # We still need to check if user manually replied in the meantime
             classification = EmailClassification.query.get(classification_id)
             if not classification:
                 print(f"⚠️  [AUTO-REPLY] Classification {classification_id} not found, skipping auto-reply")
                 return {'status': 'skipped', 'reason': 'Classification not found'}
             
-            # Check if reply was already sent (either manually or by another auto-reply)
-            if classification.reply_sent:
-                print(f"📧 [AUTO-REPLY] Skipping auto-reply for deal {deal_id} - reply already sent")
-                return {'status': 'skipped', 'reason': 'Reply already sent'}
-            
+            # Check if user manually replied since we scheduled this auto-reply
+            # by checking if any message in the thread was sent by the user
             user = User.query.get(user_id)
             if not user or not user.gmail_token:
                 print(f"⚠️  [AUTO-REPLY] User {user_id} or Gmail token not found")
@@ -1374,6 +1389,29 @@ def send_delayed_auto_reply(user_id, deal_id, sender_email, reply_subject, reply
             # Get Gmail client
             token_json = decrypt_token(user.gmail_token.encrypted_token)
             gmail = GmailClient(token_json=token_json)
+            
+            # Check if user manually replied since we scheduled this auto-reply
+            # by checking if any message in the thread was sent by the user
+            has_manual_reply = False
+            try:
+                thread_messages = gmail.get_thread_messages(thread_id)
+                user_email = user.email.lower()
+                for msg in thread_messages:
+                    msg_from = msg.get('from', '').lower()
+                    msg_to = msg.get('to', '').lower()
+                    # Check if this message was sent by the user (sent messages have user's email in 'from')
+                    # and recipient is not the user (to distinguish from incoming messages)
+                    if user_email in msg_from and user_email not in msg_to:
+                        has_manual_reply = True
+                        print(f"📧 [AUTO-REPLY] User manually replied to thread {thread_id}, skipping auto-reply")
+                        break
+            except Exception as check_error:
+                print(f"⚠️  [AUTO-REPLY] Error checking thread for manual reply: {str(check_error)}")
+                # Continue anyway - try to send auto-reply
+            
+            if has_manual_reply:
+                # User already replied, don't send auto-reply
+                return {'status': 'skipped', 'reason': 'User manually replied'}
             
             # Get user's selected signature email preference
             selected_email = user.gmail_token.selected_signature_email if user.gmail_token else None
@@ -1390,13 +1428,7 @@ def send_delayed_auto_reply(user_id, deal_id, sender_email, reply_subject, reply
             
             if success:
                 print(f"✅ [AUTO-REPLY] Auto-reply sent successfully for deal {deal_id}")
-                # Mark classification as replied so we never auto-reply this thread again
-                try:
-                    classification.reply_sent = True
-                    db.session.commit()
-                except Exception as mark_error:
-                    print(f"⚠️  [AUTO-REPLY] Failed to mark auto-reply as sent for deal {deal_id}: {mark_error}")
-                    db.session.rollback()
+                # reply_sent is already True (set when scheduling to prevent duplicates), so no need to update it
                 return {'status': 'success', 'deal_id': deal_id}
             else:
                 print(f"⚠️  [AUTO-REPLY] Failed to send auto-reply for deal {deal_id}")
