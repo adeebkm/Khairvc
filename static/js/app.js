@@ -3664,6 +3664,9 @@ async function openEmail(indexOrEmail) {
     currentEmail = clickedEmail;
     currentReply = null;
     
+    // Reset sending flag when opening a new email
+    isSendingEmail = false;
+    
     const threadId = currentEmail.thread_id;
     
     // Show modal immediately with correct email data
@@ -4407,7 +4410,10 @@ async function autosaveDraft() {
             const data = await response.json();
             if (data.success) {
                 console.log(`✅ Draft updated: ${currentDraftId}`);
-                showToast('Draft saved', 'info');
+                // Only show toast if not sending (to prevent "Draft saved" when clicking send)
+                if (!isSendingEmail) {
+                    showToast('Draft saved', 'info');
+                }
             } else {
                 console.error('Failed to update draft:', data.error);
             }
@@ -4424,7 +4430,10 @@ async function autosaveDraft() {
             if (data.success) {
                 currentDraftId = data.draft.draft_id;
                 console.log(`✅ Draft created: ${currentDraftId}`);
-                showToast('Draft saved', 'info');
+                // Only show toast if not sending (to prevent "Draft saved" when clicking send)
+                if (!isSendingEmail) {
+                    showToast('Draft saved', 'info');
+                }
             } else {
                 console.error('Failed to create draft:', data.error);
             }
@@ -4634,6 +4643,9 @@ function openReplyComposer() {
         return;
     }
     
+    // Reset sending flag when opening reply composer
+    isSendingEmail = false;
+    
     // Clear draft state for new compose
     clearDraftState();
     
@@ -4676,6 +4688,9 @@ function openReplyAllComposer() {
         showAlert('error', 'No email selected');
         return;
     }
+    
+    // Reset sending flag when opening reply all composer
+    isSendingEmail = false;
     
     // Clear draft state for new compose
     clearDraftState();
@@ -4828,6 +4843,8 @@ function closeComposer() {
     clearComposerFields();
     // Clear draft state (don't delete draft, user might want to continue later)
     clearDraftState();
+    // Reset sending flag when closing composer
+    isSendingEmail = false;
 }
 
 function clearComposer() {
@@ -5365,6 +5382,9 @@ async function sendComposedEmail() {
         return;
     }
     
+    // Set sending flag IMMEDIATELY to prevent autosave from showing "Draft saved"
+    isSendingEmail = true;
+    
     // Cancel any pending autosave to prevent draft creation during send
     if (autosaveTimeout) {
         clearTimeout(autosaveTimeout);
@@ -5414,9 +5434,6 @@ async function sendComposedEmail() {
     
     // Handle old composer (Reply/Reply All/Forward)
     if (isOldComposer) {
-        // Set sending flag
-        isSendingEmail = true;
-        
         // Disable send button to prevent multiple clicks
         const sendBtn = document.querySelector('#composerSection .btn-primary');
         if (sendBtn) {
