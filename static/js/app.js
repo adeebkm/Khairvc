@@ -4180,20 +4180,25 @@ function bodyContainsSignature(bodyContent, signatureHtml) {
     return bodyContent.includes(signatureText.substring(0, 50)) || bodyContent.includes(signatureHtml.substring(0, 100));
 }
 
-// Insert signature into body (for reply/reply all - at the top)
-async function insertSignatureIntoBody(type) {
-    // type can be 'reply' or 'compose'
-    const bodyId = type === 'compose' ? 'composeBody' : 'composerBody';
-    const bodyEl = document.getElementById(bodyId);
-    
-    if (!bodyEl) return;
+// Cache signature to avoid repeated API calls
+let cachedSignature = null;
+let signatureCacheTime = 0;
+const SIGNATURE_CACHE_DURATION = 60000; // 1 minute cache
+
+// Get signature (with caching)
+async function getSignature() {
+    // Check cache first
+    const now = Date.now();
+    if (cachedSignature && (now - signatureCacheTime) < SIGNATURE_CACHE_DURATION) {
+        return cachedSignature;
+    }
     
     try {
         const response = await fetch('/api/signatures');
         const data = await response.json();
         
         if (!data.success || !data.signatures || data.signatures.length === 0) {
-            return;
+            return null;
         }
         
         const signatures = data.signatures;
@@ -4203,25 +4208,56 @@ async function insertSignatureIntoBody(type) {
         const selectedSig = signatures.find(sig => (!selected && sig.isPrimary) || (selected === sig.email)) || signatures[0];
         
         if (selectedSig && (selectedSig.signatureHtml || selectedSig.signatureRaw)) {
-            const signatureHtml = selectedSig.signatureHtml || selectedSig.signatureRaw;
-            const currentBody = getBodyContent(bodyEl);
-            
-            // Check if signature is already in body
-            if (bodyContainsSignature(currentBody, signatureHtml)) {
-                return;
-            }
-            
-            // For reply/reply all, insert at the top (before quoted text)
-            if (type === 'reply') {
-                // Insert HTML signature at the top with spacing
-                setBodyContent(bodyEl, signatureHtml + '<br><br>' + currentBody.trim());
-            } else {
-                // For compose, append at the end
-                setBodyContent(bodyEl, currentBody + (currentBody ? '<br><br>' : '') + signatureHtml);
-            }
+            cachedSignature = selectedSig.signatureHtml || selectedSig.signatureRaw;
+            signatureCacheTime = now;
+            return cachedSignature;
         }
     } catch (error) {
-        console.error('Error inserting signature:', error);
+        console.error('Error fetching signature:', error);
+    }
+    
+    return null;
+}
+
+// Insert signature into body (for reply/reply all - a bit down from top)
+async function insertSignatureIntoBody(type) {
+    // type can be 'reply' or 'compose'
+    const bodyId = type === 'compose' ? 'composeBody' : 'composerBody';
+    const bodyEl = document.getElementById(bodyId);
+    
+    if (!bodyEl) return;
+    
+    // Get signature (uses cache if available)
+    const signatureHtml = await getSignature();
+    
+    if (!signatureHtml) {
+        return;
+    }
+    
+    const currentBody = getBodyContent(bodyEl);
+    
+    // Check if signature is already in body
+    if (bodyContainsSignature(currentBody, signatureHtml)) {
+        return;
+    }
+    
+    // For reply/reply all, insert a bit down (after some spacing for user to type)
+    if (type === 'reply') {
+        // Insert signature after a few line breaks, not at the very top
+        // This gives space for the user to type their message above the signature
+        const spacing = '<br><br>'; // Space for user to type
+        const trimmedBody = currentBody.trim();
+        
+        // If body is empty or just has quoted text, add spacing then signature
+        if (!trimmedBody || trimmedBody.startsWith('<br><br>')) {
+            setBodyContent(bodyEl, spacing + signatureHtml + '<br><br>' + trimmedBody);
+        } else {
+            // If user has already typed something, insert signature after their text
+            setBodyContent(bodyEl, trimmedBody + '<br><br>' + signatureHtml + '<br><br>');
+        }
+    } else {
+        // For compose, append at the end
+        setBodyContent(bodyEl, currentBody + (currentBody ? '<br><br>' : '') + signatureHtml);
     }
 }
 
@@ -4881,12 +4917,12 @@ async function openReplyComposer() {
     const subject = currentEmail.subject || 'No Subject';
     composerSubject.value = subject.startsWith('Re:') ? subject : `Re: ${subject}`;
     
-    // Set body with quoted text (signature will be inserted at the top)
+    // Set body with quoted text (signature will be inserted a bit down)
     const quotedText = formatQuotedText(currentEmail);
     setBodyContent(composerBody, `<br><br>${escapeHtml(quotedText)}`);
     
-    // Insert signature at the top of the body
-    await insertSignatureIntoBody('reply');
+    // Insert signature (will appear a bit down, not at the very top)
+    insertSignatureIntoBody('reply'); // Don't await - let it load in background
     
     // Clear attachments
     composerAttachments = [];
@@ -4944,12 +4980,12 @@ async function openReplyAllComposer() {
     const subject = currentEmail.subject || 'No Subject';
     composerSubject.value = subject.startsWith('Re:') ? subject : `Re: ${subject}`;
     
-    // Set body with quoted text (signature will be inserted at the top)
+    // Set body with quoted text (signature will be inserted a bit down)
     const quotedText = formatQuotedText(currentEmail);
     setBodyContent(composerBody, `<br><br>${escapeHtml(quotedText)}`);
     
-    // Insert signature at the top of the body
-    await insertSignatureIntoBody('reply');
+    // Insert signature (will appear a bit down, not at the very top)
+    insertSignatureIntoBody('reply'); // Don't await - let it load in background
     
     // Clear attachments
     composerAttachments = [];
@@ -5525,8 +5561,8 @@ async function openComposeModal() {
     // Hide CC/BCC fields by default
     document.getElementById('composeCcBcc').style.display = 'none';
     
-    // Insert signature into compose body
-    await insertSignatureIntoBody('compose');
+    // Insert signature into compose body (loads in background)
+    insertSignatureIntoBody('compose'); // Don't await - let it load in background
     
     // Focus on To field
     setTimeout(() => {
