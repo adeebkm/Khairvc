@@ -1894,6 +1894,18 @@ async function openScheduledEmail(scheduledId) {
                 modalDate.textContent = `Scheduled: ${date.toLocaleString()}`;
             }
             
+            // Hide reply section for scheduled emails (can't reply to unsent emails)
+            const replySection = document.getElementById('replySection');
+            if (replySection) {
+                replySection.style.display = 'none';
+            }
+            
+            // Hide single email section, show thread container
+            const singleEmailSection = document.getElementById('singleEmailSection');
+            if (singleEmailSection) {
+                singleEmailSection.style.display = 'none';
+            }
+            
             if (threadContainer) {
                 threadContainer.innerHTML = `
                     <div class="email-body" style="padding: 20px; background: white; border-radius: 8px; margin-bottom: 16px;">
