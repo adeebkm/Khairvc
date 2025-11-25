@@ -52,3 +52,15 @@ railway_env_vars.txt
 aws_lambda/python/
 aws_lambda/package/
 RAILWAY_TEST_ENV_VARS.json
+
+# Large binary files (should not be in git)
+*.zip
+lambda_classifier.zip
+aws_lambda/lambda_package.zip
+
+# Large image files (screenshots/documentation - keep only essential images)
+image/**/*.png
+static/css/image/**/*.png
+# Keep PNGs in public folders and website (but ignore large screenshots)
+!khair-website/**/*.png
+!public/**/*.png
