@@ -713,11 +713,16 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                     try:
                                         # Use celery.send_task to avoid circular import
                                         from celery_config import celery
-                                        celery.send_task('tasks.generate_scheduled_email', args=[deal.id])
-                                        print(f"📅 [TASK] Triggered scheduled email generation for deal {deal.id}")
+                                        print(f"📅 [TASK] About to trigger scheduled email generation for deal {deal.id} (is_incremental_sync=True)")
+                                        result = celery.send_task('tasks.generate_scheduled_email', args=[deal.id])
+                                        print(f"📅 [TASK] ✅ Triggered scheduled email generation for deal {deal.id} (task_id: {result.id})")
                                     except Exception as schedule_error:
-                                        print(f"⚠️  [TASK] Failed to trigger scheduled email generation for deal {deal.id}: {str(schedule_error)}")
+                                        print(f"⚠️  [TASK] ❌ Failed to trigger scheduled email generation for deal {deal.id}: {str(schedule_error)}")
+                                        import traceback
+                                        traceback.print_exc()
                                         # Don't fail the whole task if scheduling fails
+                                else:
+                                    print(f"📅 [TASK] Skipping scheduled email generation for deal {deal.id} (not incremental sync: new_history_id={new_history_id}, start_history_id={start_history_id})")
                                 
                                 break
                             except Exception as commit_error:
@@ -1411,6 +1416,7 @@ def generate_scheduled_email(deal_id):
     Generate scheduled email for a deal using Lambda/Kimi AI
     Creates a scheduled email that will be sent after 6 hours if no reply is sent
     """
+    print(f"📅 [SCHEDULED] Starting scheduled email generation for deal {deal_id}")
     try:
         from app import app, db
     except ImportError:
@@ -1429,6 +1435,7 @@ def generate_scheduled_email(deal_id):
         with app.app_context():
             deal = Deal.query.get(deal_id)
             if not deal:
+                print(f"❌ [SCHEDULED] Deal {deal_id} not found")
                 return {'status': 'error', 'error': 'Deal not found'}
             
             user = User.query.get(deal.user_id)
