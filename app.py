@@ -3417,6 +3417,124 @@ def send_email():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/scheduled-emails', methods=['GET'])
+@login_required
+def get_scheduled_emails():
+    """Get all pending scheduled emails for current user"""
+    try:
+        from models import ScheduledEmail, Deal
+        
+        # Get all pending scheduled emails for this user
+        scheduled_emails = ScheduledEmail.query.filter_by(
+            user_id=current_user.id,
+            status='pending'
+        ).join(Deal).order_by(ScheduledEmail.scheduled_at.asc()).all()
+        
+        # Format scheduled emails with deal information
+        formatted_emails = []
+        for scheduled in scheduled_emails:
+            deal = scheduled.deal
+            formatted_emails.append({
+                'id': scheduled.id,
+                'thread_id': scheduled.thread_id,
+                'to': scheduled.to_email,
+                'subject': scheduled.subject,
+                'body': scheduled.body,
+                'scheduled_at': scheduled.scheduled_at.isoformat() if scheduled.scheduled_at else None,
+                'created_at': scheduled.created_at.isoformat() if scheduled.created_at else None,
+                'status': scheduled.status,
+                'founder_name': deal.founder_name if deal else None,
+                'deal_subject': deal.subject if deal else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'scheduled_emails': formatted_emails
+        })
+    
+    except Exception as e:
+        print(f"Error fetching scheduled emails: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/scheduled-email/<int:email_id>', methods=['GET'])
+@login_required
+def get_scheduled_email(email_id):
+    """Get specific scheduled email details"""
+    try:
+        from models import ScheduledEmail, Deal
+        
+        scheduled = ScheduledEmail.query.filter_by(
+            id=email_id,
+            user_id=current_user.id
+        ).first()
+        
+        if not scheduled:
+            return jsonify({'success': False, 'error': 'Scheduled email not found'}), 404
+        
+        deal = scheduled.deal
+        return jsonify({
+            'success': True,
+            'scheduled_email': {
+                'id': scheduled.id,
+                'thread_id': scheduled.thread_id,
+                'to': scheduled.to_email,
+                'subject': scheduled.subject,
+                'body': scheduled.body,
+                'scheduled_at': scheduled.scheduled_at.isoformat() if scheduled.scheduled_at else None,
+                'created_at': scheduled.created_at.isoformat() if scheduled.created_at else None,
+                'status': scheduled.status,
+                'founder_name': deal.founder_name if deal else None,
+                'deal_subject': deal.subject if deal else None
+            }
+        })
+    
+    except Exception as e:
+        print(f"Error fetching scheduled email: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/scheduled-email/<int:email_id>/cancel', methods=['POST'])
+@login_required
+def cancel_scheduled_email(email_id):
+    """Cancel a scheduled email"""
+    try:
+        from models import ScheduledEmail
+        from datetime import datetime
+        
+        scheduled = ScheduledEmail.query.filter_by(
+            id=email_id,
+            user_id=current_user.id
+        ).first()
+        
+        if not scheduled:
+            return jsonify({'success': False, 'error': 'Scheduled email not found'}), 404
+        
+        if scheduled.status != 'pending':
+            return jsonify({'success': False, 'error': f'Cannot cancel scheduled email with status: {scheduled.status}'}), 400
+        
+        # Mark as cancelled
+        scheduled.status = 'cancelled'
+        scheduled.cancelled_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Scheduled email cancelled successfully'
+        })
+    
+    except Exception as e:
+        print(f"Error cancelling scheduled email: {str(e)}")
+        db.session.rollback()
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/signatures', methods=['GET'])
 @login_required
 def get_signatures():
