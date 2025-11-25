@@ -4147,40 +4147,11 @@ async function selectSignature(email) {
     }
 }
 
-// Load and display signature preview in compose/reply areas
+// Load signature (no preview box, just for insertion into body)
 async function loadSignaturePreview(type) {
-    // type can be 'compose' or 'reply'
-    const previewId = type === 'compose' ? 'composeSignaturePreview' : 'composerSignaturePreview';
-    const previewEl = document.getElementById(previewId);
-    
-    if (!previewEl) return;
-    
-    try {
-        const response = await fetch('/api/signatures');
-        const data = await response.json();
-        
-        if (!data.success || !data.signatures || data.signatures.length === 0) {
-            previewEl.style.display = 'none';
-            return;
-        }
-        
-        const signatures = data.signatures;
-        const selected = data.selected;
-        
-        // Find selected signature (or primary if none selected)
-        const selectedSig = signatures.find(sig => (!selected && sig.isPrimary) || (selected === sig.email)) || signatures[0];
-        
-        if (selectedSig && (selectedSig.signatureHtml || selectedSig.signatureRaw)) {
-            const signatureHtml = selectedSig.signatureHtml || selectedSig.signatureRaw;
-            previewEl.innerHTML = signatureHtml;
-            previewEl.style.display = 'block';
-        } else {
-            previewEl.style.display = 'none';
-        }
-    } catch (error) {
-        console.error('Error loading signature preview:', error);
-        previewEl.style.display = 'none';
-    }
+    // This function is kept for compatibility but doesn't show a preview box
+    // Signature is inserted directly into the body textarea
+    return;
 }
 
 // Insert signature into body (for reply/reply all - at the top)
@@ -4884,15 +4855,12 @@ async function openReplyComposer() {
     const subject = currentEmail.subject || 'No Subject';
     composerSubject.value = subject.startsWith('Re:') ? subject : `Re: ${subject}`;
     
-    // Load and display signature preview at the top
-    await loadSignaturePreview('reply');
-    
     // Set body with quoted text (signature will be inserted at the top)
     const quotedText = formatQuotedText(currentEmail);
     composerBody.value = `\n\n${quotedText}`;
     
     // Insert signature at the top of the body
-    insertSignatureIntoBody('reply');
+    await insertSignatureIntoBody('reply');
     
     // Clear attachments
     composerAttachments = [];
@@ -4950,15 +4918,12 @@ async function openReplyAllComposer() {
     const subject = currentEmail.subject || 'No Subject';
     composerSubject.value = subject.startsWith('Re:') ? subject : `Re: ${subject}`;
     
-    // Load and display signature preview at the top
-    await loadSignaturePreview('reply');
-    
     // Set body with quoted text (signature will be inserted at the top)
     const quotedText = formatQuotedText(currentEmail);
     composerBody.value = `\n\n${quotedText}`;
     
     // Insert signature at the top of the body
-    insertSignatureIntoBody('reply');
+    await insertSignatureIntoBody('reply');
     
     // Clear attachments
     composerAttachments = [];
@@ -5532,9 +5497,6 @@ async function openComposeModal() {
     updateAttachmentList();
     // Hide CC/BCC fields by default
     document.getElementById('composeCcBcc').style.display = 'none';
-    
-    // Load and display signature preview
-    await loadSignaturePreview('compose');
     
     // Insert signature into compose body
     await insertSignatureIntoBody('compose');
