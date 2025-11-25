@@ -3442,14 +3442,15 @@ def get_signatures():
         signatures = []
         
         for alias in send_as_list:
-            signature_text = alias.get('signature', '')
-            signature_raw = signature_text  # Keep raw for debugging
+            signature_html = alias.get('signature', '')
+            signature_raw = signature_html  # Keep raw HTML for display
             
-            # Strip HTML for preview
-            if signature_text:
+            # Also create plain text version for fallback
+            signature_text = ''
+            if signature_html:
                 import re
                 # Convert HTML breaks to newlines
-                signature_text = re.sub(r'<br\s*/?>', '\n', signature_text, flags=re.IGNORECASE)
+                signature_text = re.sub(r'<br\s*/?>', '\n', signature_html, flags=re.IGNORECASE)
                 signature_text = re.sub(r'</p>', '\n\n', signature_text, flags=re.IGNORECASE)
                 signature_text = re.sub(r'<p[^>]*>', '', signature_text, flags=re.IGNORECASE)
                 # Remove all other HTML tags
@@ -3472,9 +3473,10 @@ def get_signatures():
                 'email': alias.get('sendAsEmail', ''),
                 'displayName': alias.get('displayName', ''),
                 'isPrimary': alias.get('isPrimary', False),
-                'signature': signature_text,
-                'hasSignature': bool(signature_text),
-                'signatureRaw': signature_raw  # Include raw for debugging
+                'signature': signature_text,  # Plain text version
+                'signatureHtml': signature_html,  # Raw HTML version for proper display
+                'hasSignature': bool(signature_html),
+                'signatureRaw': signature_raw  # Keep for backward compatibility
             })
         
         # Get currently selected signature

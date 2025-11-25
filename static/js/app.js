@@ -4071,10 +4071,14 @@ async function loadSignatures() {
             const primaryBadge = sig.isPrimary ? '<span style="margin-left: 8px; font-size: 12px; opacity: 0.7;">Primary</span>' : '';
             
             // Check if signature exists (either processed or raw)
-            const hasSignature = sig.hasSignature || (sig.signatureRaw && sig.signatureRaw.trim().length > 0);
-            const signatureToShow = sig.signature || (sig.signatureRaw ? 'Raw signature available but could not be processed' : '');
+            const hasSignature = sig.hasSignature || (sig.signatureRaw && sig.signatureRaw.trim().length > 0) || (sig.signatureHtml && sig.signatureHtml.trim().length > 0);
+            // Use HTML signature if available, otherwise fall back to plain text
+            const signatureHtml = sig.signatureHtml || sig.signatureRaw || '';
+            const signatureToShow = sig.signature || '';
             
-            const signaturePreview = hasSignature ? 
+            const signaturePreview = hasSignature && signatureHtml ? 
+                `<div style="margin-top: 8px; padding: 12px; background: var(--bg-secondary); border-radius: 8px; font-size: 13px; max-height: 150px; overflow-y: auto; border: 1px solid var(--border-color); line-height: 1.5;">${signatureHtml}</div>` :
+                hasSignature ? 
                 `<div style="margin-top: 8px; padding: 12px; background: var(--bg-secondary); border-radius: 8px; font-size: 13px; color: var(--text-secondary); white-space: pre-wrap; max-height: 100px; overflow-y: auto; border: 1px solid var(--border-color);">${escapeHtml(signatureToShow.substring(0, 300))}${signatureToShow.length > 300 ? '...' : ''}</div>` :
                 '<div style="margin-top: 8px; padding: 12px; background: var(--bg-secondary); border-radius: 8px; font-size: 12px; color: var(--text-light); font-style: italic; border: 1px dashed var(--border-color);">No signature set in Gmail settings</div>';
             
@@ -4143,6 +4147,93 @@ async function selectSignature(email) {
     }
 }
 
+// Load and display signature preview in compose/reply areas
+async function loadSignaturePreview(type) {
+    // type can be 'compose' or 'reply'
+    const previewId = type === 'compose' ? 'composeSignaturePreview' : 'composerSignaturePreview';
+    const previewEl = document.getElementById(previewId);
+    
+    if (!previewEl) return;
+    
+    try {
+        const response = await fetch('/api/signatures');
+        const data = await response.json();
+        
+        if (!data.success || !data.signatures || data.signatures.length === 0) {
+            previewEl.style.display = 'none';
+            return;
+        }
+        
+        const signatures = data.signatures;
+        const selected = data.selected;
+        
+        // Find selected signature (or primary if none selected)
+        const selectedSig = signatures.find(sig => (!selected && sig.isPrimary) || (selected === sig.email)) || signatures[0];
+        
+        if (selectedSig && (selectedSig.signatureHtml || selectedSig.signatureRaw)) {
+            const signatureHtml = selectedSig.signatureHtml || selectedSig.signatureRaw;
+            previewEl.innerHTML = signatureHtml;
+            previewEl.style.display = 'block';
+        } else {
+            previewEl.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading signature preview:', error);
+        previewEl.style.display = 'none';
+    }
+}
+
+// Insert signature into body (for reply/reply all - at the top)
+async function insertSignatureIntoBody(type) {
+    // type can be 'reply' or 'compose'
+    const bodyId = type === 'compose' ? 'composeBody' : 'composerBody';
+    const bodyEl = document.getElementById(bodyId);
+    
+    if (!bodyEl) return;
+    
+    try {
+        const response = await fetch('/api/signatures');
+        const data = await response.json();
+        
+        if (!data.success || !data.signatures || data.signatures.length === 0) {
+            return;
+        }
+        
+        const signatures = data.signatures;
+        const selected = data.selected;
+        
+        // Find selected signature (or primary if none selected)
+        const selectedSig = signatures.find(sig => (!selected && sig.isPrimary) || (selected === sig.email)) || signatures[0];
+        
+        if (selectedSig && (selectedSig.signatureHtml || selectedSig.signatureRaw)) {
+            const signatureHtml = selectedSig.signatureHtml || selectedSig.signatureRaw;
+            
+            // Convert HTML signature to plain text for textarea (strip tags but preserve structure)
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = signatureHtml;
+            const signatureText = tempDiv.textContent || tempDiv.innerText || '';
+            
+            // For reply/reply all, insert at the top (before quoted text)
+            if (type === 'reply') {
+                const currentBody = bodyEl.value;
+                // Check if signature is already in body
+                if (!currentBody.includes(signatureText.substring(0, 50))) {
+                    // Insert signature at the top, then add spacing before quoted text
+                    bodyEl.value = signatureText + '\n\n' + currentBody.trim();
+                }
+            } else {
+                // For compose, append at the end
+                const currentBody = bodyEl.value;
+                if (!currentBody.includes(signatureText.substring(0, 50))) {
+                    bodyEl.value = currentBody + (currentBody ? '\n\n' : '') + signatureText;
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error inserting signature:', error);
+    }
+}
+
 // Load signatures in settings modal
 async function loadSignaturesInSettings() {
     const signatureListContainer = document.getElementById('signatureListContainer');
@@ -4207,8 +4298,10 @@ async function loadSignaturesInSettings() {
         let html = '';
         signatures.forEach(sig => {
             const isSelected = (!selected && sig.isPrimary) || (selected === sig.email);
-            const hasSignature = sig.hasSignature || (sig.signatureRaw && sig.signatureRaw.trim().length > 0);
-            const signatureToShow = sig.signature || (sig.signatureRaw ? 'Raw signature available but could not be processed' : '');
+            const hasSignature = sig.hasSignature || (sig.signatureRaw && sig.signatureRaw.trim().length > 0) || (sig.signatureHtml && sig.signatureHtml.trim().length > 0);
+            // Use HTML signature if available, otherwise fall back to plain text
+            const signatureHtml = sig.signatureHtml || sig.signatureRaw || '';
+            const signatureToShow = sig.signature || '';
             
             html += `
                 <div style="border: 1px solid #E5E7EB; border-radius: 8px; padding: 16px; background: #FFFFFF; ${isSelected ? 'border-color: #3B82F6; border-width: 2px;' : ''}">
@@ -4229,7 +4322,9 @@ async function loadSignaturesInSettings() {
                             ${isSelected ? 'Selected' : 'Select'}
                         </button>
                     </div>
-                    ${hasSignature ? 
+                    ${hasSignature && signatureHtml ? 
+                        `<div style="margin-top: 12px; padding: 12px; background: #F9FAFB; border-radius: 6px; font-size: 13px; max-height: 150px; overflow-y: auto; border: 1px solid #E5E7EB; line-height: 1.5;">${signatureHtml}</div>` :
+                        hasSignature ? 
                         `<div style="margin-top: 12px; padding: 12px; background: #F9FAFB; border-radius: 6px; font-size: 13px; color: #374151; white-space: pre-wrap; max-height: 120px; overflow-y: auto; border: 1px solid #E5E7EB;">${escapeHtml(signatureToShow.substring(0, 200))}${signatureToShow.length > 200 ? '...' : ''}</div>` :
                         '<div style="margin-top: 12px; padding: 12px; background: #F9FAFB; border-radius: 6px; font-size: 12px; color: #9CA3AF; font-style: italic; border: 1px dashed #E5E7EB;">No signature set in Gmail settings</div>'
                     }
@@ -4522,7 +4617,7 @@ async function autosaveDraft() {
                 console.log(`✅ Draft updated: ${currentDraftId}`);
                 // Only show toast if not sending (to prevent "Draft saved" when clicking send)
                 if (!isSendingEmail) {
-                    showToast('Draft saved', 'info');
+                showToast('Draft saved', 'info');
                 }
             } else {
                 console.error('Failed to update draft:', data.error);
@@ -4542,7 +4637,7 @@ async function autosaveDraft() {
                 console.log(`✅ Draft created: ${currentDraftId}`);
                 // Only show toast if not sending (to prevent "Draft saved" when clicking send)
                 if (!isSendingEmail) {
-                    showToast('Draft saved', 'info');
+                showToast('Draft saved', 'info');
                 }
             } else {
                 console.error('Failed to create draft:', data.error);
@@ -4756,7 +4851,7 @@ function openDraft(draftIndex) {
     composerSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function openReplyComposer() {
+async function openReplyComposer() {
     if (!currentEmail) {
         showAlert('error', 'No email selected');
         return;
@@ -4789,9 +4884,15 @@ function openReplyComposer() {
     const subject = currentEmail.subject || 'No Subject';
     composerSubject.value = subject.startsWith('Re:') ? subject : `Re: ${subject}`;
     
-    // Set body with quoted text
+    // Load and display signature preview at the top
+    await loadSignaturePreview('reply');
+    
+    // Set body with quoted text (signature will be inserted at the top)
     const quotedText = formatQuotedText(currentEmail);
     composerBody.value = `\n\n${quotedText}`;
+    
+    // Insert signature at the top of the body
+    insertSignatureIntoBody('reply');
     
     // Clear attachments
     composerAttachments = [];
@@ -4805,7 +4906,7 @@ function openReplyComposer() {
 }
 
 // Open reply all composer
-function openReplyAllComposer() {
+async function openReplyAllComposer() {
     if (!currentEmail) {
         showAlert('error', 'No email selected');
         return;
@@ -4849,9 +4950,15 @@ function openReplyAllComposer() {
     const subject = currentEmail.subject || 'No Subject';
     composerSubject.value = subject.startsWith('Re:') ? subject : `Re: ${subject}`;
     
-    // Set body with quoted text
+    // Load and display signature preview at the top
+    await loadSignaturePreview('reply');
+    
+    // Set body with quoted text (signature will be inserted at the top)
     const quotedText = formatQuotedText(currentEmail);
     composerBody.value = `\n\n${quotedText}`;
+    
+    // Insert signature at the top of the body
+    insertSignatureIntoBody('reply');
     
     // Clear attachments
     composerAttachments = [];
@@ -5413,7 +5520,7 @@ function decodeHtmlEntities(text) {
 let composeAttachments = [];
 
 // Compose email functions
-function openComposeModal() {
+async function openComposeModal() {
     document.getElementById('composeModal').style.display = 'flex';
     // Clear previous values
     document.getElementById('composeTo').value = '';
@@ -5425,6 +5532,10 @@ function openComposeModal() {
     updateAttachmentList();
     // Hide CC/BCC fields by default
     document.getElementById('composeCcBcc').style.display = 'none';
+    
+    // Load and display signature preview
+    await loadSignaturePreview('compose');
+    
     // Focus on To field
     setTimeout(() => {
         document.getElementById('composeTo').focus();
@@ -5564,7 +5675,7 @@ async function sendComposedEmail() {
         // Disable send button to prevent multiple clicks
         const sendBtn = document.querySelector('#composerSection .btn-primary');
         if (sendBtn) {
-            sendBtn.disabled = true;
+    sendBtn.disabled = true;
             const originalText = sendBtn.textContent;
             sendBtn.textContent = 'Sending...';
             
@@ -5574,16 +5685,16 @@ async function sendComposedEmail() {
                 if (composerMode === 'forward') {
                     // Forward email
                     response = await fetch('/api/forward-email', {
-                        method: 'POST',
+            method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            to: to,
-                            subject: subject,
+            body: JSON.stringify({
+                to: to,
+                subject: subject,
                             body: body,
                             original_message_id: currentEmail.id,
                             include_attachments: true
-                        })
-                    });
+            })
+        });
                 } else {
                     // Reply or Reply All
                     const endpoint = composerAttachments.length > 0 ? 
@@ -5610,10 +5721,10 @@ async function sendComposedEmail() {
                         body: JSON.stringify(payload)
                     });
                 }
-                
-                const data = await response.json();
-                
-                if (data.success) {
+        
+        const data = await response.json();
+        
+        if (data.success) {
                     showAlert('success', '✉️ Email sent successfully!');
                     
                     // Delete the draft if it exists (prevent it from being saved)
@@ -5633,7 +5744,7 @@ async function sendComposedEmail() {
                     // Close composer and modal immediately
                     closeComposer();
                     // Small delay before closing modal to show success message
-                    setTimeout(() => {
+            setTimeout(() => {
                         closeModal();
                         isSendingEmail = false; // Reset flag after modal closes
                     }, 500);
