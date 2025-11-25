@@ -4176,3 +4176,58 @@ body::before {
 .email-card.has-attachment:hover .email-attachment {
     opacity: 1;
 }
+
+/* Email Autocomplete Styles */
+.email-autocomplete-list {
+    position: absolute;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 10000;
+    display: none;
+    width: 100%;
+    margin-top: 4px;
+}
+
+.autocomplete-item {
+    padding: 10px 12px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-color);
+    transition: background 0.2s;
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item.selected {
+    background-color: var(--primary-light);
+    color: var(--primary-color);
+}
+
+.autocomplete-item strong {
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+.autocomplete-item .source-badge {
+    font-size: 11px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    background-color: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
+.autocomplete-item .source-badge.contact {
+    background-color: #e0f7fa;
+    color: #00796b;
+}

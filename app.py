@@ -3535,6 +3535,27 @@ def cancel_scheduled_email(email_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/contacts', methods=['GET'])
+@login_required
+def get_contacts():
+    """Get user's contacts from Google People API for autocomplete"""
+    if not current_user.gmail_token:
+        return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
+    
+    try:
+        gmail = get_user_gmail_client(current_user.id)
+        if not gmail:
+            return jsonify({'success': False, 'error': 'Failed to create Gmail client'}), 500
+        
+        contacts = gmail.get_contacts()
+        return jsonify({
+            'success': True,
+            'contacts': contacts
+        })
+    except Exception as e:
+        print(f"❌ [API] Error fetching contacts: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/signatures', methods=['GET'])
 @login_required
 def get_signatures():
