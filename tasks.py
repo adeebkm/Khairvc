@@ -1141,16 +1141,25 @@ def send_whatsapp_followups():
             
             # Find deals that need follow-ups:
             # 1. Alert was sent
-            # 2. Last follow-up was >6 hours ago (or never)
-            # 3. Deal state is still "New" or "Ask-More"
-            # 4. User hasn't stopped follow-ups
+            # 2. Alert was sent >6 hours ago (for first follow-up)
+            # 3. Last follow-up was >6 hours ago (for subsequent follow-ups)
+            # 4. Deal state is still "New" or "Ask-More"
+            # 5. User hasn't stopped follow-ups
             deals = Deal.query.filter(
                 Deal.whatsapp_alert_sent == True,
                 Deal.whatsapp_stopped == False,
                 Deal.state.in_(['New', 'Ask-More']),
+                # First follow-up: alert sent >6 hours ago AND no follow-up sent yet
                 (
-                    (Deal.whatsapp_last_followup_at == None) |
-                    (Deal.whatsapp_last_followup_at < six_hours_ago)
+                    (
+                        (Deal.whatsapp_last_followup_at == None) &
+                        (Deal.whatsapp_alert_sent_at < six_hours_ago)
+                    ) |
+                    # Subsequent follow-ups: last follow-up >6 hours ago
+                    (
+                        (Deal.whatsapp_last_followup_at != None) &
+                        (Deal.whatsapp_last_followup_at < six_hours_ago)
+                    )
                 )
             ).all()
             

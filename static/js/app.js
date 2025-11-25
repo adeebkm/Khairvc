@@ -4932,93 +4932,6 @@ function formatFileSize(bytes) {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-async function sendComposedEmail() {
-    const to = document.getElementById('composerTo').value.trim();
-    const cc = document.getElementById('composerCc').value.trim();
-    const bcc = document.getElementById('composerBcc').value.trim();
-    const subject = document.getElementById('composerSubject').value.trim();
-    const body = document.getElementById('composerBody').value.trim();
-    
-    if (!to) {
-        showAlert('error', 'Please enter a recipient');
-        return;
-    }
-    
-    if (!body) {
-        showAlert('error', 'Please enter a message');
-        return;
-    }
-    
-    try {
-        let response;
-        
-        if (composerMode === 'forward') {
-            // Forward email
-            response = await fetch('/api/forward-email', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    to: to,
-                    subject: subject,
-                    body: body,
-                    original_message_id: currentEmail.id,
-                    include_attachments: true
-                })
-            });
-        } else {
-            // Reply or Reply All
-            const endpoint = composerAttachments.length > 0 ? 
-                '/api/send-reply-with-attachments' : '/api/send-reply';
-            
-            const payload = {
-                email_id: currentEmail.id,
-                to: to,
-                subject: subject,
-                body: body,
-                thread_id: currentEmail.thread_id
-            };
-            
-            if (composerAttachments.length > 0) {
-                payload.attachments = composerAttachments;
-            }
-            
-            if (cc) payload.cc = cc;
-            if (bcc) payload.bcc = bcc;
-            
-            response = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-        }
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showAlert('success', '✉️ Email sent successfully!');
-            
-            // Delete the draft if it exists
-            if (currentDraftId) {
-                try {
-                    await fetch(`/api/drafts/${currentDraftId}`, { method: 'DELETE' });
-                    console.log(`🗑️  Deleted draft ${currentDraftId} after sending`);
-                } catch (error) {
-                    console.error('Error deleting draft:', error);
-                    // Don't fail the send operation if draft deletion fails
-                }
-            }
-            
-            closeComposer();
-            closeModal();
-        } else {
-            showAlert('error', data.error || 'Failed to send email');
-        }
-    } catch (error) {
-        console.error('Error sending email:', error);
-        showAlert('error', 'Failed to send email: ' + error.message);
-    }
-}
-
 // Send reply
 async function sendReply() {
     if (!currentEmail || !currentReply) return;
@@ -5437,30 +5350,130 @@ function removeAttachment(index) {
 
 // Send composed email
 async function sendComposedEmail() {
-    const to = document.getElementById('composeTo').value.trim();
-    const cc = document.getElementById('composeCc').value.trim();
-    const bcc = document.getElementById('composeBcc').value.trim();
-    const subject = document.getElementById('composeSubject').value.trim();
-    const body = document.getElementById('composeBody').value.trim();
+    // Detect which modal is active (old composer or new compose modal)
+    const composerSection = document.getElementById('composerSection');
+    const composeModal = document.getElementById('composeModal');
+    const isOldComposer = composerSection && composerSection.style.display !== 'none';
+    
+    let to, cc, bcc, subject, body;
+    
+    if (isOldComposer) {
+        // Old composer modal (used for Reply/Reply All inside email modal)
+        to = document.getElementById('composerTo')?.value.trim() || '';
+        cc = document.getElementById('composerCc')?.value.trim() || '';
+        bcc = document.getElementById('composerBcc')?.value.trim() || '';
+        subject = document.getElementById('composerSubject')?.value.trim() || '';
+        body = document.getElementById('composerBody')?.value.trim() || '';
+    } else {
+        // New compose modal (standalone)
+        to = document.getElementById('composeTo')?.value.trim() || '';
+        cc = document.getElementById('composeCc')?.value.trim() || '';
+        bcc = document.getElementById('composeBcc')?.value.trim() || '';
+        subject = document.getElementById('composeSubject')?.value.trim() || '';
+        body = document.getElementById('composeBody')?.value.trim() || '';
+    }
     
     if (!to) {
-        showToast('Please enter a recipient', 'error');
+        if (isOldComposer) {
+            showAlert('error', 'Please enter a recipient');
+        } else {
+            showToast('Please enter a recipient', 'error');
+        }
         return;
     }
     
     if (!body) {
-        showToast('Please enter a message', 'error');
+        if (isOldComposer) {
+            showAlert('error', 'Please enter a message');
+        } else {
+            showToast('Please enter a message', 'error');
+        }
         return;
     }
     
+    // Handle old composer (Reply/Reply All/Forward)
+    if (isOldComposer) {
+        try {
+            let response;
+            
+            if (composerMode === 'forward') {
+                // Forward email
+                response = await fetch('/api/forward-email', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        to: to,
+                        subject: subject,
+                        body: body,
+                        original_message_id: currentEmail.id,
+                        include_attachments: true
+                    })
+                });
+            } else {
+                // Reply or Reply All
+                const endpoint = composerAttachments.length > 0 ? 
+                    '/api/send-reply-with-attachments' : '/api/send-reply';
+                
+                const payload = {
+                    email_id: currentEmail.id,
+                    to: to,
+                    subject: subject,
+                    body: body,
+                    thread_id: currentEmail.thread_id
+                };
+                
+                if (composerAttachments.length > 0) {
+                    payload.attachments = composerAttachments;
+                }
+                
+                if (cc) payload.cc = cc;
+                if (bcc) payload.bcc = bcc;
+                
+                response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            }
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                showAlert('success', '✉️ Email sent successfully!');
+                
+                // Delete the draft if it exists
+                if (currentDraftId) {
+                    try {
+                        await fetch(`/api/drafts/${currentDraftId}`, { method: 'DELETE' });
+                        console.log(`🗑️  Deleted draft ${currentDraftId} after sending`);
+                    } catch (error) {
+                        console.error('Error deleting draft:', error);
+                    }
+                }
+                
+                closeComposer();
+                closeModal();
+            } else {
+                showAlert('error', data.error || 'Failed to send email');
+            }
+        } catch (error) {
+            console.error('Error sending email:', error);
+            showAlert('error', 'Failed to send email: ' + error.message);
+        }
+        return;
+    }
+    
+    // Handle new compose modal (standalone)
     const sendBtn = document.getElementById('sendComposeBtn');
     const sendBtnText = document.getElementById('sendComposeBtnText');
     const sendBtnSpinner = document.getElementById('sendComposeBtnSpinner');
     
     // Disable button and show loading
-    sendBtn.disabled = true;
-    sendBtnText.style.display = 'none';
-    sendBtnSpinner.style.display = 'inline-block';
+    if (sendBtn) {
+        sendBtn.disabled = true;
+        if (sendBtnText) sendBtnText.style.display = 'none';
+        if (sendBtnSpinner) sendBtnSpinner.style.display = 'inline-block';
+    }
     
     try {
         const formData = new FormData();
@@ -5495,9 +5508,11 @@ async function sendComposedEmail() {
         showToast('Error sending email', 'error');
     } finally {
         // Re-enable button
-        sendBtn.disabled = false;
-        sendBtnText.style.display = 'inline';
-        sendBtnSpinner.style.display = 'none';
+        if (sendBtn) {
+            sendBtn.disabled = false;
+            if (sendBtnText) sendBtnText.style.display = 'inline';
+            if (sendBtnSpinner) sendBtnSpinner.style.display = 'none';
+        }
     }
 }
 

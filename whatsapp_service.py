@@ -231,9 +231,9 @@ class WhatsAppService:
         Returns:
             dict: API response
         """
-        # Format updated time
+        # Format updated time (UTC)
         if deal.updated_at:
-            updated_str = deal.updated_at.strftime('%Y-%m-%d %H:%M')
+            updated_str = deal.updated_at.strftime('%Y-%m-%d %H:%M UTC')
         else:
             updated_str = "Never"
         
