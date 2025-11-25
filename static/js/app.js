@@ -91,6 +91,11 @@ async function autoFetchNewEmails() {
         return;
     }
     
+    // Don't auto-fetch if user is on sent/drafts/starred tabs (only fetch for inbox)
+    if (currentTab !== 'all' && currentTab !== 'deal-flow') {
+        return;
+    }
+    
     // Check if auto-fetch is paused due to rate limit
     if (autoFetchPausedUntil && Date.now() < autoFetchPausedUntil) {
         const minutesLeft = Math.ceil((autoFetchPausedUntil - Date.now()) / 60000);
@@ -153,15 +158,23 @@ async function autoFetchNewEmails() {
                     });
                     emailCache.timestamp = Date.now();
                     saveEmailCacheToStorage(); // Save to localStorage
-                    allEmails = emailCache.data;
                     
-                    // Apply filters and update display
-                    applyFilters();
-                    
-                    // Show notification
-                    showAlert('success', `📧 ${uniqueNewEmails.length} new email${uniqueNewEmails.length !== 1 ? 's' : ''} detected!`);
-                    
-                    console.log(`✅ Auto-fetch: Updated UI with ${uniqueNewEmails.length} new email(s), total: ${allEmails.length}`);
+                    // Only update allEmails and applyFilters if we're on the inbox tab
+                    // Don't interfere with sent/drafts/starred tabs
+                    if (currentTab === 'all' || currentTab === 'deal-flow') {
+                        allEmails = emailCache.data;
+                        
+                        // Apply filters and update display
+                        applyFilters();
+                        
+                        // Show notification
+                        showAlert('success', `📧 ${uniqueNewEmails.length} new email${uniqueNewEmails.length !== 1 ? 's' : ''} detected!`);
+                        
+                        console.log(`✅ Auto-fetch: Updated UI with ${uniqueNewEmails.length} new email(s), total: ${allEmails.length}`);
+                    } else {
+                        // Just update the cache, don't change the display
+                        console.log(`ℹ️  Auto-fetch: Found ${uniqueNewEmails.length} new email(s), but on ${currentTab} tab - not updating display`);
+                    }
                 } else {
                     console.log(`ℹ️  Auto-fetch: No new emails detected (${data.emails.length} total in database)`);
                 }
@@ -1998,6 +2011,15 @@ async function fetchSentEmails() {
             }));
             
             console.log(`✅ [FRONTEND] Fetched ${sentEmails.length} sent emails`);
+            // Debug: Log first sent email to check if subjects are present
+            if (sentEmails.length > 0) {
+                console.log(`📤 [DEBUG] First sent email:`, {
+                    id: sentEmails[0].id,
+                    subject: sentEmails[0].subject,
+                    to: sentEmails[0].to,
+                    from: sentEmails[0].from
+                });
+            }
             
             // Update cache (both memory and localStorage)
             sentEmailsCache = sentEmails;
@@ -2006,6 +2028,8 @@ async function fetchSentEmails() {
             // Only update UI if we're still on the sent tab
             if (currentTab === 'sent') {
                 console.log(`📤 [FRONTEND] Updating UI with ${sentEmails.length} sent emails`);
+                // CRITICAL: Set allEmails to sent emails BEFORE applyFilters
+                // This ensures applyFilters uses sent emails, not inbox emails
                 allEmails = sentEmails;
                 applyFilters(); // Apply filters including search
                 
@@ -2029,6 +2053,8 @@ async function fetchSentEmails() {
                     console.log(`📤 [FRONTEND] No sent emails found, showing empty state`);
                     displayEmails([]);
                 }
+            } else {
+                console.log(`📤 [FRONTEND] Not on sent tab (currentTab=${currentTab}), skipping UI update`);
             }
         } else {
             console.error('❌ [FRONTEND] Error fetching sent emails:', data.error);
@@ -2587,6 +2613,21 @@ function hideCacheRefreshIndicator() {
 // Refresh emails manually (cache-first for instant feedback)
 async function refreshEmails() {
     console.log('🔄 Manual refresh triggered');
+    
+    // Don't refresh inbox if on sent/drafts/starred tabs - refresh the current tab instead
+    if (currentTab === 'sent') {
+        console.log('📤 Refreshing sent emails instead of inbox');
+        fetchSentEmails();
+        return;
+    } else if (currentTab === 'drafts') {
+        console.log('📝 Refreshing drafts instead of inbox');
+        fetchDrafts();
+        return;
+    } else if (currentTab === 'starred') {
+        console.log('⭐ Refreshing starred emails instead of inbox');
+        fetchStarredEmails();
+        return;
+    }
     
     // Add spinning animation to refresh button
     const refreshBtn = document.getElementById('refreshEmailsBtn');
@@ -6182,6 +6223,12 @@ async function sendComposedEmail() {
             // Close modal immediately after successful send
             closeComposeModal();
             isSendingEmail = false;
+            
+            // Refresh sent emails if on sent tab, otherwise stay on current tab
+            if (currentTab === 'sent') {
+                console.log('📤 [SEND] Refreshing sent emails after sending...');
+                fetchSentEmails();
+            }
         } else {
             showToast(data.error || 'Failed to send email', 'error');
             isSendingEmail = false;
