@@ -16,6 +16,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 # PDF and document parsing
 try:
@@ -2068,14 +2069,16 @@ class GmailClient:
             print(f"Error downloading attachment: {str(e)}")
             return None
     
-    def setup_pubsub_watch(self, topic_name, user_id=None):
+    def setup_pubsub_watch(self, topic_name, user_id=None, max_retries=3):
         """
         Set up Gmail Watch with Pub/Sub for push notifications (test environment).
         This reduces API calls by receiving real-time notifications instead of polling.
+        Includes exponential backoff retry logic for rate limit errors (429).
         
         Args:
             topic_name: Full Pub/Sub topic name (e.g., 'projects/PROJECT_ID/topics/gmail-notifications')
             user_id: Optional user ID for logging
+            max_retries: Maximum number of retry attempts (default: 3)
         
         Returns:
             dict: Watch response with expiration timestamp, or None if failed
@@ -2084,48 +2087,119 @@ class GmailClient:
             print("❌ Gmail service not initialized")
             return None
         
-        try:
-            # Gmail Watch API - sets up push notifications via Pub/Sub
-            # Watch expires after 7 days (604800 seconds), must be renewed
-            watch_request = {
-                'topicName': topic_name,
-                'labelIds': ['INBOX'],  # Only watch inbox
-                'labelFilterAction': 'include'  # Include only inbox messages
-            }
-            
-            print(f"📡 Setting up Gmail Watch with Pub/Sub topic: {topic_name}")
-            if user_id:
-                print(f"   User ID: {user_id}")
-            
-            watch_response = self.service.users().watch(
-                userId='me',
-                body=watch_request
-            ).execute()
-            
-            expiration = watch_response.get('expiration')
-            history_id = watch_response.get('historyId')
-            
-            print(f"✅ Gmail Watch established successfully")
-            print(f"   Expiration: {expiration} (Unix timestamp)")
-            print(f"   History ID: {history_id}")
-            
-            return {
-                'expiration': expiration,
-                'history_id': history_id
-            }
-            
-        except Exception as e:
-            error_str = str(e)
-            print(f"❌ Error setting up Gmail Watch: {error_str}")
-            
-            # Common errors:
-            if '403' in error_str or 'permission' in error_str.lower():
-                print("   → Make sure Pub/Sub API is enabled in Google Cloud Console")
-                print("   → Verify the topic exists and the service account has publish permissions")
-            elif '404' in error_str:
-                print("   → Topic not found. Create it in Google Cloud Console first")
-            
-            return None
+        import time
+        from datetime import datetime, timezone
+        
+        # Gmail Watch API - sets up push notifications via Pub/Sub
+        # Watch expires after 7 days (604800 seconds), must be renewed
+        watch_request = {
+            'topicName': topic_name,
+            'labelIds': ['INBOX'],  # Only watch inbox
+            'labelFilterAction': 'include'  # Include only inbox messages
+        }
+        
+        print(f"📡 Setting up Gmail Watch with Pub/Sub topic: {topic_name}")
+        if user_id:
+            print(f"   User ID: {user_id}")
+        
+        for attempt in range(max_retries + 1):  # +1 for initial attempt
+            try:
+                watch_response = self.service.users().watch(
+                    userId='me',
+                    body=watch_request
+                ).execute()
+                
+                expiration = watch_response.get('expiration')
+                history_id = watch_response.get('historyId')
+                
+                if attempt > 0:
+                    print(f"✅ Gmail Watch established successfully (after {attempt} retry/retries)")
+                else:
+                    print(f"✅ Gmail Watch established successfully")
+                print(f"   Expiration: {expiration} (Unix timestamp)")
+                print(f"   History ID: {history_id}")
+                
+                return {
+                    'expiration': expiration,
+                    'history_id': history_id
+                }
+                
+            except HttpError as e:
+                error_str = str(e)
+                status_code = e.resp.status if hasattr(e, 'resp') else None
+                
+                # Handle rate limiting (429) with smart retry logic
+                if status_code == 429 or '429' in error_str or 'rateLimitExceeded' in error_str.lower():
+                    if attempt < max_retries:
+                        # Try to extract Retry-After from error message or headers
+                        retry_after_seconds = None
+                        
+                        # Check error message for "Retry after" timestamp
+                        retry_after_match = re.search(r'Retry after (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})', error_str)
+                        if retry_after_match:
+                            try:
+                                retry_after_str = retry_after_match.group(1)
+                                retry_after_dt = datetime.fromisoformat(retry_after_str.replace('Z', '+00:00'))
+                                now = datetime.now(timezone.utc)
+                                if retry_after_dt.tzinfo is None:
+                                    retry_after_dt = retry_after_dt.replace(tzinfo=timezone.utc)
+                                retry_after_seconds = max(0, int((retry_after_dt - now).total_seconds()))
+                            except Exception:
+                                pass
+                        
+                        # Check response headers for Retry-After
+                        if not retry_after_seconds and hasattr(e, 'resp') and hasattr(e.resp, 'headers'):
+                            retry_after_header = e.resp.headers.get('Retry-After')
+                            if retry_after_header:
+                                try:
+                                    retry_after_seconds = int(retry_after_header)
+                                except ValueError:
+                                    pass
+                        
+                        # Determine wait time
+                        if retry_after_seconds:
+                            wait_seconds = min(retry_after_seconds, 300)  # Cap at 5 minutes for immediate retry
+                            if retry_after_seconds > 300:
+                                # Long wait (>5 min) - don't retry immediately, return None to schedule background retry
+                                print(f"⏳ Rate limit requires waiting {retry_after_seconds // 60} minutes")
+                                print(f"   Will retry in background. Retry after: {retry_after_match.group(1) if retry_after_match else 'N/A'}")
+                                return None
+                        else:
+                            # No Retry-After header, use exponential backoff
+                            wait_seconds = min(2 ** attempt, 60)  # 1s, 2s, 4s, 8s... max 60s
+                        
+                        print(f"⏳ Rate limit hit (attempt {attempt + 1}/{max_retries + 1}). Waiting {wait_seconds} seconds before retry...")
+                        time.sleep(wait_seconds)
+                        continue
+                    else:
+                        # Max retries reached
+                        print(f"❌ Rate limit error after {max_retries} retries. Gmail Watch setup failed.")
+                        print(f"   Error: {error_str[:200]}")
+                        return None
+                
+                # Handle other HTTP errors
+                elif status_code == 403 or '403' in error_str or 'permission' in error_str.lower():
+                    print("❌ Permission denied setting up Gmail Watch")
+                    print("   → Make sure Pub/Sub API is enabled in Google Cloud Console")
+                    print("   → Verify the topic exists and the service account has publish permissions")
+                    return None
+                elif status_code == 404 or '404' in error_str:
+                    print("❌ Topic not found")
+                    print("   → Create the Pub/Sub topic in Google Cloud Console first")
+                    return None
+                else:
+                    # Other errors - don't retry
+                    print(f"❌ Error setting up Gmail Watch: {error_str[:200]}")
+                    return None
+                    
+            except Exception as e:
+                error_str = str(e)
+                # Non-HTTP errors - don't retry
+                print(f"❌ Error setting up Gmail Watch: {error_str[:200]}")
+                return None
+        
+        # Should not reach here, but just in case
+        return None
     
     def stop_watch(self):
         """
