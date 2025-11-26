@@ -205,25 +205,47 @@ def run_lazy_migrations():
                 SELECT column_name 
                 FROM information_schema.columns 
                 WHERE table_name = 'users' 
-                AND column_name IN ('setup_completed', 'initial_emails_fetched')
-                LIMIT 2
+                AND column_name IN ('setup_completed', 'initial_emails_fetched', 'google_id', 'full_name', 'profile_picture')
             """))
             existing_user_columns = [row[0] for row in result]
             
+            needs_commit = False
             if 'setup_completed' not in existing_user_columns:
                 db.session.execute(text("""
                     ALTER TABLE users 
                     ADD COLUMN IF NOT EXISTS setup_completed BOOLEAN DEFAULT FALSE;
                 """))
+                needs_commit = True
             if 'initial_emails_fetched' not in existing_user_columns:
                 db.session.execute(text("""
                     ALTER TABLE users 
                     ADD COLUMN IF NOT EXISTS initial_emails_fetched INTEGER DEFAULT 0;
                 """))
-            if 'setup_completed' not in existing_user_columns or 'initial_emails_fetched' not in existing_user_columns:
+                needs_commit = True
+            if 'google_id' not in existing_user_columns:
+                db.session.execute(text("""
+                    ALTER TABLE users 
+                    ADD COLUMN IF NOT EXISTS google_id VARCHAR(255);
+                """))
+                needs_commit = True
+            if 'full_name' not in existing_user_columns:
+                db.session.execute(text("""
+                    ALTER TABLE users 
+                    ADD COLUMN IF NOT EXISTS full_name VARCHAR(200);
+                """))
+                needs_commit = True
+            if 'profile_picture' not in existing_user_columns:
+                db.session.execute(text("""
+                    ALTER TABLE users 
+                    ADD COLUMN IF NOT EXISTS profile_picture VARCHAR(500);
+                """))
+                needs_commit = True
+            if needs_commit:
                 db.session.commit()
-        except Exception:
+                print("✅ User table columns migration completed")
+        except Exception as e:
             db.session.rollback()
+            print(f"⚠️  User table migration error: {e}")
         
         # WhatsApp fields migration
         try:
@@ -345,8 +367,36 @@ def run_lazy_migrations():
             if not constraint_exists:
                 print("🔄 Running lazy migration: Adding unique constraint on (user_id, message_id)...")
                 try:
-                    # First, clean up any duplicates (keep the oldest record for each user_id + message_id pair)
+                    # First, find duplicates and update deals table to point to the kept classification
                     print("🧹 Cleaning up duplicate email classifications...")
+                    
+                    # Step 1: Find duplicates and update deals to point to MIN(id) for each group
+                    print("   Updating deals table to point to kept classifications...")
+                    duplicates_query = text("""
+                        SELECT user_id, message_id, MIN(id) as keep_id
+                        FROM email_classifications
+                        GROUP BY user_id, message_id
+                        HAVING COUNT(*) > 1
+                    """)
+                    duplicates = db.session.execute(duplicates_query).fetchall()
+                    
+                    for user_id, message_id, keep_id in duplicates:
+                        # Update deals pointing to any duplicate in this group to point to keep_id
+                        update_deals = text("""
+                            UPDATE deals
+                            SET classification_id = :keep_id
+                            WHERE classification_id IN (
+                                SELECT id FROM email_classifications
+                                WHERE user_id = :user_id AND message_id = :message_id
+                                AND id != :keep_id
+                            )
+                        """)
+                        db.session.execute(update_deals, {'keep_id': keep_id, 'user_id': user_id, 'message_id': message_id})
+                    
+                    db.session.commit()
+                    print(f"   Updated deals for {len(duplicates)} duplicate groups")
+                    
+                    # Step 2: Now delete duplicates (keep the oldest record for each user_id + message_id pair)
                     cleanup_result = db.session.execute(text("""
                         DELETE FROM email_classifications
                         WHERE id NOT IN (
@@ -359,6 +409,9 @@ def run_lazy_migrations():
                             FROM email_classifications
                             GROUP BY user_id, message_id
                             HAVING COUNT(*) > 1
+                        )
+                        AND id NOT IN (
+                            SELECT classification_id FROM deals WHERE classification_id IS NOT NULL
                         )
                     """))
                     duplicates_removed = cleanup_result.rowcount
@@ -1029,10 +1082,17 @@ def oauth2callback():
                 email = user_info.get('email')
                 google_id = user_info.get('id')
                 
-                # Check if user exists
+                # Check if user exists (try google_id first if column exists, then email)
                 existing_user = None
-                if google_id:
-                    existing_user = User.query.filter_by(google_id=google_id).first()
+                try:
+                    if google_id:
+                        existing_user = User.query.filter_by(google_id=google_id).first()
+                except Exception as google_id_error:
+                    # google_id column might not exist yet - skip and use email
+                    if 'google_id' not in str(google_id_error).lower() and 'column' not in str(google_id_error).lower():
+                        raise
+                    print(f"⚠️  google_id column not available, using email lookup: {google_id_error}")
+                
                 if not existing_user and email:
                     existing_user = User.query.filter_by(email=email).first()
                 
@@ -1068,8 +1128,15 @@ def oauth2callback():
                 google_id = user_info.get('id')
                 
                 existing_user = None
-                if google_id:
-                    existing_user = User.query.filter_by(google_id=google_id).first()
+                try:
+                    if google_id:
+                        existing_user = User.query.filter_by(google_id=google_id).first()
+                except Exception as google_id_error:
+                    # google_id column might not exist yet - skip and use email
+                    if 'google_id' not in str(google_id_error).lower() and 'column' not in str(google_id_error).lower():
+                        raise
+                    print(f"⚠️  google_id column not available, using email lookup: {google_id_error}")
+                
                 if not existing_user and email:
                     existing_user = User.query.filter_by(email=email).first()
                 
