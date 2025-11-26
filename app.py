@@ -935,7 +935,6 @@ def oauth2callback():
             return "OAUTH_REDIRECT_URI not configured", 500
         
         flow = InstalledAppFlow.from_client_config(credentials_data, SCOPES)
-        flow.redirect_uri = redirect_uri
         
         # Construct callback URL with HTTPS (required for OAuth)
         # Replace HTTP with HTTPS in the callback URL if needed
@@ -948,12 +947,15 @@ def oauth2callback():
         parsed_callback = urlparse(callback_url)
         actual_redirect_uri = urlunparse((parsed_callback.scheme, parsed_callback.netloc, parsed_callback.path, '', '', ''))
         
-        # Use the actual redirect URI from the callback (must match exactly what was used in authorization)
+        # CRITICAL: Use the actual redirect URI from the callback URL (must match exactly)
         # This ensures the redirect_uri in token exchange matches what Google expects
+        # The env variable might have trailing slashes or different casing, so use the actual one
         redirect_uri_for_exchange = actual_redirect_uri
+        flow.redirect_uri = redirect_uri_for_exchange  # Set flow redirect_uri to match callback
         
         print(f"🔍 OAuth callback - Redirect URI from env: {redirect_uri}")
         print(f"🔍 OAuth callback - Actual redirect URI from callback: {redirect_uri_for_exchange}")
+        print(f"🔍 OAuth callback - Using actual redirect URI for flow: {redirect_uri_for_exchange}")
         
         # Fetch token
         # Note: Google automatically adds 'openid' scope when requesting userinfo scopes
@@ -997,8 +999,30 @@ def oauth2callback():
                     
                     if 'error' in token_response:
                         error_msg = token_response.get('error_description', token_response.get('error', 'Unknown error'))
+                        error_code = token_response.get('error', '')
                         print(f"❌ Token exchange error: {error_msg}")
+                        print(f"   Error code: {error_code}")
                         print(f"   Full response: {token_response}")
+                        
+                        # Handle invalid_grant - usually means auth code expired or was already used
+                        if error_code == 'invalid_grant':
+                            print(f"⚠️  Invalid grant error - authorization code may have expired or been used")
+                            print(f"   This can happen if:")
+                            print(f"   - The OAuth flow took too long (codes expire in ~10 minutes)")
+                            print(f"   - The authorization code was already used")
+                            print(f"   - The redirect_uri doesn't match exactly")
+                            print(f"   - Scope mismatch (scopes changed)")
+                            print(f"   Redirecting user to reconnect Gmail...")
+                            # Clear OAuth state to force fresh flow
+                            session.pop('oauth_state', None)
+                            session.pop('from_signup', None)
+                            # If user is logged in, redirect to dashboard with error message
+                            if current_user.is_authenticated:
+                                return redirect(url_for('dashboard') + '?oauth_error=invalid_grant&message=Please try reconnecting Gmail. The authorization may have expired.')
+                            else:
+                                # Not logged in - redirect to connect page
+                                return redirect(url_for('connect_gmail') + '?error=invalid_grant&message=Please try again. The authorization may have expired.')
+                        
                         raise Exception(f"Token exchange failed: {error_msg}")
                     
                     # Create credentials from token response
