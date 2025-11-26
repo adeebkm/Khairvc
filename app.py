@@ -1047,6 +1047,7 @@ def oauth2callback():
                     session.permanent = True
                     session['user_id'] = existing_user.id
                     session['username'] = existing_user.username
+                    session.modified = True  # Ensure session is saved
                     # Continue with Gmail connection flow below
             except Exception as check_error:
                 print(f"⚠️  Error checking if user exists: {check_error}")
@@ -1077,12 +1078,18 @@ def oauth2callback():
                     session.permanent = True
                     session['user_id'] = existing_user.id
                     session['username'] = existing_user.username
+                    session.modified = True  # Ensure session is saved
                 else:
                     print(f"⚠️  User not found and not authenticated, redirecting to login")
                     return redirect(url_for('login'))
             except Exception as e:
                 print(f"⚠️  Error in fallback login: {e}")
                 return redirect(url_for('login'))
+        
+        # Ensure user is authenticated before proceeding
+        if not current_user.is_authenticated:
+            print(f"❌ User not authenticated after login attempt, redirecting to login")
+            return redirect(url_for('login'))
         
         # Get token JSON
         token_json = creds.to_json()
@@ -1091,6 +1098,7 @@ def oauth2callback():
         encrypted_token = encrypt_token(token_json)
         
         # Update or create Gmail token for user
+        print(f"🔍 Saving Gmail token for user {current_user.id} (authenticated: {current_user.is_authenticated})")
         gmail_token = GmailToken.query.filter_by(user_id=current_user.id).first()
         if gmail_token:
             gmail_token.encrypted_token = encrypted_token
@@ -1098,7 +1106,7 @@ def oauth2callback():
             gmail_token = GmailToken(user_id=current_user.id, encrypted_token=encrypted_token)
             db.session.add(gmail_token)
         
-            db.session.commit()
+        db.session.commit()
         
         # Set up Pub/Sub immediately when Gmail is connected (not waiting for setup completion)
         use_pubsub = os.getenv('USE_PUBSUB', 'false').lower() == 'true'
