@@ -1418,23 +1418,47 @@ class GmailClient:
         
         try:
             pdf_file = io.BytesIO(file_data)
-            pdf_reader = PyPDF2.PdfReader(pdf_file)
+            
+            # Try to read PDF with strict=False to handle malformed PDFs
+            try:
+                pdf_reader = PyPDF2.PdfReader(pdf_file, strict=False)
+            except Exception as read_error:
+                # If strict=False doesn't work, try with strict=True as fallback
+                try:
+                    pdf_file.seek(0)  # Reset file pointer
+                    pdf_reader = PyPDF2.PdfReader(pdf_file, strict=True)
+                except Exception as fallback_error:
+                    print(f"⚠️  Could not initialize PDF reader for {filename}: {str(fallback_error)}")
+                    return None
+            
             text_parts = []
             
-            for page in pdf_reader.pages:
+            # Extract text from each page with individual error handling
+            for page_num, page in enumerate(pdf_reader.pages):
                 try:
                     page_text = page.extract_text()
                     if page_text:
                         text_parts.append(page_text)
-                except:
-                    continue
+                except Exception as page_error:
+                    # Skip problematic pages (FloatObject errors, etc.)
+                    error_str = str(page_error)
+                    if 'FloatObject' in error_str or 'invalid' in error_str.lower():
+                        # Silently skip pages with parsing errors (malformed PDF content)
+                        continue
+                    else:
+                        # Log other errors but continue processing
+                        print(f"⚠️  Could not extract text from page {page_num + 1} of {filename}: {error_str[:100]}")
+                        continue
             
             if text_parts:
                 full_text = '\n\n'.join(text_parts)
                 # Limit to first 1500 characters
                 return full_text[:1500] + ('...' if len(full_text) > 1500 else '')
         except Exception as e:
-            print(f"Note: Could not parse PDF {filename}: {str(e)}")
+            error_str = str(e)
+            # Suppress FloatObject errors (they're handled at page level)
+            if 'FloatObject' not in error_str:
+                print(f"⚠️  Could not parse PDF {filename}: {error_str[:200]}")
         
         return None
     
