@@ -459,7 +459,7 @@ class GmailClient:
             print(f"❌ Error deleting draft: {str(e)}")
             return False
     
-    def get_emails(self, max_results=10, unread_only=False, start_history_id=None):
+    def get_emails(self, max_results=10, unread_only=False, start_history_id=None, custom_query=None):
         """
         Get emails from inbox using batch requests (optimized to reduce API calls).
         Supports incremental sync via Gmail History API.
@@ -468,6 +468,7 @@ class GmailClient:
             max_results: Max emails to fetch in full sync (ignored for incremental sync)
             unread_only: Only fetch unread emails
             start_history_id: If provided, use incremental sync (fetch ALL changes since this ID, ignores max_results)
+            custom_query: Optional custom Gmail search query (overrides default query)
         
         Returns:
             tuple: (emails_list, new_history_id)
@@ -487,9 +488,12 @@ class GmailClient:
                 return result['new_emails'], result['history_id']
             
             # FULL SYNC: Use messages.list() for first time or full refresh
-            query = 'in:inbox'
-            if unread_only:
-                query = 'is:unread in:inbox'
+            if custom_query:
+                query = custom_query
+            else:
+                query = 'in:inbox'
+                if unread_only:
+                    query = 'is:unread in:inbox'
             
             print(f"📧 Full sync: Fetching up to {max_results} emails...")
             
@@ -992,16 +996,60 @@ class GmailClient:
             
         except Exception as e:
             error_str = str(e)
-            # If history is too old or invalid, fall back to full sync
-            if 'historyId' in error_str or '404' in error_str or 'invalid' in error_str.lower():
-                print(f"⚠️  History ID expired or invalid, falling back to full sync: {error_str}")
-                emails, history_id = self.get_emails(max_results=40, unread_only=unread_only, start_history_id=None)
-                return {
-                    'new_emails': emails,
-                    'deleted_ids': [],
-                    'label_changes': {},
-                    'history_id': history_id
-                }
+            # If history is too old or invalid, get current history_id and do smart sync
+            if 'historyId' in error_str or '404' in error_str or 'invalid' in error_str.lower() or 'notFound' in error_str:
+                print(f"⚠️  History ID expired or invalid, getting current history_id and syncing recent emails: {error_str[:200]}")
+                
+                try:
+                    # Get current history_id from profile (this is always valid)
+                    profile = self.get_profile()
+                    current_history_id = profile.get('historyId') if profile else None
+                    
+                    if current_history_id:
+                        print(f"📊 Current history_id from Gmail: {current_history_id}")
+                        
+                        # Instead of full sync with only 40 emails, fetch recent emails (last 7 days)
+                        # This is more efficient and less likely to miss emails
+                        from datetime import datetime, timedelta
+                        seven_days_ago = (datetime.utcnow() - timedelta(days=7)).strftime('%Y/%m/%d')
+                        query = f'in:inbox after:{seven_days_ago}'
+                        if unread_only:
+                            query = f'is:unread in:inbox after:{seven_days_ago}'
+                        
+                        print(f"🔄 Fetching recent emails (last 7 days) to catch up after history_id expiration...")
+                        emails, history_id = self.get_emails(max_results=200, unread_only=unread_only, start_history_id=None, custom_query=query)
+                        
+                        # Use the current history_id from profile (more reliable than from messages.list)
+                        if current_history_id:
+                            history_id = current_history_id
+                        
+                        print(f"✅ Fetched {len(emails)} recent emails. Updated history_id: {history_id}")
+                        return {
+                            'new_emails': emails,
+                            'deleted_ids': [],
+                            'label_changes': {},
+                            'history_id': history_id
+                        }
+                    else:
+                        # Fallback if we can't get current history_id
+                        print(f"⚠️  Could not get current history_id, falling back to limited full sync")
+                        emails, history_id = self.get_emails(max_results=100, unread_only=unread_only, start_history_id=None)
+                        return {
+                            'new_emails': emails,
+                            'deleted_ids': [],
+                            'label_changes': {},
+                            'history_id': history_id
+                        }
+                except Exception as fallback_error:
+                    print(f"⚠️  Error in history_id recovery: {str(fallback_error)[:200]}")
+                    # Last resort: limited full sync
+                    emails, history_id = self.get_emails(max_results=100, unread_only=unread_only, start_history_id=None)
+                    return {
+                        'new_emails': emails,
+                        'deleted_ids': [],
+                        'label_changes': {},
+                        'history_id': history_id
+                    }
             else:
                 print(f"Error in incremental sync: {error_str}")
                 raise
