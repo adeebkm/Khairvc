@@ -228,6 +228,16 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                             else:
                                 raise
                 
+                # Clear Redis lock for this user (sync task completed)
+                try:
+                    import redis
+                    redis_url = os.getenv('REDIS_URL', os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0'))
+                    redis_client = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
+                    sync_lock_key = f"sync_task:user_{user_id}"
+                    redis_client.delete(sync_lock_key)
+                except Exception:
+                    pass  # Ignore Redis cleanup errors
+                
                 return {
                     'status': 'complete',
                     'emails_processed': 0,
@@ -864,6 +874,16 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
             print(f"   - Emails failed commit: {emails_failed_commit}")
             print(f"   - Total errors: {len(errors)}")
             
+            # Clear Redis lock for this user (sync task completed)
+            try:
+                import redis
+                redis_url = os.getenv('REDIS_URL', os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0'))
+                redis_client = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
+                sync_lock_key = f"sync_task:user_{user_id}"
+                redis_client.delete(sync_lock_key)
+            except Exception:
+                pass  # Ignore Redis cleanup errors
+            
             result = {
                 'status': 'complete',
                 'emails_processed': emails_processed,
@@ -881,6 +901,17 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
         except Exception as e:
             error_msg = f"Task failed: {str(e)}"
             print(f"❌ {error_msg}")
+            
+            # Clear Redis lock for this user (sync task failed)
+            try:
+                import redis
+                redis_url = os.getenv('REDIS_URL', os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0'))
+                redis_client = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
+                sync_lock_key = f"sync_task:user_{user_id}"
+                redis_client.delete(sync_lock_key)
+            except Exception:
+                pass  # Ignore Redis cleanup errors
+            
             return {'status': 'error', 'error': error_msg}
 
 
@@ -1733,6 +1764,41 @@ def process_pubsub_notification(self, user_id, history_id):
                 user.gmail_token.history_id = old_history_id
                 db.session.commit()
             
+            # DEDUPLICATION: Check if a sync task is already queued/running for this user
+            # This prevents duplicate syncs when multiple Pub/Sub notifications arrive quickly
+            try:
+                import redis
+                from urllib.parse import urlparse
+                redis_url = os.getenv('REDIS_URL', os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0'))
+                redis_client = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
+                
+                # Check if sync is already queued/running (within last 30 seconds)
+                sync_lock_key = f"sync_task:user_{user_id}"
+                existing_sync = redis_client.get(sync_lock_key)
+                
+                if existing_sync:
+                    existing_task_id = existing_sync.decode('utf-8')
+                    print(f"⏭️  [PUB/SUB] Sync task already queued/running for user {user_id} (task: {existing_task_id[:16]}...)")
+                    print(f"   Skipping duplicate sync. Latest history_id: {history_id}")
+                    # Update the lock with new history_id in case it's newer (but don't queue new task)
+                    # The existing task will handle the sync
+                    return {
+                        'status': 'skipped',
+                        'reason': 'Sync already in progress',
+                        'existing_task_id': existing_task_id,
+                        'user_id': user_id,
+                        'history_id': history_id
+                    }
+                
+                # Set lock before queuing (30 second TTL - enough time for task to start)
+                # This prevents duplicate syncs within 30 seconds
+                redis_client.setex(sync_lock_key, 30, 'pending')  # Will be updated with task_id below
+                
+            except Exception as redis_error:
+                # If Redis check fails, log but continue (don't block sync)
+                print(f"⚠️  [PUB/SUB] Could not check for duplicate syncs (Redis error): {str(redis_error)[:100]}")
+                print(f"   Continuing with sync (deduplication disabled)")
+            
             # Trigger incremental sync using the OLD history_id (so it queries from old to new)
             # Pass the new history_id as a parameter so we can update it after sync
             from tasks import sync_user_emails
@@ -1747,6 +1813,13 @@ def process_pubsub_notification(self, user_id, history_id):
                 queue='email_sync',  # Route to email_sync queue
                 countdown=3  # Additional 3 second delay before task starts (total 8 seconds)
             )
+            
+            # Update Redis lock with actual task ID
+            try:
+                if 'redis_client' in locals():
+                    redis_client.setex(sync_lock_key, 30, sync_task.id)
+            except Exception:
+                pass  # Ignore Redis update errors
             
             print(f"✅ [PUB/SUB] Queued incremental sync task {sync_task.id} for user {user_id}")
             
