@@ -524,7 +524,15 @@ def signup_google():
         # Create flow with userinfo scopes
         flow = InstalledAppFlow.from_client_config(credentials_data, SCOPES)
         
+        # Use dynamic redirect URI based on current request (works for both main and test environments)
         redirect_uri = os.getenv('OAUTH_REDIRECT_URI')
+        if not redirect_uri:
+            # Build redirect URI from current request
+            scheme = 'https' if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https' else 'http'
+            host = request.headers.get('X-Forwarded-Host') or request.host
+            redirect_uri = f"{scheme}://{host}/oauth2callback"
+            print(f"🔍 Using dynamic redirect URI: {redirect_uri}")
+        
         if redirect_uri:
             flow.redirect_uri = redirect_uri
             authorization_url, state = flow.authorization_url(
@@ -709,8 +717,15 @@ def connect_gmail():
         # Create flow from credentials data
         flow = InstalledAppFlow.from_client_config(credentials_data, SCOPES)
         
-        # For Railway/production, use redirect URI instead of local server
+        # Use dynamic redirect URI based on current request (works for both main and test environments)
         redirect_uri = os.getenv('OAUTH_REDIRECT_URI')
+        if not redirect_uri:
+            # Build redirect URI from current request
+            scheme = 'https' if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https' else 'http'
+            host = request.headers.get('X-Forwarded-Host') or request.host
+            redirect_uri = f"{scheme}://{host}/oauth2callback"
+            print(f"🔍 Using dynamic redirect URI: {redirect_uri}")
+        
         if redirect_uri:
             # Production: use redirect URI
             flow.redirect_uri = redirect_uri
@@ -931,6 +946,12 @@ def oauth2callback():
         
         # Recreate flow
         redirect_uri = os.getenv('OAUTH_REDIRECT_URI')
+        if not redirect_uri:
+            # Build redirect URI from current request (works for both main and test environments)
+            scheme = 'https' if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https' else 'http'
+            host = request.headers.get('X-Forwarded-Host') or request.host
+            redirect_uri = f"{scheme}://{host}/oauth2callback"
+            print(f"🔍 Using dynamic redirect URI in callback: {redirect_uri}")
         flow = InstalledAppFlow.from_client_config(credentials_data, SCOPES)
         flow.redirect_uri = redirect_uri
         
