@@ -43,8 +43,7 @@ SCOPES = [
     'https://www.googleapis.com/auth/pubsub',  # For Pub/Sub push notifications (test environment)
     'openid',  # Explicitly include openid (Google adds it automatically anyway)
     'https://www.googleapis.com/auth/userinfo.profile',  # For user profile (name, picture)
-    'https://www.googleapis.com/auth/userinfo.email',  # For user email
-    'https://www.googleapis.com/auth/contacts.readonly'  # For People API contacts autocomplete
+    'https://www.googleapis.com/auth/userinfo.email'  # For user email
 ]
 
 
@@ -1228,7 +1227,14 @@ class GmailClient:
                                             email_data['subject'] = subject_header.strip()
                                             break
                     except Exception as e:
-                        print(f"⚠️  [SENT] Could not get subject from thread {thread_id}: {str(e)}")
+                        error_str = str(e)
+                        # Only log 404 errors at debug level (thread deleted/not found is normal)
+                        if '404' in error_str or 'not found' in error_str.lower() or 'notFound' in error_str:
+                            # Thread was deleted or doesn't exist - this is normal, don't spam logs
+                            pass
+                        else:
+                            # Other errors should be logged
+                            print(f"⚠️  [SENT] Could not get subject from thread {thread_id}: {error_str}")
             
             return email_data
         except Exception as e:
@@ -1891,47 +1897,6 @@ class GmailClient:
             # silently fail and return None
             print(f"Note: Could not fetch signature (may need re-authentication): {str(e)}")
             return None
-    
-    def get_contacts(self):
-        """
-        Fetch user's contacts from Google People API for autocomplete.
-        
-        Returns:
-            list: List of contact dicts with 'name', 'email', and 'display' fields
-        """
-        if not self.credentials:
-            print("⚠️  [CONTACTS] No credentials available for People API.")
-            return []
-
-        try:
-            people_service = build('people', 'v1', credentials=self.credentials)
-            results = people_service.people().connections().list(
-                resourceName='people/me',
-                pageSize=100,  # Fetch up to 100 contacts
-                personFields='names,emailAddresses',
-                sortOrder='LAST_MODIFIED_DESCENDING'
-            ).execute()
-            
-            connections = results.get('connections', [])
-            contacts = []
-            for person in connections:
-                names = person.get('names', [])
-                emails = person.get('emailAddresses', [])
-                
-                if names and emails:
-                    name = names[0].get('displayName', '')
-                    email = emails[0].get('value', '')
-                    if name and email:
-                        contacts.append({
-                            'name': name,
-                            'email': email,
-                            'display': f"{name} <{email}>"
-                        })
-            print(f"✅ [CONTACTS] Fetched {len(contacts)} contacts from People API.")
-            return contacts
-        except Exception as e:
-            print(f"❌ [CONTACTS] Error fetching contacts from People API: {str(e)}")
-            return []
     
     def mark_as_read(self, message_id):
         """Mark an email as read"""
