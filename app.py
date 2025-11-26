@@ -172,32 +172,39 @@ def run_lazy_migrations():
                 SELECT column_name 
                 FROM information_schema.columns 
                 WHERE table_name = 'email_classifications' 
-                AND column_name IN ('subject_encrypted', 'snippet_encrypted')
-                LIMIT 2
+                AND column_name IN ('subject_encrypted', 'snippet_encrypted', 'processed')
             """))
             existing_columns = [row[0] for row in result]
         except (OperationalError, ProgrammingError):
-            existing_columns = ['subject_encrypted', 'snippet_encrypted']
+            existing_columns = ['subject_encrypted', 'snippet_encrypted', 'processed']
         
         # Run migrations if needed
-        if 'subject_encrypted' not in existing_columns or 'snippet_encrypted' not in existing_columns:
-            print("🔄 Running lazy migration: Adding encryption columns...")
-            try:
-                if 'subject_encrypted' not in existing_columns:
-                    db.session.execute(text("""
-                        ALTER TABLE email_classifications 
-                        ADD COLUMN IF NOT EXISTS subject_encrypted TEXT;
-                    """))
-                if 'snippet_encrypted' not in existing_columns:
-                    db.session.execute(text("""
-                        ALTER TABLE email_classifications 
-                        ADD COLUMN IF NOT EXISTS snippet_encrypted TEXT;
-                    """))
-                db.session.commit()
-                print("✅ Encryption columns migration completed")
-            except Exception as e:
-                db.session.rollback()
-                print(f"⚠️  Migration error: {e}")
+        needs_commit = False
+        if 'subject_encrypted' not in existing_columns:
+            print("🔄 Adding subject_encrypted column...")
+            db.session.execute(text("""
+                ALTER TABLE email_classifications 
+                ADD COLUMN IF NOT EXISTS subject_encrypted TEXT;
+            """))
+            needs_commit = True
+        if 'snippet_encrypted' not in existing_columns:
+            print("🔄 Adding snippet_encrypted column...")
+            db.session.execute(text("""
+                ALTER TABLE email_classifications 
+                ADD COLUMN IF NOT EXISTS snippet_encrypted TEXT;
+            """))
+            needs_commit = True
+        if 'processed' not in existing_columns:
+            print("🔄 Adding processed column...")
+            db.session.execute(text("""
+                ALTER TABLE email_classifications 
+                ADD COLUMN IF NOT EXISTS processed BOOLEAN DEFAULT FALSE;
+            """))
+            needs_commit = True
+        
+        if needs_commit:
+            db.session.commit()
+            print("✅ Email classifications columns migration completed")
         
         # User table migrations
         try:
