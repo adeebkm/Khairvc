@@ -240,6 +240,26 @@ def run_lazy_migrations():
                     ADD COLUMN IF NOT EXISTS profile_picture VARCHAR(500);
                 """))
                 needs_commit = True
+            
+            # Make password_hash nullable for Google OAuth users
+            try:
+                column_info = db.session.execute(text("""
+                    SELECT is_nullable 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'users' 
+                    AND column_name = 'password_hash'
+                """)).fetchone()
+                if column_info and column_info[0] == 'NO':
+                    print("🔄 Making password_hash nullable for Google OAuth users...")
+                    db.session.execute(text("""
+                        ALTER TABLE users 
+                        ALTER COLUMN password_hash DROP NOT NULL;
+                    """))
+                    needs_commit = True
+                    print("✅ password_hash is now nullable")
+            except Exception as e:
+                print(f"⚠️  Error checking password_hash constraint: {e}")
+            
             if needs_commit:
                 db.session.commit()
                 print("✅ User table columns migration completed")
