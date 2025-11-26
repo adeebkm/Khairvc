@@ -172,39 +172,32 @@ def run_lazy_migrations():
                 SELECT column_name 
                 FROM information_schema.columns 
                 WHERE table_name = 'email_classifications' 
-                AND column_name IN ('subject_encrypted', 'snippet_encrypted', 'processed')
+                AND column_name IN ('subject_encrypted', 'snippet_encrypted')
+                LIMIT 2
             """))
             existing_columns = [row[0] for row in result]
         except (OperationalError, ProgrammingError):
-            existing_columns = ['subject_encrypted', 'snippet_encrypted', 'processed']
+            existing_columns = ['subject_encrypted', 'snippet_encrypted']
         
         # Run migrations if needed
-        needs_commit = False
-        if 'subject_encrypted' not in existing_columns:
-            print("🔄 Adding subject_encrypted column...")
-            db.session.execute(text("""
-                ALTER TABLE email_classifications 
-                ADD COLUMN IF NOT EXISTS subject_encrypted TEXT;
-            """))
-            needs_commit = True
-        if 'snippet_encrypted' not in existing_columns:
-            print("🔄 Adding snippet_encrypted column...")
-            db.session.execute(text("""
-                ALTER TABLE email_classifications 
-                ADD COLUMN IF NOT EXISTS snippet_encrypted TEXT;
-            """))
-            needs_commit = True
-        if 'processed' not in existing_columns:
-            print("🔄 Adding processed column...")
-            db.session.execute(text("""
-                ALTER TABLE email_classifications 
-                ADD COLUMN IF NOT EXISTS processed BOOLEAN DEFAULT FALSE;
-            """))
-            needs_commit = True
-        
-        if needs_commit:
-            db.session.commit()
-            print("✅ Email classifications columns migration completed")
+        if 'subject_encrypted' not in existing_columns or 'snippet_encrypted' not in existing_columns:
+            print("🔄 Running lazy migration: Adding encryption columns...")
+            try:
+                if 'subject_encrypted' not in existing_columns:
+                    db.session.execute(text("""
+                        ALTER TABLE email_classifications 
+                        ADD COLUMN IF NOT EXISTS subject_encrypted TEXT;
+                    """))
+                if 'snippet_encrypted' not in existing_columns:
+                    db.session.execute(text("""
+                        ALTER TABLE email_classifications 
+                        ADD COLUMN IF NOT EXISTS snippet_encrypted TEXT;
+                    """))
+                db.session.commit()
+                print("✅ Encryption columns migration completed")
+            except Exception as e:
+                db.session.rollback()
+                print(f"⚠️  Migration error: {e}")
         
         # User table migrations
         try:
@@ -212,67 +205,25 @@ def run_lazy_migrations():
                 SELECT column_name 
                 FROM information_schema.columns 
                 WHERE table_name = 'users' 
-                AND column_name IN ('setup_completed', 'initial_emails_fetched', 'google_id', 'full_name', 'profile_picture')
+                AND column_name IN ('setup_completed', 'initial_emails_fetched')
+                LIMIT 2
             """))
             existing_user_columns = [row[0] for row in result]
             
-            needs_commit = False
             if 'setup_completed' not in existing_user_columns:
                 db.session.execute(text("""
                     ALTER TABLE users 
                     ADD COLUMN IF NOT EXISTS setup_completed BOOLEAN DEFAULT FALSE;
                 """))
-                needs_commit = True
             if 'initial_emails_fetched' not in existing_user_columns:
                 db.session.execute(text("""
                     ALTER TABLE users 
                     ADD COLUMN IF NOT EXISTS initial_emails_fetched INTEGER DEFAULT 0;
                 """))
-                needs_commit = True
-            if 'google_id' not in existing_user_columns:
-                db.session.execute(text("""
-                    ALTER TABLE users 
-                    ADD COLUMN IF NOT EXISTS google_id VARCHAR(255);
-                """))
-                needs_commit = True
-            if 'full_name' not in existing_user_columns:
-                db.session.execute(text("""
-                    ALTER TABLE users 
-                    ADD COLUMN IF NOT EXISTS full_name VARCHAR(200);
-                """))
-                needs_commit = True
-            if 'profile_picture' not in existing_user_columns:
-                db.session.execute(text("""
-                    ALTER TABLE users 
-                    ADD COLUMN IF NOT EXISTS profile_picture VARCHAR(500);
-                """))
-                needs_commit = True
-            
-            # Make password_hash nullable for Google OAuth users
-            try:
-                column_info = db.session.execute(text("""
-                    SELECT is_nullable 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'users' 
-                    AND column_name = 'password_hash'
-                """)).fetchone()
-                if column_info and column_info[0] == 'NO':
-                    print("🔄 Making password_hash nullable for Google OAuth users...")
-                    db.session.execute(text("""
-                        ALTER TABLE users 
-                        ALTER COLUMN password_hash DROP NOT NULL;
-                    """))
-                    needs_commit = True
-                    print("✅ password_hash is now nullable")
-            except Exception as e:
-                print(f"⚠️  Error checking password_hash constraint: {e}")
-            
-            if needs_commit:
+            if 'setup_completed' not in existing_user_columns or 'initial_emails_fetched' not in existing_user_columns:
                 db.session.commit()
-                print("✅ User table columns migration completed")
-        except Exception as e:
+        except Exception:
             db.session.rollback()
-            print(f"⚠️  User table migration error: {e}")
         
         # WhatsApp fields migration
         try:
@@ -394,36 +345,8 @@ def run_lazy_migrations():
             if not constraint_exists:
                 print("🔄 Running lazy migration: Adding unique constraint on (user_id, message_id)...")
                 try:
-                    # First, find duplicates and update deals table to point to the kept classification
+                    # First, clean up any duplicates (keep the oldest record for each user_id + message_id pair)
                     print("🧹 Cleaning up duplicate email classifications...")
-                    
-                    # Step 1: Find duplicates and update deals to point to MIN(id) for each group
-                    print("   Updating deals table to point to kept classifications...")
-                    duplicates_query = text("""
-                        SELECT user_id, message_id, MIN(id) as keep_id
-                        FROM email_classifications
-                        GROUP BY user_id, message_id
-                        HAVING COUNT(*) > 1
-                    """)
-                    duplicates = db.session.execute(duplicates_query).fetchall()
-                    
-                    for user_id, message_id, keep_id in duplicates:
-                        # Update deals pointing to any duplicate in this group to point to keep_id
-                        update_deals = text("""
-                            UPDATE deals
-                            SET classification_id = :keep_id
-                            WHERE classification_id IN (
-                                SELECT id FROM email_classifications
-                                WHERE user_id = :user_id AND message_id = :message_id
-                                AND id != :keep_id
-                            )
-                        """)
-                        db.session.execute(update_deals, {'keep_id': keep_id, 'user_id': user_id, 'message_id': message_id})
-                    
-                    db.session.commit()
-                    print(f"   Updated deals for {len(duplicates)} duplicate groups")
-                    
-                    # Step 2: Now delete duplicates (keep the oldest record for each user_id + message_id pair)
                     cleanup_result = db.session.execute(text("""
                         DELETE FROM email_classifications
                         WHERE id NOT IN (
@@ -436,9 +359,6 @@ def run_lazy_migrations():
                             FROM email_classifications
                             GROUP BY user_id, message_id
                             HAVING COUNT(*) > 1
-                        )
-                        AND id NOT IN (
-                            SELECT classification_id FROM deals WHERE classification_id IS NOT NULL
                         )
                     """))
                     duplicates_removed = cleanup_result.rowcount
@@ -604,13 +524,7 @@ def signup_google():
         # Create flow with userinfo scopes
         flow = InstalledAppFlow.from_client_config(credentials_data, SCOPES)
         
-        # Always build redirect URI dynamically from current request (works for both main and test environments)
-        # This ensures users are redirected back to the same domain they logged in from
-        scheme = 'https' if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https' else 'http'
-        host = request.headers.get('X-Forwarded-Host') or request.host
-        redirect_uri = f"{scheme}://{host}/oauth2callback"
-        print(f"🔍 Using dynamic redirect URI: {redirect_uri} (from host: {host})")
-        
+        redirect_uri = os.getenv('OAUTH_REDIRECT_URI')
         if redirect_uri:
             flow.redirect_uri = redirect_uri
             authorization_url, state = flow.authorization_url(
@@ -795,13 +709,8 @@ def connect_gmail():
         # Create flow from credentials data
         flow = InstalledAppFlow.from_client_config(credentials_data, SCOPES)
         
-        # Always build redirect URI dynamically from current request (works for both main and test environments)
-        # This ensures users are redirected back to the same domain they logged in from
-        scheme = 'https' if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https' else 'http'
-        host = request.headers.get('X-Forwarded-Host') or request.host
-        redirect_uri = f"{scheme}://{host}/oauth2callback"
-        print(f"🔍 Using dynamic redirect URI: {redirect_uri} (from host: {host})")
-        
+        # For Railway/production, use redirect URI instead of local server
+        redirect_uri = os.getenv('OAUTH_REDIRECT_URI')
         if redirect_uri:
             # Production: use redirect URI
             flow.redirect_uri = redirect_uri
@@ -1020,12 +929,11 @@ def oauth2callback():
         else:
             return "Credentials not found", 500
         
-        # Recreate flow - always use dynamic redirect URI from current request
-        # This ensures the callback matches the domain where the OAuth flow was initiated
-        scheme = 'https' if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https' else 'http'
-        host = request.headers.get('X-Forwarded-Host') or request.host
-        redirect_uri = f"{scheme}://{host}/oauth2callback"
-        print(f"🔍 Using dynamic redirect URI in callback: {redirect_uri} (from host: {host})")
+        # Recreate flow
+        redirect_uri = os.getenv('OAUTH_REDIRECT_URI')
+        if not redirect_uri:
+            return "OAUTH_REDIRECT_URI not configured", 500
+        
         flow = InstalledAppFlow.from_client_config(credentials_data, SCOPES)
         flow.redirect_uri = redirect_uri
         
@@ -1035,6 +943,18 @@ def oauth2callback():
         if callback_url.startswith('http://'):
             callback_url = callback_url.replace('http://', 'https://', 1)
         
+        # Extract the actual redirect URI from the callback URL (base URL without query params)
+        from urllib.parse import urlparse, urlunparse
+        parsed_callback = urlparse(callback_url)
+        actual_redirect_uri = urlunparse((parsed_callback.scheme, parsed_callback.netloc, parsed_callback.path, '', '', ''))
+        
+        # Use the actual redirect URI from the callback (must match exactly what was used in authorization)
+        # This ensures the redirect_uri in token exchange matches what Google expects
+        redirect_uri_for_exchange = actual_redirect_uri
+        
+        print(f"🔍 OAuth callback - Redirect URI from env: {redirect_uri}")
+        print(f"🔍 OAuth callback - Actual redirect URI from callback: {redirect_uri_for_exchange}")
+        
         # Fetch token
         # Note: Google automatically adds 'openid' scope when requesting userinfo scopes
         # The google_auth_oauthlib library is strict about scope matching, so we need to handle this
@@ -1042,10 +962,11 @@ def oauth2callback():
             flow.fetch_token(authorization_response=callback_url)
         except Exception as token_error:
             error_str = str(token_error)
+            print(f"⚠️  Token fetch error: {error_str}")
             # Handle scope mismatch - Google may add 'openid' automatically
-            if 'scope' in error_str.lower() or 'Scope' in error_str:
-                print(f"⚠️  Scope mismatch detected: {error_str}")
-                print(f"   Google automatically added 'openid' scope. Handling gracefully...")
+            if 'scope' in error_str.lower() or 'Scope' in error_str or 'invalid_grant' in error_str.lower() or 'Bad Request' in error_str:
+                print(f"⚠️  Scope mismatch or invalid grant detected: {error_str}")
+                print(f"   Attempting manual token exchange...")
                 
                 # Extract authorization code from callback URL
                 from urllib.parse import urlparse, parse_qs
@@ -1060,19 +981,25 @@ def oauth2callback():
                     client_secret = credentials_data['installed']['client_secret']
                     
                     token_url = 'https://oauth2.googleapis.com/token'
+                    # CRITICAL: Use the actual redirect URI from the callback URL, not the env variable
+                    # This must match exactly what was used in the authorization URL
                     token_data = {
                         'code': auth_code,
                         'client_id': client_id,
                         'client_secret': client_secret,
-                        'redirect_uri': redirect_uri,
+                        'redirect_uri': redirect_uri_for_exchange,  # Use actual redirect URI from callback
                         'grant_type': 'authorization_code'
                     }
                     
+                    print(f"🔍 Token exchange - Using redirect_uri: {redirect_uri_for_exchange}")
                     response = requests.post(token_url, data=token_data)
                     token_response = response.json()
                     
                     if 'error' in token_response:
-                        raise Exception(f"Token exchange failed: {token_response.get('error_description', token_response.get('error'))}")
+                        error_msg = token_response.get('error_description', token_response.get('error', 'Unknown error'))
+                        print(f"❌ Token exchange error: {error_msg}")
+                        print(f"   Full response: {token_response}")
+                        raise Exception(f"Token exchange failed: {error_msg}")
                     
                     # Create credentials from token response
                     from google.oauth2.credentials import Credentials
@@ -1109,17 +1036,10 @@ def oauth2callback():
                 email = user_info.get('email')
                 google_id = user_info.get('id')
                 
-                # Check if user exists (try google_id first if column exists, then email)
+                # Check if user exists
                 existing_user = None
-                try:
-                    if google_id:
-                        existing_user = User.query.filter_by(google_id=google_id).first()
-                except Exception as google_id_error:
-                    # google_id column might not exist yet - skip and use email
-                    if 'google_id' not in str(google_id_error).lower() and 'column' not in str(google_id_error).lower():
-                        raise
-                    print(f"⚠️  google_id column not available, using email lookup: {google_id_error}")
-                
+                if google_id:
+                    existing_user = User.query.filter_by(google_id=google_id).first()
                 if not existing_user and email:
                     existing_user = User.query.filter_by(email=email).first()
                 
@@ -1128,14 +1048,9 @@ def oauth2callback():
                     print(f"🔍 User not found (email: {email}, google_id: {google_id}), treating as signup")
                     return handle_google_signup_callback(creds)
                 else:
-                    # User exists but not logged in - log them in automatically
-                    print(f"🔍 User exists but not authenticated, logging in automatically")
-                    login_user(existing_user)
-                    session.permanent = True
-                    session['user_id'] = existing_user.id
-                    session['username'] = existing_user.username
-                    session.modified = True  # Ensure session is saved
-                    # Continue with Gmail connection flow below
+                    # User exists but not logged in - redirect to login
+                    print(f"🔍 User exists but not authenticated, redirecting to login")
+                    return redirect(url_for('login'))
             except Exception as check_error:
                 print(f"⚠️  Error checking if user exists: {check_error}")
                 # If we can't check, fall through to regular flow
@@ -1144,45 +1059,8 @@ def oauth2callback():
             # Handle Google signup - create account and connect Gmail
             return handle_google_signup_callback(creds)
         
-        # Regular flow - user should be logged in by now (either was already logged in, or we just logged them in above)
+        # Regular flow - user is already logged in, just connecting Gmail
         if not current_user.is_authenticated:
-            # This shouldn't happen, but if it does, try to find and log in the user
-            try:
-                from googleapiclient.discovery import build
-                userinfo_service = build('oauth2', 'v2', credentials=creds)
-                user_info = userinfo_service.userinfo().get().execute()
-                email = user_info.get('email')
-                google_id = user_info.get('id')
-                
-                existing_user = None
-                try:
-                    if google_id:
-                        existing_user = User.query.filter_by(google_id=google_id).first()
-                except Exception as google_id_error:
-                    # google_id column might not exist yet - skip and use email
-                    if 'google_id' not in str(google_id_error).lower() and 'column' not in str(google_id_error).lower():
-                        raise
-                    print(f"⚠️  google_id column not available, using email lookup: {google_id_error}")
-                
-                if not existing_user and email:
-                    existing_user = User.query.filter_by(email=email).first()
-                
-                if existing_user:
-                    login_user(existing_user)
-                    session.permanent = True
-                    session['user_id'] = existing_user.id
-                    session['username'] = existing_user.username
-                    session.modified = True  # Ensure session is saved
-                else:
-                    print(f"⚠️  User not found and not authenticated, redirecting to login")
-                    return redirect(url_for('login'))
-            except Exception as e:
-                print(f"⚠️  Error in fallback login: {e}")
-                return redirect(url_for('login'))
-        
-        # Ensure user is authenticated before proceeding
-        if not current_user.is_authenticated:
-            print(f"❌ User not authenticated after login attempt, redirecting to login")
             return redirect(url_for('login'))
         
         # Get token JSON
@@ -1192,7 +1070,6 @@ def oauth2callback():
         encrypted_token = encrypt_token(token_json)
         
         # Update or create Gmail token for user
-        print(f"🔍 Saving Gmail token for user {current_user.id} (authenticated: {current_user.is_authenticated})")
         gmail_token = GmailToken.query.filter_by(user_id=current_user.id).first()
         if gmail_token:
             gmail_token.encrypted_token = encrypted_token
@@ -1200,7 +1077,7 @@ def oauth2callback():
             gmail_token = GmailToken(user_id=current_user.id, encrypted_token=encrypted_token)
             db.session.add(gmail_token)
         
-        db.session.commit()
+            db.session.commit()
         
         # Set up Pub/Sub immediately when Gmail is connected (not waiting for setup completion)
         use_pubsub = os.getenv('USE_PUBSUB', 'false').lower() == 'true'
@@ -3679,27 +3556,6 @@ def cancel_scheduled_email(email_id):
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
-
-@app.route('/api/contacts', methods=['GET'])
-@login_required
-def get_contacts():
-    """Get user's contacts from Google People API for autocomplete"""
-    if not current_user.gmail_token:
-        return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
-    
-    try:
-        gmail = get_user_gmail_client(current_user.id)
-        if not gmail:
-            return jsonify({'success': False, 'error': 'Failed to create Gmail client'}), 500
-        
-        contacts = gmail.get_contacts()
-        return jsonify({
-            'success': True,
-            'contacts': contacts
-        })
-    except Exception as e:
-        print(f"❌ [API] Error fetching contacts: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/signatures', methods=['GET'])
 @login_required
