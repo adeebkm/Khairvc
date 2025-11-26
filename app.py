@@ -1048,9 +1048,13 @@ def oauth2callback():
                     print(f"🔍 User not found (email: {email}, google_id: {google_id}), treating as signup")
                     return handle_google_signup_callback(creds)
                 else:
-                    # User exists but not logged in - redirect to login
-                    print(f"🔍 User exists but not authenticated, redirecting to login")
-                    return redirect(url_for('login'))
+                    # User exists but not logged in - log them in automatically
+                    print(f"🔍 User exists but not authenticated, logging in automatically: {existing_user.email}")
+                    login_user(existing_user)
+                    session.permanent = True
+                    session['user_id'] = existing_user.id
+                    session['username'] = existing_user.username
+                    # Continue with Gmail connection flow below
             except Exception as check_error:
                 print(f"⚠️  Error checking if user exists: {check_error}")
                 # If we can't check, fall through to regular flow
