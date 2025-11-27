@@ -129,7 +129,18 @@ def clear_problematic_session_data():
 @login_manager.user_loader
 def load_user(user_id):
     """Load user from database"""
-    return User.query.get(int(user_id))
+    try:
+        user = User.query.get(int(user_id))
+        if user:
+            print(f"✅ User loaded from session: {user.username} (ID: {user_id})")
+        else:
+            print(f"⚠️  User not found in database: ID {user_id}")
+        return user
+    except Exception as e:
+        print(f"❌ Error loading user {user_id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 # Lazy migration flag (prevents multiple runs)
