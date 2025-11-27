@@ -493,11 +493,50 @@ def login():
             # Store user ID in session for additional verification
             session['user_id'] = user.id
             session['username'] = user.username
+            
+            # Check for 'next' parameter to redirect after login
+            next_url = request.args.get('next') or request.form.get('next')
+            if next_url:
+                # Validate next_url to prevent open redirects
+                from urllib.parse import urlparse
+                parsed = urlparse(next_url)
+                if parsed.netloc == '' or parsed.netloc == request.host:
+                    return redirect(next_url)
+            
+            # Check for OAuth error in session
+            oauth_error = session.pop('oauth_error', None)
+            oauth_error_message = session.pop('oauth_error_message', None)
+            if oauth_error:
+                # Redirect to connect_gmail with error message
+                error_param = f'?error={oauth_error}'
+                if oauth_error_message:
+                    from urllib.parse import quote
+                    error_param += f'&message={quote(oauth_error_message)}'
+                return redirect(url_for('connect_gmail') + error_param)
+            
             return redirect(url_for('dashboard'))
         else:
             return render_template('login.html', error='Invalid username or password')
     
-    return render_template('login.html')
+    # GET request - check for error messages from query parameters or session
+    error = request.args.get('error')
+    message = request.args.get('message', '')
+    display_error = None
+    
+    # Check session for OAuth errors
+    oauth_error = session.get('oauth_error')
+    oauth_error_message = session.get('oauth_error_message')
+    
+    if oauth_error:
+        display_error = oauth_error_message or 'OAuth authorization failed. Please try connecting Gmail again after logging in.'
+    elif error:
+        # Decode URL-encoded message
+        if message:
+            from urllib.parse import unquote
+            message = unquote(message)
+        display_error = message or 'An error occurred. Please try again.'
+    
+    return render_template('login.html', error=display_error)
 
 
 @app.route('/signup-google')
@@ -1020,8 +1059,12 @@ def oauth2callback():
                             if current_user.is_authenticated:
                                 return redirect(url_for('dashboard') + '?oauth_error=invalid_grant&message=Please try reconnecting Gmail. The authorization may have expired.')
                             else:
-                                # Not logged in - redirect to connect page
-                                return redirect(url_for('connect_gmail') + '?error=invalid_grant&message=Please try again. The authorization may have expired.')
+                                # Not logged in - redirect to login page with error message
+                                # Don't redirect to connect_gmail (requires login) - that causes a redirect loop
+                                # Store the error in session so it can be displayed after login
+                                session['oauth_error'] = 'invalid_grant'
+                                session['oauth_error_message'] = 'OAuth authorization failed. Please log in and try connecting Gmail again.'
+                                return redirect(url_for('login') + '?next=' + url_for('connect_gmail'))
                         
                         raise Exception(f"Token exchange failed: {error_msg}")
                     
