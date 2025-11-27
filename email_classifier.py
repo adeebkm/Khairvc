@@ -441,197 +441,37 @@ class EmailClassifier:
         user_id: str = None
     ) -> Tuple[str, float]:
         """
-        Use OpenAI (via Lambda or direct) to validate/override deterministic classification
+        Use AWS Lambda to validate/override deterministic classification.
+        Lambda is REQUIRED - no fallbacks.
         Returns: (category, confidence)
         
-        Uses a comprehensive zero-hallucination prompt for accurate classification.
-        Prefers Lambda if available (more secure, no logging).
+        Raises:
+            ValueError: If Lambda client is not available
+            Exception: If Lambda classification fails
         """
-        # Prefer Lambda if available (more secure, no email content logging)
-        if self.lambda_client:
-            try:
-                return self.lambda_client.classify_email(
-                    subject=subject,
-                    body=body,
-                    headers=headers,
-                    sender=sender,
-                    links=links,
-                    deterministic_category=deterministic_category,
-                    has_pdf_attachment=has_pdf_attachment,
-                    thread_id=thread_id,
-                    user_id=user_id
-                )
-            except Exception as e:
-                print(f"⚠️  Lambda classification failed, falling back to OpenAI: {str(e)}")
-                # Fall through to OpenAI fallback
-        
-        # Fallback to direct OpenAI if Lambda not available or failed
-        if not self.openai_client:
-            return (deterministic_category, 0.70)
-        
-        try:
-            # Extract sender domain
-            sender_email = sender.split('<')[-1].strip('>') if '<' in sender else sender
-            sender_domain = sender_email.split('@')[-1] if '@' in sender_email else "unknown"
-            sender_name = sender.split('<')[0].strip() if '<' in sender else sender_email.split('@')[0]
-            
-            # Extract attachments info
-            attachment_names = []
-            if has_pdf_attachment or '--- Attachment Content ---' in body:
-                # Extract attachment filenames if present
-                if 'Attachment:' in body:
-                    import re
-                    matches = re.findall(r'Attachment: ([^\n]+)', body)
-                    attachment_names = matches if matches else ["pitch_deck.pdf"]
-                else:
-                    attachment_names = ["pitch_deck.pdf"]
-            
-            # Clean body: remove signatures, footers, quoted content
-            # First 2500 chars only (as per prompt spec)
-            body_clean = body[:2500]
-            
-            # Build input JSON
-            input_json = {
-                "subject": subject or "",
-                "from_name": sender_name,
-                "from_email": sender_email,
-                "sender_domain": sender_domain,
-                "body": body_clean,
-                "attachments": attachment_names,
-                "links": links[:10] if links else []  # First 10 links
-            }
-            
-            # Build the condensed prompt (85-90% token reduction)
-            prompt = f"""You are a zero-hallucination email classifier for a VC partner.
-
-Classify into ONE of: dealflow, hiring, networking, spam, general.
-
-Output ONLY this JSON:
-{{"label":"...","confidence":0.0-1.0,"rationale":"...","signals":{{"intent":"...","keywords":[...],"entities":[...],"attachments":[...]}}}}
-
-Rules:
-- Ignore: sigs, quotes, legal, unsub, old threads.
-- Spam overrides all. Triggers: phishing, fake invoices, crypto scams, mismatched From/Reply-To, malicious TLDs (.tk/.ml/.ga/.cf) + urgency.
-- **Legitimate domains (google.com, microsoft.com, apple.com, etc.) = ALWAYS general, never spam.**
-- Dealflow: fundraising, deck, SAFE, valuation, **warm intro about SPECIFIC startup/team**.
-- Hiring: resume, CV, job app, recruiter, JD.
-- Networking: coffee, intro, event, podcast, **no money ask AND no specific startup mentioned**.
-- General: newsletters, receipts, vendor demos, Google/Microsoft security alerts.
-- **Short body + deck/resume attachment = classify by attachment type.**
-
-Tie-breaker: spam > dealflow > hiring > networking > general.
-
-Examples:
-1. "Intro: Founder raising pre-seed, deck attached" → dealflow
-2. "Analyst role — resume attached" → hiring
-3. "Coffee next week?" → networking
-4. "URGENT: verify email" + unknown sender → spam
-5. "Gmail security alert" → general
-
-Input email:
-{json.dumps(input_json, indent=2)}
-
-Deterministic classification (reference): {deterministic_category.lower()}
-(Override if email's PRIMARY INTENT suggests otherwise)
-
-Return ONLY the JSON object. No additional text."""
-            
-            # Handle both OpenAIClient wrapper and direct OpenAI client
-            client = self.openai_client.client if hasattr(self.openai_client, 'client') else self.openai_client
-            
-            # Check if using Moonshot (test environment)
-            use_moonshot = os.getenv('USE_MOONSHOT', 'false').lower() == 'true'
-            model = "kimi-k2-thinking" if use_moonshot else "gpt-4o-mini"
-            
-            # Use appropriate model based on environment
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "You are a deterministic email classifier for a venture capital firm. Return ONLY valid JSON. No markdown, no explanation, no additional text."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.0,  # Zero temperature for determinism
-                top_p=0.0,  # Zero top_p for maximum determinism
-                max_tokens=300  # Enough for JSON response
+        # Lambda is REQUIRED - no fallbacks
+        if not self.lambda_client:
+            raise ValueError(
+                "AWS Lambda client is required but not available. "
+                "Please ensure LAMBDA_FUNCTION_ARN and AWS credentials are configured."
             )
-            
-            ai_response = response.choices[0].message.content.strip()
-            
-            # Parse JSON response
-            # Remove markdown code blocks if present
-            if ai_response.startswith('```'):
-                ai_response = ai_response.split('```')[1]
-                if ai_response.startswith('json'):
-                    ai_response = ai_response[4:]
-                ai_response = ai_response.strip()
-            
-            result = json.loads(ai_response)
-            
-            # Extract label and confidence
-            label = result.get('label', '').lower()
-            confidence = float(result.get('confidence', 0.75))
-            
-            # Map label to category constant
-            if label == 'dealflow':
-                category = CATEGORY_DEAL_FLOW
-            elif label == 'hiring':
-                category = CATEGORY_HIRING
-            elif label == 'networking':
-                category = CATEGORY_NETWORKING
-            elif label == 'spam':
-                category = CATEGORY_SPAM
-            elif label == 'general':
-                category = CATEGORY_GENERAL
-            else:
-                # Fallback to deterministic
-                print(f"⚠️ Unknown label '{label}', using deterministic classification")
-                category = deterministic_category
-                confidence = 0.70
-            
-            # Apply SPAM override rule
-            if category == CATEGORY_SPAM:
-                # SPAM overrides everything
-                return (category, confidence)
-            
-            # Apply tie-breaker hierarchy (if deterministic strongly suggests something)
-            # But generally trust OpenAI's comprehensive analysis
-            if deterministic_category == CATEGORY_DEAL_FLOW and confidence < 0.80:
-                # If deterministic strongly believes it's deal flow, and AI is uncertain, lean toward deal flow
-                category = CATEGORY_DEAL_FLOW
-                confidence = 0.85
-            
-            return (category, confidence)
         
-        except json.JSONDecodeError as e:
-            print(f"⚠️ JSON parsing error in OpenAI response: {str(e)}")
-            # Try to extract label from malformed response
-            try:
-                ai_response_upper = ai_response.upper()
-                if 'DEALFLOW' in ai_response_upper or 'DEAL_FLOW' in ai_response_upper:
-                    return (CATEGORY_DEAL_FLOW, 0.75)
-                elif 'HIRING' in ai_response_upper:
-                    return (CATEGORY_HIRING, 0.75)
-                elif 'NETWORKING' in ai_response_upper:
-                    return (CATEGORY_NETWORKING, 0.75)
-                elif 'SPAM' in ai_response_upper:
-                    return (CATEGORY_SPAM, 0.75)
-                elif 'GENERAL' in ai_response_upper:
-                    return (CATEGORY_GENERAL, 0.75)
-            except:
-                pass
-            return (deterministic_category, 0.70)
-        
+        # Use Lambda for classification (encrypted, secure)
+        try:
+            return self.lambda_client.classify_email(
+                subject=subject,
+                body=body,
+                headers=headers,
+                sender=sender,
+                links=links,
+                deterministic_category=deterministic_category,
+                has_pdf_attachment=has_pdf_attachment,
+                thread_id=thread_id,
+                user_id=user_id
+            )
         except Exception as e:
-            error_str = str(e)
-            # Check for quota/rate limit errors
-            if '429' in error_str or 'insufficient_quota' in error_str.lower() or 'quota' in error_str.lower():
-                print(f"⚠️ OpenAI quota/rate limit exceeded. Using deterministic classification only.")
-                print(f"   Error: {error_str[:200]}")  # Truncate long error messages
-                # Return deterministic classification with lower confidence
-                return (deterministic_category, 0.70)
-            else:
-                print(f"⚠️ Error in OpenAI classification: {error_str[:200]}")
-                return (deterministic_category, 0.70)
+            # Re-raise the exception - no fallback
+            raise Exception(f"Lambda classification failed: {str(e)}")
     
     def classify_email(
         self,
