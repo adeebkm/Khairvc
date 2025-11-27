@@ -480,43 +480,86 @@ def app_redirect():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """User login"""
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        user = User.query.filter_by(username=username).first()
-        
-        if user and user.check_password(password):
-            login_user(user)
-            # Make session permanent to survive OAuth redirects
-            session.permanent = True
-            # Store user ID in session for additional verification
-            session['user_id'] = user.id
-            session['username'] = user.username
+    try:
+        if request.method == 'POST':
+            username = request.form.get('username')
+            password = request.form.get('password')
             
-            # Check for 'next' parameter to redirect after login
-            next_url = request.args.get('next') or request.form.get('next')
-            if next_url:
-                # Validate next_url to prevent open redirects
-                from urllib.parse import urlparse
-                parsed = urlparse(next_url)
-                if parsed.netloc == '' or parsed.netloc == request.host:
-                    return redirect(next_url)
+            print(f"🔍 Login attempt - Username: {username}")
             
-            # Check for OAuth error in session
-            oauth_error = session.pop('oauth_error', None)
-            oauth_error_message = session.pop('oauth_error_message', None)
-            if oauth_error:
-                # Redirect to connect_gmail with error message
-                error_param = f'?error={oauth_error}'
-                if oauth_error_message:
-                    from urllib.parse import quote
-                    error_param += f'&message={quote(oauth_error_message)}'
-                return redirect(url_for('connect_gmail') + error_param)
+            if not username or not password:
+                print(f"❌ Login failed - Missing username or password")
+                return render_template('login.html', error='Please enter both username and password')
             
-            return redirect(url_for('dashboard'))
-        else:
-            return render_template('login.html', error='Invalid username or password')
+            try:
+                user = User.query.filter_by(username=username).first()
+            except Exception as db_error:
+                print(f"❌ Database error during login: {str(db_error)}")
+                import traceback
+                traceback.print_exc()
+                return render_template('login.html', error='Database error. Please try again.')
+            
+            if not user:
+                print(f"❌ Login failed - User not found: {username}")
+                return render_template('login.html', error='Invalid username or password')
+            
+            # Check if user has a password (Google OAuth users might not have one)
+            if not user.password_hash:
+                print(f"❌ Login failed - User has no password (OAuth user): {username}")
+                return render_template('login.html', error='This account was created with Google sign-in. Please use "Login with Google" instead.')
+            
+            try:
+                password_valid = user.check_password(password)
+            except Exception as pwd_error:
+                print(f"❌ Password check error: {str(pwd_error)}")
+                import traceback
+                traceback.print_exc()
+                return render_template('login.html', error='Error verifying password. Please try again.')
+            
+            if password_valid:
+                try:
+                    login_user(user)
+                    # Make session permanent to survive OAuth redirects
+                    session.permanent = True
+                    # Store user ID in session for additional verification
+                    session['user_id'] = user.id
+                    session['username'] = user.username
+                    print(f"✅ Login successful - User: {username} (ID: {user.id})")
+                    
+                    # Check for 'next' parameter to redirect after login
+                    next_url = request.args.get('next') or request.form.get('next')
+                    if next_url:
+                        # Validate next_url to prevent open redirects
+                        from urllib.parse import urlparse
+                        parsed = urlparse(next_url)
+                        if parsed.netloc == '' or parsed.netloc == request.host:
+                            return redirect(next_url)
+                    
+                    # Check for OAuth error in session
+                    oauth_error = session.pop('oauth_error', None)
+                    oauth_error_message = session.pop('oauth_error_message', None)
+                    if oauth_error:
+                        # Redirect to connect_gmail with error message
+                        error_param = f'?error={oauth_error}'
+                        if oauth_error_message:
+                            from urllib.parse import quote
+                            error_param += f'&message={quote(oauth_error_message)}'
+                        return redirect(url_for('connect_gmail') + error_param)
+                    
+                    return redirect(url_for('dashboard'))
+                except Exception as login_error:
+                    print(f"❌ Error during login_user: {str(login_error)}")
+                    import traceback
+                    traceback.print_exc()
+                    return render_template('login.html', error='Login error. Please try again.')
+            else:
+                print(f"❌ Login failed - Invalid password for user: {username}")
+                return render_template('login.html', error='Invalid username or password')
+    except Exception as e:
+        print(f"❌ Unexpected error in login route: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return render_template('login.html', error='An unexpected error occurred. Please try again.')
     
     # GET request - check for error messages from query parameters or session
     error = request.args.get('error')
