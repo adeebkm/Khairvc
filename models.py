@@ -52,7 +52,13 @@ class User(UserMixin, db.Model):
     
     def check_password(self, password):
         """Check password"""
-        return check_password_hash(self.password_hash, password)
+        if not self.password_hash:
+            return False  # OAuth users don't have passwords
+        try:
+            return check_password_hash(self.password_hash, password)
+        except Exception as e:
+            print(f"❌ Error checking password for user {self.username}: {str(e)}")
+            return False
     
     def __repr__(self):
         return f'<User {self.username}>'
