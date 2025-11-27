@@ -1060,42 +1060,16 @@ def oauth2callback():
         if not auth_code:
             return "No authorization code in callback URL", 400
         
-        # Check if redirect_uri matches - if not, skip flow.fetch_token() to avoid consuming the code
-        redirect_uri_mismatch = redirect_uri.strip().rstrip('/') != redirect_uri_for_exchange.strip().rstrip('/')
+        # CRITICAL: Always use manual token exchange to avoid code consumption issues
+        # flow.fetch_token() can consume the code even when it fails (e.g., scope mismatches)
+        # Manual exchange gives us better control and error handling
+        print(f"🔄 Using manual token exchange (skipping flow.fetch_token() to prevent code consumption)")
         
         creds = None
         
-        # Only try flow.fetch_token() if redirect_uri matches (to avoid consuming code with wrong URI)
-        if not redirect_uri_mismatch:
-            try:
-                flow.fetch_token(authorization_response=callback_url)
-                creds = flow.credentials
-                print(f"✅ Successfully obtained token via flow.fetch_token()")
-            except Exception as token_error:
-                error_str = str(token_error)
-                print(f"⚠️  Token fetch error: {error_str}")
-                # If flow.fetch_token() fails with invalid_grant, the code is likely already consumed
-                if 'invalid_grant' in error_str.lower():
-                    print(f"❌ Invalid grant from flow.fetch_token() - code may be consumed")
-                    print(f"   This usually means the code was already used or expired")
-                    session.pop('oauth_state', None)
-                    session.pop('from_signup', None)
-                    if current_user.is_authenticated:
-                        return redirect(url_for('dashboard') + '?oauth_error=invalid_grant&message=Please try reconnecting Gmail. The authorization may have expired.')
-                    else:
-                        session['oauth_error'] = 'invalid_grant'
-                        session['oauth_error_message'] = 'OAuth authorization failed. Please log in and try connecting Gmail again.'
-                        return redirect(url_for('login') + '?next=' + url_for('connect_gmail'))
-                # For other errors, try manual exchange
-                print(f"   Attempting manual token exchange...")
-        else:
-            print(f"⚠️  Redirect URI mismatch detected - skipping flow.fetch_token()")
-            print(f"   Env redirect_uri: {redirect_uri}")
-            print(f"   Callback redirect_uri: {redirect_uri_for_exchange}")
-            print(f"   Using manual token exchange to avoid consuming code with wrong URI")
-        
-        # If we don't have credentials yet, try manual token exchange
-        if not creds:
+        # Always use manual token exchange for better control
+        # This prevents the authorization code from being consumed by flow.fetch_token()
+        # when there are scope mismatches or other issues
             print(f"🔄 Attempting manual token exchange...")
             client_id = credentials_data['installed']['client_id']
             client_secret = credentials_data['installed']['client_secret']
