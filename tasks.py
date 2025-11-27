@@ -1403,15 +1403,19 @@ def send_delayed_auto_reply(user_id, deal_id, sender_email, reply_subject, reply
     
     try:
         with app.app_context():
-            # Get classification - reply_sent is already True (set when scheduling to prevent duplicates)
-            # We still need to check if user manually replied in the meantime
+            # Get classification
             classification = EmailClassification.query.get(classification_id)
             if not classification:
                 print(f"⚠️  [AUTO-REPLY] Classification {classification_id} not found, skipping auto-reply")
                 return {'status': 'skipped', 'reason': 'Classification not found'}
             
-            # Check if user manually replied since we scheduled this auto-reply
-            # by checking if any message in the thread was sent by the user
+            # CRITICAL: Check if reply was already sent (prevents duplicate auto-replies)
+            # This can happen if the same email gets processed multiple times or if multiple tasks are scheduled
+            if classification.reply_sent:
+                print(f"⏭️  [AUTO-REPLY] Reply already sent for classification {classification_id} (deal {deal_id}), skipping duplicate auto-reply")
+                return {'status': 'skipped', 'reason': 'Reply already sent'}
+            
+            # Get user
             user = User.query.get(user_id)
             if not user or not user.gmail_token:
                 print(f"⚠️  [AUTO-REPLY] User {user_id} or Gmail token not found")
@@ -1441,7 +1445,12 @@ def send_delayed_auto_reply(user_id, deal_id, sender_email, reply_subject, reply
                 # Continue anyway - try to send auto-reply
             
             if has_manual_reply:
-                # User already replied, don't send auto-reply
+                # User already replied, mark as sent and don't send auto-reply
+                try:
+                    classification.reply_sent = True
+                    db.session.commit()
+                except Exception as mark_error:
+                    print(f"⚠️  [AUTO-REPLY] Failed to mark reply_sent for classification {classification_id}: {str(mark_error)}")
                 return {'status': 'skipped', 'reason': 'User manually replied'}
             
             # Get user's selected signature email preference
@@ -1459,10 +1468,22 @@ def send_delayed_auto_reply(user_id, deal_id, sender_email, reply_subject, reply
             
             if success:
                 print(f"✅ [AUTO-REPLY] Auto-reply sent successfully for deal {deal_id}")
-                # reply_sent is already True (set when scheduling to prevent duplicates), so no need to update it
+                # Mark reply_sent to prevent duplicate sends
+                try:
+                    classification.reply_sent = True
+                    db.session.commit()
+                    print(f"✅ [AUTO-REPLY] Marked classification {classification_id} as reply_sent=True")
+                except Exception as mark_error:
+                    print(f"⚠️  [AUTO-REPLY] Failed to mark auto-reply as sent for deal {deal_id}: {str(mark_error)}")
                 return {'status': 'success', 'deal_id': deal_id}
             else:
                 print(f"⚠️  [AUTO-REPLY] Failed to send auto-reply for deal {deal_id}")
+                # If send failed, reset reply_sent flag so it can be retried
+                try:
+                    classification.reply_sent = False
+                    db.session.commit()
+                except Exception as mark_error:
+                    print(f"⚠️  [AUTO-REPLY] Failed to reset reply_sent flag for deal {deal_id}: {str(mark_error)}")
                 return {'status': 'error', 'error': 'Failed to send email'}
                 
     except Exception as e:
