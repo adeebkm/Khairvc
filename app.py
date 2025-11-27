@@ -1070,61 +1070,61 @@ def oauth2callback():
         # Always use manual token exchange for better control
         # This prevents the authorization code from being consumed by flow.fetch_token()
         # when there are scope mismatches or other issues
-            print(f"🔄 Attempting manual token exchange...")
-            client_id = credentials_data['installed']['client_id']
-            client_secret = credentials_data['installed']['client_secret']
+        print(f"🔄 Attempting manual token exchange...")
+        client_id = credentials_data['installed']['client_id']
+        client_secret = credentials_data['installed']['client_secret']
+        
+        token_url = 'https://oauth2.googleapis.com/token'
+        token_data = {
+            'code': auth_code,
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'redirect_uri': redirect_uri_for_exchange,  # Use actual redirect URI from callback
+            'grant_type': 'authorization_code'
+        }
+        
+        print(f"🔍 Token exchange - Using redirect_uri: {redirect_uri_for_exchange}")
+        response = requests.post(token_url, data=token_data)
+        token_response = response.json()
+        
+        if 'error' in token_response:
+            error_msg = token_response.get('error_description', token_response.get('error', 'Unknown error'))
+            error_code = token_response.get('error', '')
+            print(f"❌ Token exchange error: {error_msg}")
+            print(f"   Error code: {error_code}")
+            print(f"   Full response: {token_response}")
             
-            token_url = 'https://oauth2.googleapis.com/token'
-            token_data = {
-                'code': auth_code,
-                'client_id': client_id,
-                'client_secret': client_secret,
-                'redirect_uri': redirect_uri_for_exchange,  # Use actual redirect URI from callback
-                'grant_type': 'authorization_code'
-            }
+            # Handle invalid_grant - usually means auth code expired or was already used
+            if error_code == 'invalid_grant':
+                print(f"⚠️  Invalid grant error - authorization code may have expired or been used")
+                print(f"   This can happen if:")
+                print(f"   - The OAuth flow took too long (codes expire in ~10 minutes)")
+                print(f"   - The authorization code was already used")
+                print(f"   - The redirect_uri doesn't match exactly")
+                print(f"   - Scope mismatch (scopes changed)")
+                print(f"   Redirecting user to reconnect Gmail...")
+                session.pop('oauth_state', None)
+                session.pop('from_signup', None)
+                if current_user.is_authenticated:
+                    return redirect(url_for('dashboard') + '?oauth_error=invalid_grant&message=Please try reconnecting Gmail. The authorization may have expired.')
+                else:
+                    session['oauth_error'] = 'invalid_grant'
+                    session['oauth_error_message'] = 'OAuth authorization failed. Please log in and try connecting Gmail again.'
+                    return redirect(url_for('login') + '?next=' + url_for('connect_gmail'))
             
-            print(f"🔍 Token exchange - Using redirect_uri: {redirect_uri_for_exchange}")
-            response = requests.post(token_url, data=token_data)
-            token_response = response.json()
-            
-            if 'error' in token_response:
-                error_msg = token_response.get('error_description', token_response.get('error', 'Unknown error'))
-                error_code = token_response.get('error', '')
-                print(f"❌ Token exchange error: {error_msg}")
-                print(f"   Error code: {error_code}")
-                print(f"   Full response: {token_response}")
-                
-                # Handle invalid_grant - usually means auth code expired or was already used
-                if error_code == 'invalid_grant':
-                    print(f"⚠️  Invalid grant error - authorization code may have expired or been used")
-                    print(f"   This can happen if:")
-                    print(f"   - The OAuth flow took too long (codes expire in ~10 minutes)")
-                    print(f"   - The authorization code was already used")
-                    print(f"   - The redirect_uri doesn't match exactly")
-                    print(f"   - Scope mismatch (scopes changed)")
-                    print(f"   Redirecting user to reconnect Gmail...")
-                    session.pop('oauth_state', None)
-                    session.pop('from_signup', None)
-                    if current_user.is_authenticated:
-                        return redirect(url_for('dashboard') + '?oauth_error=invalid_grant&message=Please try reconnecting Gmail. The authorization may have expired.')
-                    else:
-                        session['oauth_error'] = 'invalid_grant'
-                        session['oauth_error_message'] = 'OAuth authorization failed. Please log in and try connecting Gmail again.'
-                        return redirect(url_for('login') + '?next=' + url_for('connect_gmail'))
-                
-                raise Exception(f"Token exchange failed: {error_msg}")
-            
-            # Create credentials from token response
-            from google.oauth2.credentials import Credentials
-            creds = Credentials(
-                token=token_response['access_token'],
-                refresh_token=token_response.get('refresh_token'),
-                token_uri='https://oauth2.googleapis.com/token',
-                client_id=client_id,
-                client_secret=client_secret,
-                scopes=token_response.get('scope', '').split() if 'scope' in token_response else SCOPES
-            )
-            print(f"✅ Successfully obtained token via manual exchange")
+            raise Exception(f"Token exchange failed: {error_msg}")
+        
+        # Create credentials from token response
+        from google.oauth2.credentials import Credentials
+        creds = Credentials(
+            token=token_response['access_token'],
+            refresh_token=token_response.get('refresh_token'),
+            token_uri='https://oauth2.googleapis.com/token',
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=token_response.get('scope', '').split() if 'scope' in token_response else SCOPES
+        )
+        print(f"✅ Successfully obtained token via manual exchange")
         
         # Now we have creds, continue with the rest of the flow
         if not creds:
