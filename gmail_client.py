@@ -1089,7 +1089,20 @@ class GmailClient:
             print(f"✅ Fetched {len(thread_emails)} messages from thread with 1 API call (no extra calls)")
             return thread_emails
         
+        except HttpError as e:
+            # Handle 404 errors gracefully (thread was deleted)
+            if e.resp.status == 404:
+                # Thread not found - likely deleted, silently return empty list
+                return []
+            else:
+                print(f"Error fetching thread messages: {str(e)}")
+                return []
         except Exception as e:
+            error_str = str(e)
+            # Check if it's a 404 error
+            if '404' in error_str or 'notFound' in error_str or 'not found' in error_str.lower():
+                # Thread not found - likely deleted, silently return empty list
+                return []
             print(f"Error fetching thread messages: {str(e)}")
             return []
     
@@ -1465,27 +1478,49 @@ class GmailClient:
         if not PDF_AVAILABLE:
             return None
         
+        # Suppress stderr during PDF parsing to hide FloatObject warnings from PyPDF2
+        import sys
+        import contextlib
+        
+        @contextlib.contextmanager
+        def suppress_stderr():
+            """Context manager to suppress stderr output"""
+            with open(os.devnull, 'w') as devnull:
+                old_stderr = sys.stderr
+                try:
+                    sys.stderr = devnull
+                    yield
+                finally:
+                    sys.stderr = old_stderr
+        
         try:
             pdf_file = io.BytesIO(file_data)
             
-            # Try to read PDF with strict=False to handle malformed PDFs
-            try:
-                pdf_reader = PyPDF2.PdfReader(pdf_file, strict=False)
-            except Exception as read_error:
-                # If strict=False doesn't work, try with strict=True as fallback
+            # Suppress stderr during PDF reading (PyPDF2 prints FloatObject errors to stderr)
+            with suppress_stderr():
+                # Try to read PDF with strict=False to handle malformed PDFs
                 try:
-                    pdf_file.seek(0)  # Reset file pointer
-                    pdf_reader = PyPDF2.PdfReader(pdf_file, strict=True)
-                except Exception as fallback_error:
-                    print(f"⚠️  Could not initialize PDF reader for {filename}: {str(fallback_error)}")
-                    return None
+                    pdf_reader = PyPDF2.PdfReader(pdf_file, strict=False)
+                except Exception as read_error:
+                    # If strict=False doesn't work, try with strict=True as fallback
+                    try:
+                        pdf_file.seek(0)  # Reset file pointer
+                        pdf_reader = PyPDF2.PdfReader(pdf_file, strict=True)
+                    except Exception as fallback_error:
+                        # Only log if it's not a FloatObject error
+                        error_str = str(fallback_error)
+                        if 'FloatObject' not in error_str:
+                            print(f"⚠️  Could not initialize PDF reader for {filename}: {error_str[:200]}")
+                        return None
             
             text_parts = []
             
             # Extract text from each page with individual error handling
             for page_num, page in enumerate(pdf_reader.pages):
                 try:
-                    page_text = page.extract_text()
+                    # Suppress stderr during page extraction
+                    with suppress_stderr():
+                        page_text = page.extract_text()
                     if page_text:
                         text_parts.append(page_text)
                 except Exception as page_error:
