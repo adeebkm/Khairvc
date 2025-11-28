@@ -24,9 +24,9 @@ export default function Navbar() {
         </div>
 
         {/* Login Button */}
-        <button className="px-5 py-2 text-sm font-medium text-white/80 hover:text-white transition-colors duration-200 hover:bg-surface-hover rounded-lg">
+        <a href="/login" className="px-5 py-2 text-sm font-medium text-white/80 hover:text-white transition-colors duration-200 hover:bg-surface-hover rounded-lg">
           Log In
-        </button>
+        </a>
       </div>
     </motion.nav>
   )
