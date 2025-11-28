@@ -103,6 +103,114 @@ function clearEmailCache() {
         console.error('Error clearing email cache:', error);
     }
 }
+
+// ==================== SENT EMAILS INDEXEDDB CACHE ====================
+const SENT_CACHE_DB = 'gmail_sent_emails';
+const SENT_CACHE_STORE = 'sent';
+const SENT_CACHE_VERSION = 1;
+const SENT_CACHE_MAX_AGE = 3600000; // 1 hour in milliseconds
+
+let sentEmailsCacheDB = null;
+
+async function initSentEmailsCache() {
+    return new Promise((resolve, reject) => {
+        try {
+            const request = indexedDB.open(SENT_CACHE_DB, SENT_CACHE_VERSION);
+            
+            request.onerror = () => {
+                console.error('Error opening sent emails cache:', request.error);
+                reject(request.error);
+            };
+            
+            request.onsuccess = () => {
+                sentEmailsCacheDB = request.result;
+                console.log('✅ Sent emails cache initialized');
+                resolve();
+            };
+            
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(SENT_CACHE_STORE)) {
+                    const store = db.createObjectStore(SENT_CACHE_STORE, { keyPath: 'user_id' });
+                    store.createIndex('timestamp', 'timestamp', { unique: false });
+                    console.log('✅ Created sent emails cache store');
+                }
+            };
+        } catch (error) {
+            console.error('Error initializing sent emails cache:', error);
+            reject(error);
+        }
+    });
+}
+
+async function getCachedSentEmails(userId) {
+    if (!sentEmailsCacheDB) {
+        console.warn('Sent emails cache DB not initialized');
+        return null;
+    }
+    
+    return new Promise((resolve) => {
+        try {
+            const tx = sentEmailsCacheDB.transaction(SENT_CACHE_STORE, 'readonly');
+            const store = tx.objectStore(SENT_CACHE_STORE);
+            const request = store.get(userId);
+            
+            request.onsuccess = () => {
+                const data = request.result;
+                if (data && Date.now() - data.timestamp < SENT_CACHE_MAX_AGE) {
+                    console.log(`📧 Loaded ${data.emails.length} sent emails from IndexedDB cache`);
+                    resolve(data.emails);
+                } else {
+                    if (data) {
+                        console.log('📧 Sent emails cache expired, will fetch fresh data');
+                    }
+                    resolve(null);
+                }
+            };
+            
+            request.onerror = () => {
+                console.warn('Error reading sent emails from cache:', request.error);
+                resolve(null);
+            };
+        } catch (error) {
+            console.error('Error getting cached sent emails:', error);
+            resolve(null);
+        }
+    });
+}
+
+async function cacheSentEmails(userId, emails) {
+    if (!sentEmailsCacheDB) {
+        console.warn('Sent emails cache DB not initialized, skipping cache');
+        return;
+    }
+    
+    try {
+        const tx = sentEmailsCacheDB.transaction(SENT_CACHE_STORE, 'readwrite');
+        const store = tx.objectStore(SENT_CACHE_STORE);
+        store.put({ 
+            user_id: userId, 
+            emails, 
+            timestamp: Date.now() 
+        });
+        console.log(`✅ Cached ${emails.length} sent emails in IndexedDB`);
+    } catch (error) {
+        console.error('Error caching sent emails:', error);
+    }
+}
+
+async function clearSentEmailsCache() {
+    if (!sentEmailsCacheDB) return;
+    
+    try {
+        const tx = sentEmailsCacheDB.transaction(SENT_CACHE_STORE, 'readwrite');
+        const store = tx.objectStore(SENT_CACHE_STORE);
+        store.clear();
+        console.log('✅ Cleared sent emails cache');
+    } catch (error) {
+        console.error('Error clearing sent emails cache:', error);
+    }
+}
 // Auto-fetch polling
 let autoFetchInterval = null;
 let autoFetchEnabled = false;
@@ -387,7 +495,10 @@ let setupProgressPoller = null;
 let setupTimerInterval = null;
 
 async function startSetup() {
-    console.log('🚀 Starting intelligent setup...');
+    console.log('🚀 === SETUP STARTED ===');
+    console.log('🚀 Timestamp:', new Date().toISOString());
+    console.log('🚀 User ID:', document.body.dataset.userId);
+    console.log('🚀 Username:', document.body.dataset.username);
     
     const setupScreen = document.getElementById('setupScreen');
     const progressBar = document.getElementById('setupProgressBar');
@@ -396,20 +507,38 @@ async function startSetup() {
     const timerSeconds = document.getElementById('timerSeconds');
     const motivationalQuote = document.getElementById('motivationalQuote');
     
+    console.log('🚀 Setup elements:', {
+        setupScreen: setupScreen ? 'FOUND' : 'NOT FOUND',
+        progressBar: progressBar ? 'FOUND' : 'NOT FOUND',
+        progressText: progressText ? 'FOUND' : 'NOT FOUND',
+        timerMinutes: timerMinutes ? 'FOUND' : 'NOT FOUND',
+        timerSeconds: timerSeconds ? 'FOUND' : 'NOT FOUND',
+        motivationalQuote: motivationalQuote ? 'FOUND' : 'NOT FOUND'
+    });
+    
     if (!setupScreen) {
-        console.error('Setup screen not found');
+        console.error('❌ Setup screen element not found - cannot continue');
         return;
     }
     
+    console.log('✅ All setup elements found, proceeding...');
+    
     try {
         // STEP 1: Check inbox size first
+        console.log('📊 STEP 1: Checking inbox size...');
         progressText.textContent = 'Analyzing your inbox...';
         progressBar.style.width = '5%';
         
+        console.log('📊 Calling /api/setup/check-inbox-size...');
         const sizeResponse = await fetch('/api/setup/check-inbox-size');
+        console.log('📊 Response status:', sizeResponse.status);
+        console.log('📊 Response ok:', sizeResponse.ok);
+        
         const sizeData = await sizeResponse.json();
+        console.log('📊 Size data:', sizeData);
         
         if (!sizeData.success) {
+            console.error('❌ Failed to check inbox size:', sizeData);
             throw new Error('Failed to check inbox size');
         }
         
@@ -417,36 +546,53 @@ async function startSetup() {
         const emailsToFetch = sizeData.emails_to_fetch;
         const estimatedSeconds = sizeData.estimated_seconds;
         
-        console.log(`📊 Inbox has ${totalEmails} emails, fetching ${emailsToFetch}, ETA: ${Math.floor(estimatedSeconds/60)} minutes`);
+        console.log('📊 ✅ Inbox analysis complete:');
+        console.log(`   - Total emails in inbox: ${totalEmails}`);
+        console.log(`   - Emails to fetch: ${emailsToFetch}`);
+        console.log(`   - Estimated time: ${Math.floor(estimatedSeconds/60)} minutes (${estimatedSeconds} seconds)`);
         
         // STEP 2: Start fetching emails
+        console.log('📧 STEP 2: Starting email fetch...');
         progressText.textContent = `Fetching ${emailsToFetch} emails from your inbox...`;
         progressBar.style.width = '10%';
         
+        console.log('📧 Calling /api/setup/fetch-initial...');
         const fetchResponse = await fetch('/api/setup/fetch-initial', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
+        console.log('📧 Fetch response status:', fetchResponse.status);
         
         const fetchData = await fetchResponse.json();
+        console.log('📧 Fetch data:', fetchData);
         
         if (fetchData.already_complete) {
             // Setup already done
-            console.log('✅ Setup already complete, showing inbox');
+            console.log('✅ Setup already complete, showing inbox immediately');
             await completeSetupImmediately(setupScreen, progressBar, progressText);
             return;
         }
         
+        console.log('✅ Email fetch initiated successfully');
+        
         // STEP 3: Start adaptive countdown timer
+        console.log('⏱️  STEP 3: Starting adaptive timer...');
         startAdaptiveTimer(estimatedSeconds, emailsToFetch, setupScreen, progressBar, progressText, timerMinutes, timerSeconds, motivationalQuote);
         
         // STEP 4: Start real-time progress polling
+        console.log('🔄 STEP 4: Starting progress polling...');
         startProgressPolling(progressBar, progressText, emailsToFetch);
         
+        console.log('🚀 === SETUP INITIALIZATION COMPLETE ===');
+        
     } catch (error) {
-        console.error('❌ Setup error:', error);
+        console.error('❌ === SETUP ERROR ===');
+        console.error('❌ Error type:', error.name);
+        console.error('❌ Error message:', error.message);
+        console.error('❌ Error stack:', error.stack);
         progressText.textContent = `Error: ${error.message}. Retrying...`;
         // Retry after 3 seconds
+        console.log('⏳ Retrying setup in 3 seconds...');
         setTimeout(() => startSetup(), 3000);
     }
 }
@@ -1148,10 +1294,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Initialize IndexedDB thread cache and pre-fetching
     try {
         await initThreadCache();
+        await initSentEmailsCache();  // Initialize sent emails cache
         await cleanupOldThreads();
         initThreadPrefetching();
     } catch (error) {
-        console.error('Error initializing cache:', error);
+        console.error('Error initializing caches:', error);
     }
     
     // Initialize sidebar state
@@ -2044,7 +2191,34 @@ async function fetchStarredEmails() {
 async function fetchSentEmails() {
     try {
         console.log('📤 [FRONTEND] Fetching sent emails...');
-        console.log('📤 [FRONTEND] Calling /api/sent-emails?max=100');
+        
+        // Get user ID for cache
+        const userId = document.body.dataset.userId;
+        
+        // Check IndexedDB cache first
+        if (userId) {
+            const cached = await getCachedSentEmails(userId);
+            if (cached && cached.length > 0) {
+                console.log(`📧 Loaded ${cached.length} sent emails from IndexedDB cache (skipping API call)`);
+                sentEmailsCache = cached;
+                
+                // Update UI if on sent tab
+                if (currentTab === 'sent') {
+                    applyFilters();
+                    const emailCountEl = document.getElementById('emailCount');
+                    if (emailCountEl) {
+                        const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                        emailCountEl.textContent = `${cached.length} sent email${cached.length !== 1 ? 's' : ''}${searchText}`;
+                    }
+                    if (cached.length > 0) {
+                        displayEmails(filteredEmails.length > 0 ? filteredEmails : cached);
+                    }
+                }
+                return; // Exit early - no API call needed
+            }
+        }
+        
+        console.log('📤 [FRONTEND] No cache found, calling /api/sent-emails?max=100');
         
         const response = await fetch(`/api/sent-emails?max=100`);
         
@@ -2089,9 +2263,14 @@ async function fetchSentEmails() {
                 });
             }
             
-            // Update cache (both memory and localStorage)
+            // Update cache (memory, localStorage, and IndexedDB)
             sentEmailsCache = sentEmails;
             saveSentCacheToStorage();
+            
+            // Cache in IndexedDB
+            if (userId) {
+                await cacheSentEmails(userId, sentEmails);
+            }
             
             // Only update UI if we're still on the sent tab
             if (currentTab === 'sent') {
@@ -7065,8 +7244,9 @@ function handleLogout(event) {
         // 3. Clear IndexedDB (don't wait for it - do it in background)
         try {
             if (typeof indexedDB !== 'undefined' && indexedDB.deleteDatabase) {
-                console.log('🗑️  Deleting IndexedDB...');
+                console.log('🗑️  Deleting IndexedDB databases...');
                 indexedDB.deleteDatabase('gmail_threads');
+                indexedDB.deleteDatabase('gmail_sent_emails');
             }
         } catch (e) {
             console.warn('Could not delete IndexedDB:', e);
@@ -7112,7 +7292,7 @@ function handleLogout(event) {
     return false;
 }
 
-// Close dropdown when clicking outside
+![1764306122923](image/app/1764306122923.png)// Close dropdown when clicking outside
 document.addEventListener('click', function(event) {
     const dropdown = document.getElementById('userDropdownMenu');
     const userMenu = document.querySelector('.nav-user-menu');

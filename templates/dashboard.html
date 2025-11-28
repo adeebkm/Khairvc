@@ -940,8 +940,8 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/cache.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/cache.js') }}?v={{ cache_bust_timestamp }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}?v={{ cache_bust_timestamp }}"></script>
 </body>
 </html>
 

@@ -6,6 +6,7 @@ Each user manages their own Gmail account with complete privacy
 import os
 import json
 import requests
+import time
 from threading import Semaphore
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session, send_file, Response, stream_with_context
 from werkzeug.utils import secure_filename
@@ -903,7 +904,10 @@ def dashboard():
     # Check if setup is needed (first-time user with Gmail connected but setup not completed)
     needs_setup = has_gmail and not current_user.setup_completed
     
-    return render_template('dashboard.html', has_gmail=has_gmail, gmail_email=gmail_email, needs_setup=needs_setup, setup_completed=current_user.setup_completed)
+    # Add cache-busting timestamp for JavaScript
+    cache_bust = int(time.time())
+    
+    return render_template('dashboard.html', has_gmail=has_gmail, gmail_email=gmail_email, needs_setup=needs_setup, setup_completed=current_user.setup_completed, cache_bust_timestamp=cache_bust)
 
 
 # ==================== GMAIL CONNECTION ====================
