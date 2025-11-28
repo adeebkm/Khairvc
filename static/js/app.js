@@ -7292,7 +7292,7 @@ function handleLogout(event) {
     return false;
 }
 
-![1764306122923](image/app/1764306122923.png)// Close dropdown when clicking outside
+// Close dropdown when clicking outside
 document.addEventListener('click', function(event) {
     const dropdown = document.getElementById('userDropdownMenu');
     const userMenu = document.querySelector('.nav-user-menu');
