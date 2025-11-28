@@ -483,8 +483,20 @@ def index():
 @app.route('/app')
 def app_redirect():
     """Redirect to dashboard if logged in, otherwise to login"""
+    # SECURITY: Double-check authentication and verify session matches
     if current_user.is_authenticated:
+        # Verify session user_id matches current_user (prevent session hijacking)
+        if 'user_id' in session:
+            if session['user_id'] != current_user.id:
+                print(f"⚠️  SESSION MISMATCH in /app route! Session user_id={session.get('user_id')}, current_user.id={current_user.id}")
+                logout_user()
+                session.clear()
+                session.modified = True
+                return redirect(url_for('login'))
         return redirect(url_for('dashboard'))
+    # Not authenticated - clear any stale session data
+    session.clear()
+    session.modified = True
     return redirect(url_for('login'))
 
 
@@ -701,10 +713,29 @@ def signup():
 @app.route('/logout')
 @login_required
 def logout():
-    """User logout"""
+    """User logout - completely clear session and cookies"""
+    user_id = current_user.id if current_user.is_authenticated else None
+    username = current_user.username if current_user.is_authenticated else None
+    
+    # Logout user (clears Flask-Login session)
     logout_user()
-    session.clear()  # Clear all session data to prevent session reuse
-    return redirect(url_for('index'))
+    
+    # Clear all session data
+    session.clear()
+    
+    # Explicitly mark session as modified to ensure cookie is deleted
+    session.modified = True
+    
+    # Clear any remaining session cookies by setting them to expire
+    from flask import make_response
+    response = make_response(redirect(url_for('index')))
+    
+    # Delete session cookie
+    response.set_cookie('session', '', expires=0, max_age=0, path='/', domain=None)
+    
+    print(f"✅ User {user_id} ({username}) logged out - session and cookies cleared")
+    
+    return response
 
 
 # ==================== DASHBOARD ====================
@@ -1581,15 +1612,34 @@ def get_emails():
         else:
             print("📂 Loading all classified emails from database...")
 
+        # SECURITY: Verify user is authenticated and get user_id
+        if not current_user.is_authenticated:
+            print(f"⚠️  [SECURITY] Unauthenticated user attempted to access emails")
+            logout_user()
+            session.clear()
+            return jsonify({'error': 'User session expired. Please log in again.'}), 401
+        
         # Check if user still exists (may have been deleted)
         try:
             user_id = current_user.id
+            username = current_user.username
         except (AttributeError, Exception) as e:
             # User has been deleted or session is invalid
             print(f"⚠️  User session invalid or user deleted: {e}")
             logout_user()
+            session.clear()
             return jsonify({'error': 'User session expired. Please log in again.'}), 401
-
+        
+        # SECURITY: Verify session user_id matches current_user.id (prevent session hijacking)
+        if 'user_id' in session and session['user_id'] != user_id:
+            print(f"⚠️  [SECURITY] SESSION MISMATCH in get_emails! Session user_id={session.get('user_id')}, current_user.id={user_id}")
+            logout_user()
+            session.clear()
+            return jsonify({'error': 'Session mismatch detected. Please log in again.'}), 401
+        
+        # Log user_id for debugging (helps identify cross-user issues)
+        print(f"🔒 [SECURITY] Loading emails for user_id={user_id} (username={username})")
+        
         print(f"   (Ignoring 'unread_only' filter - database doesn't track read status)")
         query = EmailClassification.query.filter_by(user_id=user_id)
 
