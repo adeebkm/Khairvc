@@ -5147,25 +5147,31 @@ def delete_user_account():
     - Deal flow data
     """
     try:
+        from models import ScheduledEmail
+        
         user_id = current_user.id
         user_email = current_user.email
         
         print(f"🗑️  Deleting account for user {user_id} ({user_email})")
         
-        # Delete all associated data (cascades will handle most of this, but being explicit)
-        # 1. Delete deals
+        # Delete all associated data in the correct order (respecting foreign key constraints)
+        # 1. Delete scheduled emails (references deals, so must be deleted first)
+        scheduled_count = ScheduledEmail.query.filter_by(user_id=user_id).delete()
+        print(f"   Deleted {scheduled_count} scheduled emails")
+        
+        # 2. Delete deals (can now be deleted safely)
         deals_count = Deal.query.filter_by(user_id=user_id).delete()
         print(f"   Deleted {deals_count} deal records")
         
-        # 2. Delete email classifications
+        # 3. Delete email classifications
         classifications_count = EmailClassification.query.filter_by(user_id=user_id).delete()
         print(f"   Deleted {classifications_count} email classifications")
         
-        # 3. Delete Gmail token
+        # 4. Delete Gmail token
         token_count = GmailToken.query.filter_by(user_id=user_id).delete()
         print(f"   Deleted {token_count} Gmail token")
         
-        # 4. Finally, delete the user
+        # 5. Finally, delete the user
         user = User.query.get(user_id)
         if user:
             db.session.delete(user)
