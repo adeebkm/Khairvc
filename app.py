@@ -100,9 +100,17 @@ login_manager.login_message = 'Please log in to access this page.'
 def clear_problematic_session_data():
     """Clear any non-serializable objects from session before each request"""
     try:
+        # SECURITY: On login page, force clear any stale authentication
+        # This prevents auto-login from stale session cookies
+        if request.endpoint == 'login' and current_user.is_authenticated:
+            print(f"⚠️  [SECURITY] Stale authentication detected on login page - forcing logout")
+            logout_user()
+            session.clear()
+            session.modified = True
+        
         # SECURITY: Verify authenticated users have matching session user_id
         # This prevents cross-user authentication if session is corrupted
-        if current_user.is_authenticated:
+        elif current_user.is_authenticated:
             if 'user_id' in session:
                 if session['user_id'] != current_user.id:
                     print(f"⚠️  [SECURITY] SESSION MISMATCH in before_request! Session user_id={session.get('user_id')}, current_user.id={current_user.id}")
