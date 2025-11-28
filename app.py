@@ -95,6 +95,18 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 login_manager.login_message = 'Please log in to access this page.'
 
+@login_manager.unauthorized_handler
+def handle_unauthorized():
+    """Handle unauthorized access - return JSON for API routes, redirect for pages"""
+    if request.path.startswith('/api/'):
+        return jsonify({
+            'success': False,
+            'error': 'Authentication required. Please log in.'
+        }), 401
+    # For non-API routes, redirect to login (default behavior)
+    from flask import redirect, url_for
+    return redirect(url_for('login'))
+
 
 # Error handler to catch session serialization errors and clear problematic session data
 @app.before_request
@@ -2797,7 +2809,10 @@ def get_starred_emails():
 @app.route('/api/sent-emails')
 @login_required
 def get_sent_emails():
-    """Get user's sent emails"""
+    """Get user's sent emails - always returns JSON"""
+    # Ensure we always return JSON, never HTML
+    from flask import make_response
+    
     if not current_user.gmail_token:
         return jsonify({
             'success': False,
