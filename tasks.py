@@ -1703,6 +1703,15 @@ def send_scheduled_emails():
                         # Continue anyway - try to send
                     
                     # Send the scheduled email
+                    # Validate thread_id is set
+                    if not scheduled_email.thread_id:
+                        print(f"❌ [SCHEDULED] Thread ID is missing for scheduled email {scheduled_email.id}, cannot send as reply")
+                        scheduled_email.status = 'failed'
+                        failed_count += 1
+                        db.session.commit()
+                        continue
+                    
+                    print(f"📧 [SCHEDULED] Sending scheduled email {scheduled_email.id} as reply to thread {scheduled_email.thread_id[:16]}...")
                     selected_email = user.gmail_token.selected_signature_email if user.gmail_token else None
                     success = gmail.send_reply(
                         to_email=scheduled_email.to_email,

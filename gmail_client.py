@@ -1654,16 +1654,26 @@ class GmailClient:
             send_message = {'raw': raw_message}
             if thread_id:
                 send_message['threadId'] = thread_id
+                print(f"📧 [SEND_REPLY] Sending reply with threadId: {thread_id[:16]}...")
+            else:
+                print(f"⚠️  [SEND_REPLY] WARNING: No thread_id provided, email will be sent as new thread!")
             
             result = self.service.users().messages().send(
                 userId='me',
                 body=send_message
             ).execute()
             
+            if thread_id:
+                print(f"✅ [SEND_REPLY] Reply sent successfully to thread {thread_id[:16]}...")
+            else:
+                print(f"✅ [SEND_REPLY] Email sent as new message (no thread_id)")
+            
             return True
         
         except Exception as e:
             print(f"Error sending reply: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def send_reply_with_attachments(self, to_email, subject, body, thread_id=None, attachments=None, send_as_email=None, cc=None, bcc=None):
