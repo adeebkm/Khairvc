@@ -699,32 +699,48 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
 <p>Looking forward to learning more about your venture.</p>
 <p>Best regards</p>"""
                                                 
-                                                # CRITICAL: Mark reply_sent IMMEDIATELY to prevent duplicate scheduling
-                                                # This prevents race conditions when multiple emails in same thread arrive quickly
-                                                new_classification.reply_sent = True
-                                                db.session.commit()
-                                                print(f"✅ [TASK] Marked classification {new_classification.id} as reply_sent=True to prevent duplicates")
-                                                
                                                 # Schedule delayed auto-reply (10 minutes = 600 seconds)
                                                 # Use ETA instead of countdown - ETA is stored in Redis and survives worker restarts
-                                                from celery_config import celery
-                                                # datetime and timedelta are already imported at module level
-                                                eta_time = datetime.utcnow() + timedelta(minutes=10)
-                                                celery.send_task(
-                                                    'tasks.send_delayed_auto_reply',
-                                                    args=[user_id, deal.id, sender_email, reply_subject, reply_body, email.get('thread_id', ''), new_classification.id],
-                                                    eta=eta_time  # Absolute time - survives worker restarts
-                                                )
-                                                print(f"📧 [TASK] Scheduled auto-reply for deal {deal.id} to {sender_email} (ETA: {eta_time.strftime('%H:%M:%S UTC')})")
+                                                # NOTE: We do NOT set reply_sent=True here - it will be set AFTER the email is actually sent
+                                                # Use Redis to prevent duplicate scheduling for the same thread
+                                                thread_id = email.get('thread_id', '')
+                                                auto_reply_lock_key = f"auto_reply_scheduled:{user_id}:{thread_id}"
+                                                
+                                                try:
+                                                    import redis
+                                                    redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+                                                    redis_client = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
+                                                    
+                                                    # Check if auto-reply already scheduled for this thread
+                                                    if redis_client.get(auto_reply_lock_key):
+                                                        print(f"⏭️  [TASK] Auto-reply already scheduled for thread {thread_id[:16]}..., skipping duplicate")
+                                                    else:
+                                                        # Set lock for 15 minutes (10 min delay + 5 min buffer)
+                                                        redis_client.setex(auto_reply_lock_key, 15 * 60, 'scheduled')
+                                                        
+                                                        from celery_config import celery
+                                                        # datetime and timedelta are already imported at module level
+                                                        eta_time = datetime.utcnow() + timedelta(minutes=10)
+                                                        celery.send_task(
+                                                            'tasks.send_delayed_auto_reply',
+                                                            args=[user_id, deal.id, sender_email, reply_subject, reply_body, thread_id, new_classification.id],
+                                                            eta=eta_time  # Absolute time - survives worker restarts
+                                                        )
+                                                        print(f"📧 [TASK] Scheduled auto-reply for deal {deal.id} to {sender_email} (ETA: {eta_time.strftime('%H:%M:%S UTC')})")
+                                                except Exception as redis_error:
+                                                    # If Redis fails, fall back to scheduling anyway (better to send duplicate than miss it)
+                                                    print(f"⚠️  [TASK] Redis check failed for auto-reply scheduling: {str(redis_error)}, proceeding anyway...")
+                                                    from celery_config import celery
+                                                    eta_time = datetime.utcnow() + timedelta(minutes=10)
+                                                    celery.send_task(
+                                                        'tasks.send_delayed_auto_reply',
+                                                        args=[user_id, deal.id, sender_email, reply_subject, reply_body, thread_id, new_classification.id],
+                                                        eta=eta_time
+                                                    )
+                                                    print(f"📧 [TASK] Scheduled auto-reply for deal {deal.id} to {sender_email} (ETA: {eta_time.strftime('%H:%M:%S UTC')})")
                                             except Exception as schedule_error:
                                                 error_msg = str(schedule_error)
                                                 print(f"❌ [TASK] Failed to schedule auto-reply for deal {deal.id}: {error_msg}")
-                                                # Rollback the reply_sent flag if scheduling failed
-                                                try:
-                                                    new_classification.reply_sent = False
-                                                    db.session.commit()
-                                                except:
-                                                    pass
                                                 import traceback
                                                 traceback.print_exc()
                                                 # Don't fail the whole task if scheduling fails
