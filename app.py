@@ -4547,25 +4547,26 @@ def check_inbox_size():
             maxResults=1  # We only need the count
         ).execute()
         
-        total_emails = inbox.get('resultSizeEstimate', 0)
+        inbox_total = inbox.get('resultSizeEstimate', 0)
         
-        # Calculate estimated time based on count
-        if total_emails <= 100:
+        # Cap at 200 (we only fetch first 200)
+        emails_to_fetch = min(inbox_total, 200)
+        
+        # Calculate estimated time based on emails_to_fetch (not total inbox)
+        # This is the ACTUAL number we'll process
+        if emails_to_fetch <= 100:
             estimated_minutes = 4
-        elif total_emails <= 150:
+        elif emails_to_fetch <= 150:
             estimated_minutes = 7
         else:
             estimated_minutes = 10
         
-        # Cap at 200 (we only fetch first 200)
-        emails_to_fetch = min(total_emails, 200)
-        
-        print(f"📊 Inbox size check: {total_emails} total, fetching {emails_to_fetch}, ETA: {estimated_minutes} min")
+        print(f"📊 Inbox size check: inbox_total={inbox_total}, fetching={emails_to_fetch}, ETA={estimated_minutes} min")
         
         return jsonify({
             'success': True,
-            'total_emails': total_emails,
-            'emails_to_fetch': emails_to_fetch,
+            'total_emails': inbox_total,  # Total in inbox (for display)
+            'emails_to_fetch': emails_to_fetch,  # Actual number we'll process (capped at 200)
             'estimated_minutes': estimated_minutes,
             'estimated_seconds': estimated_minutes * 60
         })
