@@ -1,6 +1,8 @@
 """
 Email Classification System for VC Categories
 Classifies emails into: Deal Flow, Networking, Hiring, Spam
+
+REQUIRES: AWS Lambda for secure email classification (no local OpenAI fallback)
 """
 import re
 import json
@@ -8,7 +10,7 @@ from typing import Dict, List, Tuple, Optional
 from openai import OpenAI
 import os
 
-# Try to import Lambda client (optional - falls back to OpenAI if not available)
+# Lambda client is REQUIRED for email classification (no OpenAI fallback for security)
 try:
     from lambda_client import LambdaClient
     LAMBDA_AVAILABLE = True
@@ -16,11 +18,13 @@ try:
 except ImportError as e:
     LAMBDA_AVAILABLE = False
     LambdaClient = None
-    print(f"⚠️  Lambda client module not available: {str(e)}")
+    print(f"❌ CRITICAL: Lambda client module not available: {str(e)}")
+    print(f"   Email classification will fail without Lambda. Please configure AWS Lambda.")
 except Exception as e:
     LAMBDA_AVAILABLE = False
     LambdaClient = None
-    print(f"⚠️  Error importing Lambda client: {str(e)}")
+    print(f"❌ CRITICAL: Error importing Lambda client: {str(e)}")
+    print(f"   Email classification will fail without Lambda. Please configure AWS Lambda.")
 
 
 # Category constants
@@ -45,7 +49,7 @@ TAG_GENERAL = "GEN/General"
 
 
 class EmailClassifier:
-    """Classify emails into VC categories using deterministic rules + OpenAI/Lambda"""
+    """Classify emails into VC categories using deterministic rules + AWS Lambda (REQUIRED)"""
     
     def __init__(self, openai_client=None):
         self.openai_client = openai_client
