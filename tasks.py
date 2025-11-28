@@ -708,7 +708,7 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                                 # Schedule delayed auto-reply (10 minutes = 600 seconds)
                                                 # Use ETA instead of countdown - ETA is stored in Redis and survives worker restarts
                                                 from celery_config import celery
-                                                from datetime import datetime, timedelta
+                                                # datetime and timedelta are already imported at module level
                                                 eta_time = datetime.utcnow() + timedelta(minutes=10)
                                                 celery.send_task(
                                                     'tasks.send_delayed_auto_reply',
