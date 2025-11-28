@@ -100,6 +100,17 @@ login_manager.login_message = 'Please log in to access this page.'
 def clear_problematic_session_data():
     """Clear any non-serializable objects from session before each request"""
     try:
+        # SECURITY: Verify authenticated users have matching session user_id
+        # This prevents cross-user authentication if session is corrupted
+        if current_user.is_authenticated:
+            if 'user_id' in session:
+                if session['user_id'] != current_user.id:
+                    print(f"⚠️  [SECURITY] SESSION MISMATCH in before_request! Session user_id={session.get('user_id')}, current_user.id={current_user.id}")
+                    logout_user()
+                    session.clear()
+                    session.modified = True
+                    # Don't redirect here - let the route handle it (some routes don't require auth)
+        
         # Check if session has any problematic keys
         keys_to_remove = []
         for key in list(session.keys()):
