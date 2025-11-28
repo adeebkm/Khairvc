@@ -1399,6 +1399,13 @@ document.addEventListener('DOMContentLoaded', async function() {
         const setupResponse = await fetch('/api/setup/status');
         const setupData = await setupResponse.json();
         if (setupData.success && setupData.setup_completed) {
+            // CRITICAL: Make contentArea visible (CSS starts at opacity: 0)
+            const contentArea = document.getElementById('contentArea');
+            if (contentArea) {
+                contentArea.style.display = 'flex';
+                contentArea.style.opacity = '1';
+            }
+            
             // Load emails first and wait for classification to complete
             console.log('📧 Setup complete, loading emails...');
             await loadEmailsFromDatabase();
