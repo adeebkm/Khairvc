@@ -1169,6 +1169,43 @@ function stopObservingEmails() {
 }
 
 document.addEventListener('DOMContentLoaded', async function() {
+    // SECURITY: Clear any old generic cache keys that could cause cross-user data leakage
+    try {
+        const currentUserId = document.body?.dataset?.userId;
+        if (currentUserId) {
+            // Clear any cache keys that don't match current user
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('emailCache_')) {
+                    // Keep only the current user's cache
+                    if (!key.includes(`user_${currentUserId}`) && key !== `emailCache_user_${currentUserId}`) {
+                        keysToRemove.push(key);
+                    }
+                }
+            }
+            if (keysToRemove.length > 0) {
+                keysToRemove.forEach(key => localStorage.removeItem(key));
+                console.log(`🔒 Security: Cleared ${keysToRemove.length} cache entries from other users`);
+            }
+        } else {
+            // If we can't identify user, clear all email caches as a safety measure
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('emailCache_')) {
+                    keysToRemove.push(key);
+                }
+            }
+            if (keysToRemove.length > 0) {
+                keysToRemove.forEach(key => localStorage.removeItem(key));
+                console.warn(`⚠️  Security: Cleared all email caches (user ID not available)`);
+            }
+        }
+    } catch (error) {
+        console.error('Error clearing cross-user cache:', error);
+    }
+    
     // Initialize IndexedDB thread cache and pre-fetching
     try {
         await initThreadCache();
