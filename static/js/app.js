@@ -799,8 +799,12 @@ async function completeSetupImmediately(setupScreen, progressBar, progressText) 
         setupScreen.style.display = 'none';
         const compactHeader = document.querySelector('.main-content > .compact-header');
         if (compactHeader) compactHeader.style.display = 'block';
+        
+        // CRITICAL: contentArea uses display: flex in CSS, don't change to block!
         const contentArea = document.getElementById('contentArea');
-        if (contentArea) contentArea.style.display = 'block';
+        if (contentArea) {
+            contentArea.style.opacity = '1';  // Just set opacity, display is already flex from CSS
+        }
         
         // Fade in email list
         const emailList = document.getElementById('emailList');
@@ -852,11 +856,19 @@ async function completeSetupAfterTimer(setupScreen, progressBar, progressText) {
             const compactHeader = document.querySelector('.main-content > .compact-header');
             if (compactHeader) compactHeader.style.display = 'block';
             
+            // CRITICAL: contentArea uses display: flex in CSS, don't change it!
+            // Just set opacity to make it visible
             const contentArea = document.getElementById('contentArea');
             if (contentArea) {
-                contentArea.style.display = 'block';
                 contentArea.style.transition = 'opacity 1s ease-in';
                 contentArea.style.opacity = '1';
+            }
+            
+            // Also ensure emailList is visible
+            const emailList = document.getElementById('emailList');
+            if (emailList) {
+                emailList.style.transition = 'opacity 0.5s ease-in';
+                emailList.style.opacity = '1';
             }
             
             // Display emails
