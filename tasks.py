@@ -706,13 +706,16 @@ def sync_user_emails(self, user_id, max_emails=50, force_full_sync=False, new_hi
                                                 print(f"✅ [TASK] Marked classification {new_classification.id} as reply_sent=True to prevent duplicates")
                                                 
                                                 # Schedule delayed auto-reply (10 minutes = 600 seconds)
+                                                # Use ETA instead of countdown - ETA is stored in Redis and survives worker restarts
                                                 from celery_config import celery
+                                                from datetime import datetime, timedelta
+                                                eta_time = datetime.utcnow() + timedelta(minutes=10)
                                                 celery.send_task(
                                                     'tasks.send_delayed_auto_reply',
                                                     args=[user_id, deal.id, sender_email, reply_subject, reply_body, email.get('thread_id', ''), new_classification.id],
-                                                    countdown=600  # 10 minutes delay
+                                                    eta=eta_time  # Absolute time - survives worker restarts
                                                 )
-                                                print(f"📧 [TASK] Scheduled auto-reply for deal {deal.id} to {sender_email} (will send in 10 minutes)")
+                                                print(f"📧 [TASK] Scheduled auto-reply for deal {deal.id} to {sender_email} (ETA: {eta_time.strftime('%H:%M:%S UTC')})")
                                             except Exception as schedule_error:
                                                 error_msg = str(schedule_error)
                                                 print(f"❌ [TASK] Failed to schedule auto-reply for deal {deal.id}: {error_msg}")
@@ -1386,8 +1389,14 @@ def send_whatsapp_followups():
 def send_delayed_auto_reply(user_id, deal_id, sender_email, reply_subject, reply_body, thread_id, classification_id):
     """
     Send delayed auto-reply (10 minutes after email received)
-    This task is scheduled with countdown=600 (10 minutes)
+    This task is scheduled with eta=datetime.utcnow() + timedelta(minutes=10)
+    Using ETA (absolute time) instead of countdown ensures task survives worker restarts.
     """
+    from datetime import datetime
+    print(f"🚀 [AUTO-REPLY] ========== EXECUTING DELAYED AUTO-REPLY ==========")
+    print(f"🚀 [AUTO-REPLY] Task started at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    print(f"🚀 [AUTO-REPLY] Deal ID: {deal_id}, To: {sender_email}, Classification: {classification_id}")
+    
     try:
         from app import app, db
     except ImportError:
