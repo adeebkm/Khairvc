@@ -537,16 +537,55 @@ def app_redirect():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """User login"""
-    # SECURITY: If user is already authenticated, force logout first to prevent auto-login
+    # SECURITY: If user is already authenticated, force complete logout first to prevent auto-login
     if current_user.is_authenticated:
-        print(f"⚠️  [SECURITY] Authenticated user attempted to access login page - forcing logout")
+        print(f"⚠️  [SECURITY] Authenticated user attempted to access login page - forcing complete logout")
+        user_id = current_user.id
+        username = current_user.username
+        
+        # Clear Flask-Login session keys explicitly
+        session_keys_to_clear = ['_user_id', '_id', 'user_id', 'username', '_permanent', '_fresh']
+        for key in session_keys_to_clear:
+            session.pop(key, None)
+        
+        # Logout user
         logout_user()
+        
+        # Set permanent to False and clear session
+        session.permanent = False
         session.clear()
         session.modified = True
+        
         # Clear session cookie
         from flask import make_response
         response = make_response(render_template('login.html'))
-        response.set_cookie('session', '', expires=0, max_age=0, path='/', domain=None)
+        
+        # Delete session cookie with all configurations
+        cookie_name = app.config.get('SESSION_COOKIE_NAME', 'session')
+        cookie_path = app.config.get('SESSION_COOKIE_PATH', '/')
+        cookie_domain = app.config.get('SESSION_COOKIE_DOMAIN', None)
+        cookie_secure = app.config.get('SESSION_COOKIE_SECURE', False)
+        cookie_httponly = app.config.get('SESSION_COOKIE_HTTPONLY', True)
+        cookie_samesite = app.config.get('SESSION_COOKIE_SAMESITE', 'Lax')
+        
+        response.set_cookie(
+            cookie_name, 
+            '', 
+            expires=0, 
+            max_age=0, 
+            path=cookie_path, 
+            domain=cookie_domain,
+            secure=cookie_secure,
+            httponly=cookie_httponly,
+            samesite=cookie_samesite
+        )
+        
+        # Also delete with default name
+        if cookie_name != 'session':
+            response.set_cookie('session', '', expires=0, max_age=0, path='/', domain=None, httponly=True, samesite='Lax')
+        
+        print(f"✅ Forced logout for user {user_id} ({username}) on login page access")
+        
         # If this was a POST request, redirect to login page to show login form
         if request.method == 'POST':
             return redirect(url_for('login'))
