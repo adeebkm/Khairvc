@@ -355,8 +355,8 @@ async function handleEmailDeletions(deletedIds) {
         await invalidateThreadCache(threadId);
     }
     
-    // Update UI
-    applyFilters();
+    // Update UI (don't reset page - user is still viewing same list)
+    applyFilters(false);
     saveEmailCacheToStorage();
     
     if (deletedIds.length > 0) {
@@ -388,7 +388,7 @@ async function deleteEmail(messageId, emailIndexOrThreadId) {
         if (emailIndex >= 0) {
             removedEmail = allEmails[emailIndex];
             allEmails.splice(emailIndex, 1);
-            applyFilters();
+            applyFilters(false);  // Don't reset page on delete
         }
         
         // Call backend to delete from Gmail
@@ -424,7 +424,7 @@ async function deleteEmail(messageId, emailIndexOrThreadId) {
                 // Restore email if deletion failed
                 if (removedEmail && emailIndex >= 0) {
                 allEmails.splice(emailIndex, 0, removedEmail);
-                applyFilters();
+                applyFilters(false);  // Don't reset page
             }
                 showToast(data.error || 'Failed to delete email', 'error');
             }
@@ -432,7 +432,7 @@ async function deleteEmail(messageId, emailIndexOrThreadId) {
             // Restore email if deletion failed
             if (removedEmail && emailIndex >= 0) {
                 allEmails.splice(emailIndex, 0, removedEmail);
-                applyFilters();
+                applyFilters(false);  // Don't reset page
             }
             showToast('Failed to delete email', 'error');
         }
@@ -2640,9 +2640,12 @@ function clearSearch() {
 }
 
 // Apply both category and search filters
-function applyFilters() {
-    // Reset to first page when filters change
-    currentPage = 1;
+// resetPage: if true, reset to page 1 (default). If false, keep current page.
+function applyFilters(resetPage = true) {
+    // Only reset to first page when explicitly requested (filter/tab change)
+    if (resetPage) {
+        currentPage = 1;
+    }
     
     // Ensure allEmails is an array
     if (!Array.isArray(allEmails)) {
