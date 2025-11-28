@@ -1,22 +1,16 @@
-import Header from '@/components/Header'
-import Hero from '@/components/sections/Hero'
-import Agents from '@/components/sections/Agents'
-import Security from '@/components/sections/Security'
-import SocialProof from '@/components/sections/SocialProof'
-import HowItWorks from '@/components/sections/HowItWorks'
-import CTA from '@/components/sections/CTA'
+import Navbar from '@/components/Navbar'
+import Hero from '@/components/Hero'
+import FeatureTrinity from '@/components/FeatureTrinity'
+import TrustStrip from '@/components/TrustStrip'
 import Footer from '@/components/Footer'
 
 export default function Home() {
   return (
-    <main className="min-h-screen">
-      <Header />
+    <main className="relative">
+      <Navbar />
       <Hero />
-      <Agents />
-      <Security />
-      <SocialProof />
-      <HowItWorks />
-      <CTA />
+      <FeatureTrinity />
+      <TrustStrip />
       <Footer />
     </main>
   )
