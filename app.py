@@ -128,18 +128,33 @@ def clear_problematic_session_data():
 
 @login_manager.user_loader
 def load_user(user_id):
-    """Load user from database"""
+    """Load user from database - SECURITY: Verify session matches"""
     try:
         user = User.query.get(int(user_id))
         if user:
+            # SECURITY: Verify session user_id matches loaded user (prevent session hijacking)
+            if 'user_id' in session:
+                if session['user_id'] != user.id:
+                    print(f"⚠️  [SECURITY] Session user_id mismatch in load_user! Session={session.get('user_id')}, Loaded user={user.id}")
+                    # Clear the mismatched session
+                    session.clear()
+                    session.modified = True
+                    return None
             print(f"✅ User loaded from session: {user.username} (ID: {user_id})")
         else:
             print(f"⚠️  User not found in database: ID {user_id}")
+            # User doesn't exist - clear session
+            if 'user_id' in session:
+                session.clear()
+                session.modified = True
         return user
     except Exception as e:
         print(f"❌ Error loading user {user_id}: {str(e)}")
         import traceback
         traceback.print_exc()
+        # Clear session on error
+        session.clear()
+        session.modified = True
         return None
 
 
