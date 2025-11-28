@@ -4535,7 +4535,7 @@ def check_inbox_size():
         return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
     
     try:
-        gmail = get_user_gmail_client(current_user.id)
+        gmail = get_user_gmail_client(current_user)  # Fixed: pass user object, not ID
         if not gmail:
             return jsonify({'success': False, 'error': 'Failed to initialize Gmail client'}), 500
         
