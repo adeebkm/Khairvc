@@ -800,10 +800,11 @@ async function completeSetupImmediately(setupScreen, progressBar, progressText) 
         const compactHeader = document.querySelector('.main-content > .compact-header');
         if (compactHeader) compactHeader.style.display = 'block';
         
-        // CRITICAL: contentArea uses display: flex in CSS, don't change to block!
+        // CRITICAL: Remove inline display:none AND set opacity
         const contentArea = document.getElementById('contentArea');
         if (contentArea) {
-            contentArea.style.opacity = '1';  // Just set opacity, display is already flex from CSS
+            contentArea.style.display = 'flex';  // Override inline style="display: none" from HTML
+            contentArea.style.opacity = '1';
         }
         
         // Fade in email list
@@ -856,10 +857,10 @@ async function completeSetupAfterTimer(setupScreen, progressBar, progressText) {
             const compactHeader = document.querySelector('.main-content > .compact-header');
             if (compactHeader) compactHeader.style.display = 'block';
             
-            // CRITICAL: contentArea uses display: flex in CSS, don't change it!
-            // Just set opacity to make it visible
+            // CRITICAL: Remove inline display:none AND set opacity
             const contentArea = document.getElementById('contentArea');
             if (contentArea) {
+                contentArea.style.display = 'flex';  // Override inline style="display: none" from HTML
                 contentArea.style.transition = 'opacity 1s ease-in';
                 contentArea.style.opacity = '1';
             }
