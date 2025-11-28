@@ -1243,6 +1243,12 @@ let threadPrefetchObserver = null;
 const prefetchedThreads = new Set();
 
 function initThreadPrefetching() {
+    // DISABLED: Aggressive prefetching causes too many API calls and rate limits
+    // Threads will only be fetched when user clicks to open an email
+    console.log('ℹ️ Thread pre-fetching DISABLED to save API quota');
+    return;
+    
+    /* DISABLED FOR API QUOTA SAVINGS
     if (!('IntersectionObserver' in window)) {
         console.log('IntersectionObserver not supported - pre-fetching disabled');
         return;
@@ -1269,6 +1275,7 @@ function initThreadPrefetching() {
     );
     
     console.log('✅ Thread pre-fetching initialized');
+    */
 }
 
 function observeEmailsForPrefetch() {
@@ -1677,16 +1684,17 @@ let threadCacheMemory = new Map();
 
 // Pre-fetch threads for visible emails
 async function prefetchVisibleThreads() {
+    // SMART BATCH PREFETCHING: Fetch all visible threads in ONE API call
     const visibleEmails = filteredEmails.slice((currentPage - 1) * EMAILS_PER_PAGE, currentPage * EMAILS_PER_PAGE);
     
-    // Pre-fetch threads for all visible emails in parallel
-    const prefetchPromises = visibleEmails.map(async (email) => {
-        if (!email.thread_id) return;
+    // Step 1: Check caches and collect thread IDs that need fetching
+    const threadIdsToFetch = [];
+    
+    for (const email of visibleEmails) {
+        if (!email.thread_id) continue;
         
-        // Check memory cache first
-        if (threadCacheMemory.has(email.thread_id)) {
-            return; // Already in memory
-        }
+        // Skip if already in memory cache
+        if (threadCacheMemory.has(email.thread_id)) continue;
         
         // Check IndexedDB cache
         try {
@@ -1694,25 +1702,43 @@ async function prefetchVisibleThreads() {
             if (cached && cached.emails && cached.emails.length > 0) {
                 // Store in memory for instant access
                 threadCacheMemory.set(email.thread_id, cached);
-            } else {
-                // Pre-fetch from API in background
-                fetch(`/api/thread/${email.thread_id}`)
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.success && data.emails) {
-                            cacheThread(email.thread_id, data);
-                            threadCacheMemory.set(email.thread_id, data);
-                        }
-                    })
-                    .catch(err => console.warn('Prefetch error:', err));
+                continue;
             }
         } catch (err) {
-            console.warn('Cache check error:', err);
+            // Cache check failed, need to fetch
         }
-    });
+        
+        // Not in cache, need to fetch
+        threadIdsToFetch.push(email.thread_id);
+    }
     
-    // Don't await - let it run in background
-    Promise.all(prefetchPromises).catch(() => {});
+    // Step 2: If there are threads to fetch, do it in ONE batch call
+    if (threadIdsToFetch.length > 0) {
+        console.log(`📦 Batch prefetching ${threadIdsToFetch.length} threads in 1 API call...`);
+        
+        try {
+            const response = await fetch('/api/threads/batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ thread_ids: threadIdsToFetch })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success && data.threads) {
+                // Cache all fetched threads
+                for (const [threadId, threadData] of Object.entries(data.threads)) {
+                    if (threadData && threadData.emails) {
+                        threadCacheMemory.set(threadId, threadData);
+                        cacheThread(threadId, threadData);
+                    }
+                }
+                console.log(`✅ Batch prefetched ${Object.keys(data.threads).length} threads`);
+            }
+        } catch (err) {
+            console.warn('Batch prefetch error:', err);
+        }
+    }
 }
 
 // Load starred emails cache from localStorage on init

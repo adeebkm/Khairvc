@@ -4340,6 +4340,93 @@ def get_thread(thread_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/threads/batch', methods=['POST'])
+@login_required
+def get_threads_batch():
+    """
+    Batch fetch multiple threads in ONE Gmail API call.
+    Reduces API usage from N calls to 1 call.
+    """
+    if not current_user.gmail_token:
+        return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
+    
+    try:
+        data = request.get_json()
+        thread_ids = data.get('thread_ids', [])
+        
+        if not thread_ids:
+            return jsonify({'success': True, 'threads': {}})
+        
+        # Limit to 50 threads per batch to avoid timeouts
+        thread_ids = thread_ids[:50]
+        
+        gmail = get_user_gmail_client(current_user)
+        if not gmail:
+            return jsonify({'success': False, 'error': 'Failed to connect to Gmail'}), 500
+        
+        print(f"📦 [BATCH] Fetching {len(thread_ids)} threads in 1 batch call...")
+        
+        # Use Gmail batch API
+        threads_data = {}
+        errors = []
+        
+        def handle_thread(request_id, response, exception):
+            """Callback for batch request"""
+            thread_id = request_id
+            if exception:
+                errors.append(f"{thread_id}: {str(exception)}")
+                return
+            if response:
+                try:
+                    messages = response.get('messages', [])
+                    thread_emails = []
+                    for msg in messages:
+                        email_data = gmail._extract_message_data(msg)
+                        if email_data:
+                            thread_emails.append(email_data)
+                    threads_data[thread_id] = {
+                        'success': True,
+                        'count': len(thread_emails),
+                        'emails': thread_emails
+                    }
+                except Exception as e:
+                    errors.append(f"{thread_id}: Parse error - {str(e)}")
+        
+        # Create batch request
+        batch = gmail.service.new_batch_http_request(callback=handle_thread)
+        
+        # Add all thread requests to batch
+        for thread_id in thread_ids:
+            batch.add(
+                gmail.service.users().threads().get(
+                    userId='me',
+                    id=thread_id,
+                    format='full'
+                ),
+                request_id=thread_id
+            )
+        
+        # Execute batch (1 API call for all threads!)
+        batch.execute()
+        
+        if errors:
+            print(f"⚠️  [BATCH] {len(errors)} errors: {errors[0][:100] if errors else 'none'}")
+        
+        print(f"✅ [BATCH] Successfully fetched {len(threads_data)} threads in 1 API call")
+        
+        return jsonify({
+            'success': True,
+            'threads': threads_data,
+            'fetched': len(threads_data),
+            'errors': len(errors)
+        })
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/attachment/<message_id>/<attachment_id>')
 @login_required
 def download_attachment(message_id, attachment_id):

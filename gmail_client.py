@@ -203,7 +203,7 @@ class GmailClient:
     
     def get_sent_emails(self, max_results=20):
         """
-        Get sent emails from Gmail
+        Get sent emails from Gmail using BATCH API (reduces 100 calls → 1 call)
         
         Args:
             max_results: Max emails to fetch
@@ -237,26 +237,46 @@ class GmailClient:
                 print("📤 [SENT] No sent emails found in Gmail")
                 return []
             
-            print(f"📤 [SENT] Found {len(messages)} sent email IDs, fetching details...")
+            print(f"📤 [SENT] Found {len(messages)} sent email IDs, using BATCH API (1 call instead of {len(messages)})...")
             
-            # Batch fetch email details
+            # Use BATCH API to fetch all emails in ONE request (saves API quota!)
             sent_emails = []
-            for i, msg in enumerate(messages, 1):
-                try:
-                    print(f"📤 [SENT] Fetching email {i}/{len(messages)}: {msg['id']}")
-                    email_data = self.get_email_details(msg['id'])
-                    if email_data:
-                        sent_emails.append(email_data)
-                        print(f"✅ [SENT] Email {i}/{len(messages)}: {email_data.get('subject', 'No Subject')[:50]}")
-                    else:
-                        print(f"⚠️  [SENT] Email {i}/{len(messages)}: get_email_details returned None")
-                except Exception as e:
-                    print(f"⚠️  [SENT] Error fetching sent email {msg['id']}: {str(e)}")
-                    import traceback
-                    traceback.print_exc()
-                    continue
+            errors = []
             
-            print(f"✅ [SENT] Successfully fetched {len(sent_emails)} sent emails")
+            def handle_message(request_id, response, exception):
+                """Callback for batch request"""
+                if exception:
+                    errors.append(str(exception))
+                    return
+                if response:
+                    try:
+                        email_data = self._parse_sent_message(response)
+                        if email_data:
+                            sent_emails.append(email_data)
+                    except Exception as e:
+                        errors.append(f"Parse error: {str(e)}")
+            
+            # Create batch request
+            batch = self.service.new_batch_http_request(callback=handle_message)
+            
+            # Add all message requests to batch
+            for msg in messages:
+                batch.add(
+                    self.service.users().messages().get(
+                        userId='me',
+                        id=msg['id'],
+                        format='full'
+                    )
+                )
+            
+            # Execute batch (1 API call instead of 100!)
+            print(f"📤 [SENT] Executing BATCH request for {len(messages)} emails...")
+            batch.execute()
+            
+            if errors:
+                print(f"⚠️  [SENT] {len(errors)} errors during batch fetch (first: {errors[0][:100] if errors else 'none'})")
+            
+            print(f"✅ [SENT] Successfully fetched {len(sent_emails)} sent emails with 1 BATCH API call")
             return sent_emails
             
         except Exception as e:
@@ -264,6 +284,18 @@ class GmailClient:
             import traceback
             traceback.print_exc()
             return []
+    
+    def _parse_sent_message(self, message):
+        """Parse a Gmail API message response into email dict (used by batch API)"""
+        try:
+            # Reuse existing extraction method
+            email_data = self._extract_message_data(message)
+            if email_data:
+                email_data['is_sent'] = True
+            return email_data
+        except Exception as e:
+            print(f"❌ [SENT] Error parsing message: {str(e)}")
+            return None
     
     def get_drafts(self, max_results=20):
         """
