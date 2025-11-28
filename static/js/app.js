@@ -7106,92 +7106,71 @@ function toggleUserDropdown() {
 }
 
 // SECURITY: Clear all user data before logout to prevent cross-user data leakage
-async function handleLogout(event) {
-    event.preventDefault();
+function handleLogout(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
     
     console.log('🔒 Logging out - clearing ALL user data from device...');
     
     try {
-        // 1. Clear ALL localStorage entries (not just email caches)
-        const keysToRemove = [];
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key) {
-                // Clear ALL cache-related keys
-                if (key.startsWith('emailCache_') ||
-                    key.startsWith('sentEmailsCache_') ||
-                    key.startsWith('starredEmailsCache_') ||
-                    key.startsWith('draftsCache_') ||
-                    key.startsWith('dealsCache_') ||
-                    key === 'sidebarCollapsed' ||  // User preference
-                    key.startsWith('compose_') ||   // Draft compose data
-                    key.startsWith('thread_')) {    // Any thread-related cache
-                    keysToRemove.push(key);
-                }
-            }
-        }
-        keysToRemove.forEach(key => localStorage.removeItem(key));
-        console.log(`🗑️  Cleared ${keysToRemove.length} localStorage entries`);
+        // 1. Clear ALL localStorage
+        console.log('🗑️  Clearing localStorage...');
+        localStorage.clear();
         
         // 2. Clear ALL sessionStorage
-        try {
-            sessionStorage.clear();
-            console.log('🗑️  Cleared all sessionStorage');
-        } catch (e) {
-            console.warn('Could not clear sessionStorage:', e);
-        }
+        console.log('🗑️  Clearing sessionStorage...');
+        sessionStorage.clear();
         
-        // 3. Clear IndexedDB (thread cache)
+        // 3. Clear IndexedDB (don't wait for it - do it in background)
         try {
-            if (typeof clearAllThreadCache === 'function') {
-                await clearAllThreadCache();
-                console.log('🗑️  Cleared IndexedDB thread cache');
-            }
-            // Also try to delete the entire database
             if (typeof indexedDB !== 'undefined' && indexedDB.deleteDatabase) {
-                const deleteRequest = indexedDB.deleteDatabase('gmail_threads');
-                await new Promise((resolve, reject) => {
-                    deleteRequest.onsuccess = () => {
-                        console.log('🗑️  Deleted IndexedDB database');
-                        resolve();
-                    };
-                    deleteRequest.onerror = () => {
-                        console.warn('Could not delete IndexedDB:', deleteRequest.error);
-                        resolve(); // Don't fail logout if IndexedDB deletion fails
-                    };
-                });
+                console.log('🗑️  Deleting IndexedDB...');
+                indexedDB.deleteDatabase('gmail_threads');
             }
         } catch (e) {
-            console.warn('Error clearing IndexedDB:', e);
+            console.warn('Could not delete IndexedDB:', e);
         }
         
         // 4. Clear in-memory caches
-        emailCache.data = [];
-        emailCache.timestamp = null;
-        allEmails = [];
-        filteredEmails = [];
-        sentEmailsCache = [];
-        starredEmailsCache = [];
-        draftsCache = [];
-        if (typeof threadCacheMemory !== 'undefined' && threadCacheMemory && threadCacheMemory.clear) {
-            threadCacheMemory.clear();
+        try {
+            if (typeof emailCache !== 'undefined') {
+                emailCache.data = [];
+                emailCache.timestamp = null;
+            }
+            if (typeof allEmails !== 'undefined') allEmails = [];
+            if (typeof filteredEmails !== 'undefined') filteredEmails = [];
+            if (typeof sentEmailsCache !== 'undefined') sentEmailsCache = [];
+            if (typeof starredEmailsCache !== 'undefined') starredEmailsCache = [];
+            if (typeof draftsCache !== 'undefined') draftsCache = [];
+            if (typeof threadCacheMemory !== 'undefined' && threadCacheMemory && threadCacheMemory.clear) {
+                threadCacheMemory.clear();
+            }
+        } catch (e) {
+            console.warn('Error clearing in-memory caches:', e);
         }
         
-        // 5. Clear any cookies that might be set by JavaScript
-        // (Server-side cookies will be cleared by the logout endpoint)
-        document.cookie.split(";").forEach(function(c) { 
-            document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
-        });
-        console.log('🗑️  Cleared all JavaScript-accessible cookies');
+        // 5. Clear JavaScript-accessible cookies
+        try {
+            document.cookie.split(";").forEach(function(c) { 
+                document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
+            });
+        } catch (e) {
+            console.warn('Could not clear cookies:', e);
+        }
         
         console.log('✅ All user data cleared from device');
     } catch (error) {
         console.error('Error clearing cache on logout:', error);
     }
     
-    // Redirect to logout endpoint (server will clear session cookie)
-    // Use window.location.replace to prevent back button from restoring session
-    window.location.replace('/logout');
+    // IMMEDIATELY redirect to logout endpoint (server will clear session cookie)
+    console.log('🔄 Redirecting to logout...');
+    window.location.href = '/logout';
+    
+    // Return false to prevent any default link behavior
+    return false;
 }
 
 // Close dropdown when clicking outside
