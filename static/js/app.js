@@ -7106,30 +7106,66 @@ function toggleUserDropdown() {
 }
 
 // SECURITY: Clear all user data before logout to prevent cross-user data leakage
-function handleLogout(event) {
+async function handleLogout(event) {
     event.preventDefault();
     
-    console.log('🔒 Logging out - clearing all user data...');
+    console.log('🔒 Logging out - clearing ALL user data from device...');
     
     try {
-        // Clear all email caches (including cross-user caches)
+        // 1. Clear ALL localStorage entries (not just email caches)
         const keysToRemove = [];
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
-            if (key && (
-                key.startsWith('emailCache_') ||
-                key.startsWith('sentEmailsCache_') ||
-                key.startsWith('starredEmailsCache_') ||
-                key.startsWith('draftsCache_') ||
-                key.startsWith('dealsCache_')
-            )) {
-                keysToRemove.push(key);
+            if (key) {
+                // Clear ALL cache-related keys
+                if (key.startsWith('emailCache_') ||
+                    key.startsWith('sentEmailsCache_') ||
+                    key.startsWith('starredEmailsCache_') ||
+                    key.startsWith('draftsCache_') ||
+                    key.startsWith('dealsCache_') ||
+                    key === 'sidebarCollapsed' ||  // User preference
+                    key.startsWith('compose_') ||   // Draft compose data
+                    key.startsWith('thread_')) {    // Any thread-related cache
+                    keysToRemove.push(key);
+                }
             }
         }
         keysToRemove.forEach(key => localStorage.removeItem(key));
-        console.log(`🗑️  Cleared ${keysToRemove.length} cache entries`);
+        console.log(`🗑️  Cleared ${keysToRemove.length} localStorage entries`);
         
-        // Clear in-memory caches
+        // 2. Clear ALL sessionStorage
+        try {
+            sessionStorage.clear();
+            console.log('🗑️  Cleared all sessionStorage');
+        } catch (e) {
+            console.warn('Could not clear sessionStorage:', e);
+        }
+        
+        // 3. Clear IndexedDB (thread cache)
+        try {
+            if (typeof clearAllThreadCache === 'function') {
+                await clearAllThreadCache();
+                console.log('🗑️  Cleared IndexedDB thread cache');
+            }
+            // Also try to delete the entire database
+            if (typeof indexedDB !== 'undefined' && indexedDB.deleteDatabase) {
+                const deleteRequest = indexedDB.deleteDatabase('gmail_threads');
+                await new Promise((resolve, reject) => {
+                    deleteRequest.onsuccess = () => {
+                        console.log('🗑️  Deleted IndexedDB database');
+                        resolve();
+                    };
+                    deleteRequest.onerror = () => {
+                        console.warn('Could not delete IndexedDB:', deleteRequest.error);
+                        resolve(); // Don't fail logout if IndexedDB deletion fails
+                    };
+                });
+            }
+        } catch (e) {
+            console.warn('Error clearing IndexedDB:', e);
+        }
+        
+        // 4. Clear in-memory caches
         emailCache.data = [];
         emailCache.timestamp = null;
         allEmails = [];
@@ -7141,13 +7177,21 @@ function handleLogout(event) {
             threadCacheMemory.clear();
         }
         
-        console.log('✅ All user data cleared');
+        // 5. Clear any cookies that might be set by JavaScript
+        // (Server-side cookies will be cleared by the logout endpoint)
+        document.cookie.split(";").forEach(function(c) { 
+            document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
+        });
+        console.log('🗑️  Cleared all JavaScript-accessible cookies');
+        
+        console.log('✅ All user data cleared from device');
     } catch (error) {
         console.error('Error clearing cache on logout:', error);
     }
     
-    // Redirect to logout endpoint (server will clear session)
-    window.location.href = '/logout';
+    // Redirect to logout endpoint (server will clear session cookie)
+    // Use window.location.replace to prevent back button from restoring session
+    window.location.replace('/logout');
 }
 
 // Close dropdown when clicking outside
