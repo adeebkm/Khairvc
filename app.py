@@ -529,6 +529,21 @@ def app_redirect():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """User login"""
+    # SECURITY: If user is already authenticated, force logout first to prevent auto-login
+    if current_user.is_authenticated:
+        print(f"⚠️  [SECURITY] Authenticated user attempted to access login page - forcing logout")
+        logout_user()
+        session.clear()
+        session.modified = True
+        # Clear session cookie
+        from flask import make_response
+        response = make_response(render_template('login.html'))
+        response.set_cookie('session', '', expires=0, max_age=0, path='/', domain=None)
+        # If this was a POST request, redirect to login page to show login form
+        if request.method == 'POST':
+            return redirect(url_for('login'))
+        return response
+    
     try:
         if request.method == 'POST':
             username = request.form.get('username')
@@ -756,10 +771,20 @@ def logout():
     from flask import make_response
     response = make_response(redirect(url_for('index')))
     
-    # Delete session cookie
-    response.set_cookie('session', '', expires=0, max_age=0, path='/', domain=None)
+    # Delete session cookie with all possible configurations
+    # Flask uses 'session' as default cookie name, but we'll clear it with all settings
+    cookie_name = app.config.get('SESSION_COOKIE_NAME', 'session')
+    cookie_path = app.config.get('SESSION_COOKIE_PATH', '/')
+    cookie_domain = app.config.get('SESSION_COOKIE_DOMAIN', None)
     
-    print(f"✅ User {user_id} ({username}) logged out - session and cookies cleared")
+    # Delete with current settings
+    response.set_cookie(cookie_name, '', expires=0, max_age=0, path=cookie_path, domain=cookie_domain, httponly=True, samesite='Lax')
+    
+    # Also try deleting with default name in case config is different
+    if cookie_name != 'session':
+        response.set_cookie('session', '', expires=0, max_age=0, path='/', domain=None)
+    
+    print(f"✅ User {user_id} ({username}) logged out - session and cookies cleared (cookie: {cookie_name})")
     
     return response
 
