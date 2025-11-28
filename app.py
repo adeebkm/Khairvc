@@ -512,8 +512,31 @@ def get_user_gmail_client(user):
 
 @app.route('/')
 def index():
-    """Landing page for Khair - separate from the app"""
-    return render_template('landing.html')
+    """Landing page for Khair - serve Next.js static export"""
+    import os
+    nextjs_index = os.path.join(os.path.dirname(__file__), 'khair-website', 'out', 'index.html')
+    if os.path.exists(nextjs_index):
+        with open(nextjs_index, 'r', encoding='utf-8') as f:
+            return f.read()
+    else:
+        # Fallback to old landing page if Next.js build not found
+        return render_template('landing.html')
+
+@app.route('/_next/<path:path>')
+def nextjs_static(path):
+    """Serve Next.js static assets"""
+    import os
+    from flask import send_from_directory
+    nextjs_out = os.path.join(os.path.dirname(__file__), 'khair-website', 'out', '_next')
+    return send_from_directory(nextjs_out, path)
+
+@app.route('/logo.png')
+def nextjs_logo():
+    """Serve logo from Next.js build"""
+    import os
+    from flask import send_from_directory
+    nextjs_out = os.path.join(os.path.dirname(__file__), 'khair-website', 'out')
+    return send_from_directory(nextjs_out, 'logo.png')
 
 @app.route('/app')
 def app_redirect():
