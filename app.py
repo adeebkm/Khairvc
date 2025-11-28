@@ -4357,6 +4357,9 @@ def get_threads_batch():
         if not thread_ids:
             return jsonify({'success': True, 'threads': {}})
         
+        # IMPORTANT: Deduplicate thread IDs (batch API requires unique request IDs)
+        thread_ids = list(set(thread_ids))
+        
         # Limit to 50 threads per batch to avoid timeouts
         thread_ids = thread_ids[:50]
         

@@ -1713,14 +1713,17 @@ async function prefetchVisibleThreads() {
     }
     
     // Step 2: If there are threads to fetch, do it in ONE batch call
-    if (threadIdsToFetch.length > 0) {
-        console.log(`📦 Batch prefetching ${threadIdsToFetch.length} threads in 1 API call...`);
+    // IMPORTANT: Deduplicate thread IDs (multiple emails can share same thread)
+    const uniqueThreadIds = [...new Set(threadIdsToFetch)];
+    
+    if (uniqueThreadIds.length > 0) {
+        console.log(`📦 Batch prefetching ${uniqueThreadIds.length} unique threads in 1 API call...`);
         
         try {
             const response = await fetch('/api/threads/batch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ thread_ids: threadIdsToFetch })
+                body: JSON.stringify({ thread_ids: uniqueThreadIds })
             });
             
             const data = await response.json();
