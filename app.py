@@ -769,6 +769,10 @@ def logout():
     # Logout user (clears Flask-Login session)
     logout_user()
     
+    # CRITICAL: Set session.permanent = False BEFORE clearing to ensure cookie is deleted
+    # If session is permanent, Flask might not delete the cookie properly
+    session.permanent = False
+    
     # Clear all session data
     session.clear()
     
@@ -784,15 +788,28 @@ def logout():
     cookie_name = app.config.get('SESSION_COOKIE_NAME', 'session')
     cookie_path = app.config.get('SESSION_COOKIE_PATH', '/')
     cookie_domain = app.config.get('SESSION_COOKIE_DOMAIN', None)
+    cookie_secure = app.config.get('SESSION_COOKIE_SECURE', False)
+    cookie_httponly = app.config.get('SESSION_COOKIE_HTTPONLY', True)
+    cookie_samesite = app.config.get('SESSION_COOKIE_SAMESITE', 'Lax')
     
-    # Delete with current settings
-    response.set_cookie(cookie_name, '', expires=0, max_age=0, path=cookie_path, domain=cookie_domain, httponly=True, samesite='Lax')
+    # Delete with current settings - use all the same settings as when cookie was set
+    response.set_cookie(
+        cookie_name, 
+        '', 
+        expires=0, 
+        max_age=0, 
+        path=cookie_path, 
+        domain=cookie_domain,
+        secure=cookie_secure,
+        httponly=cookie_httponly,
+        samesite=cookie_samesite
+    )
     
     # Also try deleting with default name in case config is different
     if cookie_name != 'session':
-        response.set_cookie('session', '', expires=0, max_age=0, path='/', domain=None)
+        response.set_cookie('session', '', expires=0, max_age=0, path='/', domain=None, httponly=True, samesite='Lax')
     
-    print(f"✅ User {user_id} ({username}) logged out - session and cookies cleared (cookie: {cookie_name})")
+    print(f"✅ User {user_id} ({username}) logged out - session and cookies cleared (cookie: {cookie_name}, permanent=False)")
     
     return response
 
