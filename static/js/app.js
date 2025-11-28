@@ -7105,6 +7105,51 @@ function toggleUserDropdown() {
     }
 }
 
+// SECURITY: Clear all user data before logout to prevent cross-user data leakage
+function handleLogout(event) {
+    event.preventDefault();
+    
+    console.log('🔒 Logging out - clearing all user data...');
+    
+    try {
+        // Clear all email caches (including cross-user caches)
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (
+                key.startsWith('emailCache_') ||
+                key.startsWith('sentEmailsCache_') ||
+                key.startsWith('starredEmailsCache_') ||
+                key.startsWith('draftsCache_') ||
+                key.startsWith('dealsCache_')
+            )) {
+                keysToRemove.push(key);
+            }
+        }
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+        console.log(`🗑️  Cleared ${keysToRemove.length} cache entries`);
+        
+        // Clear in-memory caches
+        emailCache.data = [];
+        emailCache.timestamp = null;
+        allEmails = [];
+        filteredEmails = [];
+        sentEmailsCache = [];
+        starredEmailsCache = [];
+        draftsCache = [];
+        if (typeof threadCacheMemory !== 'undefined' && threadCacheMemory && threadCacheMemory.clear) {
+            threadCacheMemory.clear();
+        }
+        
+        console.log('✅ All user data cleared');
+    } catch (error) {
+        console.error('Error clearing cache on logout:', error);
+    }
+    
+    // Redirect to logout endpoint (server will clear session)
+    window.location.href = '/logout';
+}
+
 // Close dropdown when clicking outside
 document.addEventListener('click', function(event) {
     const dropdown = document.getElementById('userDropdownMenu');
