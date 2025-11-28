@@ -21,18 +21,43 @@ let emailCache = {
 };
 
 // Get cache key for current user (to isolate cache per user)
+// CRITICAL: Must use user_id to prevent cross-user data leakage
 function getCacheKey() {
-    // Try to get username from the page
-    const userInfo = document.querySelector('.user-info');
-    if (userInfo) {
-        const text = userInfo.textContent || '';
-        const match = text.match(/Welcome, (\w+)/);
-        if (match) {
-            return `emailCache_${match[1]}`;
-        }
+    // Get user_id from body data attribute (most reliable)
+    const body = document.body;
+    if (body && body.dataset && body.dataset.userId) {
+        const userId = body.dataset.userId;
+        return `emailCache_user_${userId}`;
     }
-    // Fallback to generic key
-    return 'emailCache';
+    
+    // Fallback: Try to get from username attribute
+    if (body && body.dataset && body.dataset.username) {
+        const username = body.dataset.username;
+        return `emailCache_user_${username}`;
+    }
+    
+    // SECURITY: If we can't identify the user, clear all caches and use session-based key
+    // This prevents cross-user data leakage
+    console.warn('⚠️  Cannot identify user for cache key - clearing all email caches');
+    try {
+        // Clear all emailCache_* keys from localStorage
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('emailCache_')) {
+                keysToRemove.push(key);
+            }
+        }
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+        console.log(`🗑️  Cleared ${keysToRemove.length} email cache entries`);
+    } catch (error) {
+        console.error('Error clearing cache:', error);
+    }
+    
+    // Use session-based key (unique per browser session)
+    const sessionKey = `emailCache_session_${Date.now()}_${Math.random()}`;
+    console.warn(`⚠️  Using temporary session-based cache key: ${sessionKey}`);
+    return sessionKey;
 }
 
 // Load email cache from localStorage on initialization
@@ -5292,9 +5317,6 @@ async function openReplyComposer() {
     const senderEmail = extractEmail(currentEmail.from || '');
     composerTo.value = senderEmail;
     
-    // Initialize autocomplete for To field
-    initEmailAutocomplete('composerTo');
-    
     // Set subject
     const subject = currentEmail.subject || 'No Subject';
     composerSubject.value = subject.startsWith('Re:') ? subject : `Re: ${subject}`;
@@ -5352,11 +5374,6 @@ async function openReplyAllComposer() {
     // Show CC/BCC fields
     ccBccFields.style.display = 'flex';
     
-    // Initialize autocomplete for To, CC, and BCC fields
-    initEmailAutocomplete('composerTo');
-    initEmailAutocomplete('composerCc');
-    initEmailAutocomplete('composerBcc');
-    
     // Extract all recipients for CC (excluding current user)
     const toEmails = extractAllEmails(currentEmail.to || '');
     const ccEmails = extractAllEmails(currentEmail.cc || '');
@@ -5407,9 +5424,6 @@ function openForwardComposer() {
     
     // Clear recipient
     composerTo.value = '';
-    
-    // Initialize autocomplete for To field
-    initEmailAutocomplete('composerTo');
     
     // Set subject
     const subject = currentEmail.subject || 'No Subject';
@@ -5936,259 +5950,6 @@ function decodeHtmlEntities(text) {
 // Compose email attachment storage
 let composeAttachments = [];
 
-// Email autocomplete cache (People API only)
-let contactsCache = {
-    data: [],
-    loaded: false,
-    loading: false
-};
-
-// Load contacts from People API
-async function loadContacts() {
-    if (contactsCache.loaded) {
-        return contactsCache.data;
-    }
-    
-    if (contactsCache.loading) {
-        // Wait for existing load to complete
-        while (contactsCache.loading) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        return contactsCache.data;
-    }
-    
-    contactsCache.loading = true;
-    try {
-        const response = await fetch('/api/contacts');
-        if (response.ok) {
-            const data = await response.json();
-            if (data.success && data.contacts) {
-                contactsCache.data = data.contacts;
-                contactsCache.loaded = true;
-                console.log(`✅ Loaded ${contactsCache.data.length} contacts for autocomplete`);
-            } else {
-                console.warn('⚠️ Contacts API returned success=false:', data);
-                if (data.error && data.error.includes('scope')) {
-                    console.warn('💡 You may need to re-authenticate to grant contacts permission');
-                }
-            }
-        } else {
-            const errorText = await response.text();
-            console.error(`❌ Contacts API error (${response.status}):`, errorText);
-            // Try to parse as JSON for better error message
-            try {
-                const errorData = JSON.parse(errorText);
-                if (errorData.error && errorData.error.includes('scope')) {
-                    console.warn('💡 You may need to re-authenticate to grant contacts permission');
-                }
-            } catch (e) {
-                // Not JSON, that's okay
-            }
-        }
-    } catch (error) {
-        console.error('❌ Error loading contacts:', error);
-    } finally {
-        contactsCache.loading = false;
-    }
-    
-    return contactsCache.data || [];
-}
-
-// Initialize autocomplete for an input field (People API only)
-function initEmailAutocomplete(inputId) {
-    const input = document.getElementById(inputId);
-    if (!input) {
-        console.warn(`⚠️ Autocomplete: Input element '${inputId}' not found`);
-        return;
-    }
-    
-    // Check if already initialized
-    if (input.dataset.autocompleteInitialized === 'true') {
-        console.log(`ℹ️ Autocomplete already initialized for '${inputId}'`);
-        return;
-    }
-    input.dataset.autocompleteInitialized = 'true';
-    console.log(`✅ Initializing autocomplete for '${inputId}'`);
-    
-    let autocompleteList = null;
-    let selectedIndex = -1;
-    
-    // Create autocomplete dropdown
-    const createAutocompleteList = () => {
-        if (autocompleteList) {
-            autocompleteList.remove();
-        }
-        autocompleteList = document.createElement('div');
-        autocompleteList.className = 'email-autocomplete-list';
-        autocompleteList.style.cssText = `
-            position: absolute;
-            background: white;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            max-height: 300px;
-            overflow-y: auto;
-            z-index: 10000;
-            display: none;
-            width: ${input.offsetWidth}px;
-            margin-top: 4px;
-            left: 0;
-            top: 100%;
-        `;
-        const parent = input.parentElement;
-        if (parent) {
-            if (getComputedStyle(parent).position === 'static') {
-                parent.style.position = 'relative';
-            }
-            parent.appendChild(autocompleteList);
-        }
-    };
-    
-    createAutocompleteList();
-    
-    // Filter and show suggestions
-    const showSuggestions = async (query) => {
-        if (!query || query.length < 1) {
-            if (autocompleteList) autocompleteList.style.display = 'none';
-            return;
-        }
-        
-        const contacts = await loadContacts();
-        const lowerQuery = query.toLowerCase();
-        
-        // Filter contacts
-        const filtered = contacts.filter(contact => {
-            return contact.email.toLowerCase().includes(lowerQuery) ||
-                   contact.name.toLowerCase().includes(lowerQuery) ||
-                   contact.display.toLowerCase().includes(lowerQuery);
-        }).slice(0, 10); // Limit to 10 suggestions
-        
-        if (filtered.length === 0) {
-            if (autocompleteList) autocompleteList.style.display = 'none';
-            return;
-        }
-        
-        // Render suggestions
-        if (autocompleteList) {
-            autocompleteList.innerHTML = filtered.map((contact, index) => {
-                const highlight = (text) => {
-                    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-                    return text.replace(regex, '<strong>$1</strong>');
-                };
-                
-                const escapedDisplay = escapeHtml(contact.display);
-                return `
-                    <div class="autocomplete-item" data-index="${index}" data-email="${escapeHtml(contact.email)}" data-display="${escapedDisplay}" style="
-                        padding: 10px 12px;
-                        cursor: pointer;
-                        border-bottom: 1px solid var(--border-color);
-                        transition: background 0.2s;
-                    ">
-                        <div>
-                            <div style="font-weight: 500; color: var(--text-primary);">${highlight(contact.name)}</div>
-                            <div style="font-size: 12px; color: var(--text-secondary);">${highlight(contact.email)}</div>
-                        </div>
-                        <span class="source-badge contact" style="
-                            font-size: 11px;
-                            padding: 3px 6px;
-                            border-radius: 4px;
-                            background-color: #e0f7fa;
-                            color: #00796b;
-                        ">Contact</span>
-                    </div>
-                `;
-            }).join('');
-            
-            autocompleteList.style.display = 'block';
-            selectedIndex = -1;
-        }
-    };
-    
-    // Select suggestion
-    const selectSuggestion = (item) => {
-        if (!item) return;
-        const display = item.dataset.display || item.dataset.email;
-        input.value = display;
-        if (autocompleteList) autocompleteList.style.display = 'none';
-        input.focus();
-    };
-    
-    // Handle input
-    const handleInput = async (e) => {
-        const query = input.value.trim();
-        if (query.length >= 1) {
-            await showSuggestions(query);
-        } else {
-            if (autocompleteList) autocompleteList.style.display = 'none';
-        }
-    };
-    
-    // Handle keyboard navigation
-    const handleKeydown = (e) => {
-        if (!autocompleteList || autocompleteList.style.display === 'none') {
-            return;
-        }
-        
-        const items = autocompleteList.querySelectorAll('.autocomplete-item');
-        if (items.length === 0) return;
-        
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            selectedIndex = (selectedIndex + 1) % items.length;
-            items.forEach((item, idx) => {
-                item.style.backgroundColor = idx === selectedIndex ? 'var(--primary-light)' : '';
-            });
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            selectedIndex = selectedIndex <= 0 ? items.length - 1 : selectedIndex - 1;
-            items.forEach((item, idx) => {
-                item.style.backgroundColor = idx === selectedIndex ? 'var(--primary-light)' : '';
-            });
-        } else if (e.key === 'Enter' && selectedIndex >= 0) {
-            e.preventDefault();
-            selectSuggestion(items[selectedIndex]);
-        } else if (e.key === 'Escape') {
-            if (autocompleteList) autocompleteList.style.display = 'none';
-        }
-    };
-    
-    // Handle clicks (scoped to this input's autocomplete)
-    const handleClick = (e) => {
-        if (!autocompleteList) return;
-        
-        const item = e.target.closest('.autocomplete-item');
-        if (item && autocompleteList.contains(item)) {
-            selectSuggestion(item);
-        } else if (e.target !== input && !autocompleteList.contains(e.target)) {
-            autocompleteList.style.display = 'none';
-        }
-    };
-    
-    // Add event listeners
-    input.addEventListener('input', handleInput);
-    input.addEventListener('keydown', handleKeydown);
-    // Use capture phase to handle clicks before they bubble
-    document.addEventListener('click', handleClick, true);
-    
-    // Clean up on input removal (if modal is closed)
-    const observer = new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-            mutation.removedNodes.forEach((node) => {
-                if (node === input || (node.contains && node.contains(input))) {
-                    document.removeEventListener('click', handleClick, true);
-                    observer.disconnect();
-                }
-            });
-        });
-    });
-    if (input.parentElement) {
-        observer.observe(input.parentElement, { childList: true, subtree: true });
-    }
-    
-    // Preload contacts in background
-    loadContacts();
-}
-
 // Compose email functions
 async function openComposeModal() {
     document.getElementById('composeModal').style.display = 'flex';
@@ -6203,9 +5964,6 @@ async function openComposeModal() {
     updateAttachmentList();
     // Hide CC/BCC fields by default
     document.getElementById('composeCcBcc').style.display = 'none';
-    
-    // Initialize autocomplete for To field
-    initEmailAutocomplete('composeTo');
     
     // Insert signature immediately at the bottom (loads in background if not cached yet)
     insertSignatureIntoBody('compose');
@@ -6227,9 +5985,6 @@ function toggleCcBcc() {
     const ccBccDiv = document.getElementById('composeCcBcc');
     if (ccBccDiv.style.display === 'none') {
         ccBccDiv.style.display = 'block';
-        // Initialize autocomplete for CC and BCC fields
-        initEmailAutocomplete('composeCc');
-        initEmailAutocomplete('composeBcc');
     } else {
         ccBccDiv.style.display = 'none';
     }
