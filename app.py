@@ -4539,34 +4539,40 @@ def check_inbox_size():
         if not gmail:
             return jsonify({'success': False, 'error': 'Failed to initialize Gmail client'}), 500
         
-        # Get inbox message count (fast, no fetching)
+        # Get ACTUAL inbox message count by listing messages (more accurate than resultSizeEstimate)
         service = gmail.service
+        
+        # List up to 200 message IDs to get actual count (fast, minimal data)
         inbox = service.users().messages().list(
             userId='me',
             labelIds=['INBOX'],
-            maxResults=1  # We only need the count
+            maxResults=200  # Get actual count up to our limit
         ).execute()
         
-        inbox_total = inbox.get('resultSizeEstimate', 0)
+        # Count actual messages returned (not the estimate)
+        messages = inbox.get('messages', [])
+        actual_count = len(messages)
+        estimate = inbox.get('resultSizeEstimate', 0)
         
-        # Cap at 200 (we only fetch first 200)
-        emails_to_fetch = min(inbox_total, 200)
+        # Use the ACTUAL count of messages returned, capped at 200
+        emails_to_fetch = min(actual_count, 200)
         
-        # Calculate estimated time based on emails_to_fetch (not total inbox)
-        # This is the ACTUAL number we'll process
-        if emails_to_fetch <= 100:
+        # Calculate estimated time based on ACTUAL emails we'll process
+        if emails_to_fetch == 0:
+            estimated_minutes = 1  # Nearly instant
+        elif emails_to_fetch <= 100:
             estimated_minutes = 4
         elif emails_to_fetch <= 150:
             estimated_minutes = 7
         else:
             estimated_minutes = 10
         
-        print(f"📊 Inbox size check: inbox_total={inbox_total}, fetching={emails_to_fetch}, ETA={estimated_minutes} min")
+        print(f"📊 Inbox size check: estimate={estimate}, actual_count={actual_count}, fetching={emails_to_fetch}, ETA={estimated_minutes} min")
         
         return jsonify({
             'success': True,
-            'total_emails': inbox_total,  # Total in inbox (for display)
-            'emails_to_fetch': emails_to_fetch,  # Actual number we'll process (capped at 200)
+            'total_emails': actual_count,  # ACTUAL messages found (not estimate)
+            'emails_to_fetch': emails_to_fetch,  # Number we'll process (capped at 200)
             'estimated_minutes': estimated_minutes,
             'estimated_seconds': estimated_minutes * 60
         })
