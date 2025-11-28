@@ -217,6 +217,11 @@ let autoFetchEnabled = false;
 const AUTO_FETCH_INTERVAL = 5 * 60 * 1000; // Check every 5 minutes
 let autoFetchPausedUntil = null; // Timestamp when auto-fetch should resume after rate limit
 
+// Sent emails fetch protection
+let isFetchingSentEmails = false;
+let sentEmailsFetchPausedUntil = null; // Timestamp when sent fetch should resume after rate limit
+let sentEmailsIntervalId = null; // Track the interval so we can clear it
+
 // Auto-fetch function (only fetches new emails using incremental sync)
 async function autoFetchNewEmails() {
     // Don't auto-fetch if already fetching or if user is viewing an email
@@ -439,32 +444,47 @@ async function deleteEmail(messageId, emailIndexOrThreadId) {
 
 // Start/stop auto-fetch polling
 function toggleAutoFetch(enabled) {
-    // Auto-fetch enabled - polls database for new emails synced by Pub/Sub
-    // Pub/Sub syncs emails to database, but frontend needs to poll to update UI
-    autoFetchEnabled = true;
-    
-    // Start polling every 30 seconds to check for new emails in database
+    // Clear existing intervals first
     if (autoFetchInterval) {
         clearInterval(autoFetchInterval);
+        autoFetchInterval = null;
     }
+    if (sentEmailsIntervalId) {
+        clearInterval(sentEmailsIntervalId);
+        sentEmailsIntervalId = null;
+    }
+    
+    // Set the flag properly based on the parameter
+    autoFetchEnabled = enabled !== false; // Default to true if not explicitly false
+    
+    if (!autoFetchEnabled) {
+        console.log('⏸️ Auto-fetch disabled');
+        return;
+    }
+    
+    // Auto-fetch enabled - polls database for new emails synced by Pub/Sub
+    // Pub/Sub syncs emails to database, but frontend needs to poll to update UI
     
     // Poll immediately, then every 30 seconds
     autoFetchNewEmails();
     autoFetchInterval = setInterval(autoFetchNewEmails, 30 * 1000); // 30 seconds
     
-    // Auto-fetch sent emails in background (every 2 minutes)
-    fetchSentEmails(); // Fetch immediately
-    const sentEmailsInterval = setInterval(() => {
-        // Only auto-fetch if not currently on sent tab (to avoid interrupting user)
-        // If on sent tab, fetchSentEmails will be called when user switches to it
-        if (currentTab !== 'sent') {
+    // Auto-fetch sent emails in background (every 5 minutes instead of 2)
+    // IMPORTANT: Delay the first fetch to ensure IndexedDB is initialized
+    console.log('⏳ Sent emails fetch will start in 5 seconds (waiting for IndexedDB)...');
+    setTimeout(() => {
+        fetchSentEmails(); // Fetch after delay
+    }, 5000); // 5 second delay for IndexedDB initialization
+    
+    sentEmailsIntervalId = setInterval(() => {
+        // Only auto-fetch if not currently on sent tab and not already fetching
+        if (currentTab !== 'sent' && !isFetchingSentEmails) {
             fetchSentEmails();
         }
-    }, 2 * 60 * 1000); // 2 minutes
+    }, 5 * 60 * 1000); // 5 minutes (increased from 2 to reduce API calls)
     
     console.log('✅ Auto-fetch enabled - polling database every 30 seconds for new emails synced by Pub/Sub');
-    console.log('✅ Auto-fetch sent emails enabled - fetching every 2 minutes');
-    // No polling needed - Pub/Sub will trigger background sync when new emails arrive
+    console.log('✅ Auto-fetch sent emails enabled - fetching every 5 minutes');
 }
 
 // Toggle Gmail dropdown
@@ -1319,19 +1339,47 @@ document.addEventListener('DOMContentLoaded', async function() {
     const urlParams = new URLSearchParams(window.location.search);
     const autoSetup = urlParams.get('auto_setup') === 'true';
     
-    if (setupScreen && setupScreen.style.display !== 'none') {
+    // Better setup screen detection - check computed style, not just inline style
+    const isSetupScreenVisible = setupScreen && (
+        setupScreen.style.display !== 'none' &&
+        window.getComputedStyle(setupScreen).display !== 'none'
+    );
+    
+    console.log('🔍 Setup screen check:', {
+        setupScreenExists: !!setupScreen,
+        inlineStyle: setupScreen?.style?.display,
+        computedDisplay: setupScreen ? window.getComputedStyle(setupScreen).display : 'N/A',
+        isVisible: isSetupScreenVisible,
+        autoSetup: autoSetup
+    });
+    
+    if (isSetupScreenVisible) {
         // Setup screen is visible - auto-start setup
-        console.log('📋 Setup screen detected - auto-starting setup');
-        if (autoSetup || !document.getElementById('startSetupBtn')) {
-            // Auto-start if from signup or if no start button (auto-setup mode)
-            setTimeout(() => startSetup(), 500);
-        }
+        console.log('📋 Setup screen detected and VISIBLE - auto-starting setup');
+        // Always auto-start for setup screen (no need for button click)
+        setTimeout(() => startSetup(), 500);
         return;
     }
     
-    // Auto-fetch is disabled - using Pub/Sub for real-time notifications
-    // Pub/Sub automatically notifies when new emails arrive
-    toggleAutoFetch(false);
+    // Setup screen not visible - check if setup is still needed via API
+    try {
+        const statusResponse = await fetch('/api/setup/status');
+        const statusData = await statusResponse.json();
+        console.log('📊 Setup status from API:', statusData);
+        
+        if (statusData.success && !statusData.setup_completed && statusData.has_gmail) {
+            // Setup is needed but screen isn't visible - this shouldn't happen
+            // Force reload to get setup screen
+            console.warn('⚠️ Setup needed but screen not visible - reloading page');
+            window.location.href = '/dashboard?auto_setup=true';
+            return;
+        }
+    } catch (error) {
+        console.error('Error checking setup status:', error);
+    }
+    
+    // Enable auto-fetch for users with completed setup
+    toggleAutoFetch(true);
     
     // Start background fetching if setup is complete
     try {
@@ -2189,47 +2237,89 @@ async function fetchStarredEmails() {
 
 // Fetch sent emails
 async function fetchSentEmails() {
+    // Prevent concurrent fetches
+    if (isFetchingSentEmails) {
+        console.log('⏳ [SENT] Already fetching sent emails, skipping...');
+        return;
+    }
+    
+    // Check if paused due to rate limit
+    if (sentEmailsFetchPausedUntil && Date.now() < sentEmailsFetchPausedUntil) {
+        const minutesLeft = Math.ceil((sentEmailsFetchPausedUntil - Date.now()) / 60000);
+        console.log(`⏸️ [SENT] Sent email fetch paused due to rate limit. Resuming in ${minutesLeft} minute${minutesLeft !== 1 ? 's' : ''}`);
+        return;
+    }
+    
+    // Clear pause if time has passed
+    if (sentEmailsFetchPausedUntil && Date.now() >= sentEmailsFetchPausedUntil) {
+        sentEmailsFetchPausedUntil = null;
+        console.log('✅ [SENT] Rate limit pause expired, resuming sent email fetches');
+    }
+    
     try {
+        isFetchingSentEmails = true;
         console.log('📤 [FRONTEND] Fetching sent emails...');
         
         // Get user ID for cache
         const userId = document.body.dataset.userId;
         
-        // Check IndexedDB cache first
-        if (userId) {
-            const cached = await getCachedSentEmails(userId);
-            if (cached && cached.length > 0) {
-                console.log(`📧 Loaded ${cached.length} sent emails from IndexedDB cache (skipping API call)`);
-                sentEmailsCache = cached;
-                
-                // Update UI if on sent tab
-                if (currentTab === 'sent') {
-                    applyFilters();
-                    const emailCountEl = document.getElementById('emailCount');
-                    if (emailCountEl) {
-                        const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
-                        emailCountEl.textContent = `${cached.length} sent email${cached.length !== 1 ? 's' : ''}${searchText}`;
+        // Check IndexedDB cache first (with better error handling)
+        if (userId && sentEmailsCacheDB) {
+            try {
+                const cached = await getCachedSentEmails(userId);
+                if (cached && cached.length > 0) {
+                    console.log(`📧 [SENT] Loaded ${cached.length} sent emails from IndexedDB cache (SKIPPING API CALL)`);
+                    sentEmailsCache = cached;
+                    
+                    // Update UI if on sent tab
+                    if (currentTab === 'sent') {
+                        applyFilters();
+                        const emailCountEl = document.getElementById('emailCount');
+                        if (emailCountEl) {
+                            const searchText = searchQuery ? ` (${filteredEmails.length} found)` : '';
+                            emailCountEl.textContent = `${cached.length} sent email${cached.length !== 1 ? 's' : ''}${searchText}`;
+                        }
+                        if (cached.length > 0) {
+                            displayEmails(filteredEmails.length > 0 ? filteredEmails : cached);
+                        }
                     }
-                    if (cached.length > 0) {
-                        displayEmails(filteredEmails.length > 0 ? filteredEmails : cached);
-                    }
+                    isFetchingSentEmails = false;
+                    return; // Exit early - no API call needed
                 }
-                return; // Exit early - no API call needed
+            } catch (cacheError) {
+                console.warn('⚠️ [SENT] Cache check failed:', cacheError);
+                // Continue to API call
             }
+        } else if (!sentEmailsCacheDB) {
+            console.warn('⚠️ [SENT] IndexedDB cache not initialized, will fetch from API');
         }
         
-        console.log('📤 [FRONTEND] No cache found, calling /api/sent-emails?max=100');
+        console.log('📤 [FRONTEND] No cache found or cache expired, calling /api/sent-emails?max=100');
         
         const response = await fetch(`/api/sent-emails?max=100`);
         
         console.log(`📤 [FRONTEND] Response status: ${response.status}`);
-        console.log(`📤 [FRONTEND] Response ok: ${response.ok}`);
-        console.log(`📤 [FRONTEND] Content-Type: ${response.headers.get('content-type')}`);
+        
+        // Handle rate limit (429) - pause for 15 minutes
+        if (response.status === 429) {
+            sentEmailsFetchPausedUntil = Date.now() + (15 * 60 * 1000); // 15 minutes
+            console.warn('⚠️ [SENT] Rate limit hit! Pausing sent email fetches for 15 minutes');
+            showToast('Gmail rate limit reached. Sent emails will refresh in 15 minutes.', 'warning');
+            isFetchingSentEmails = false;
+            return;
+        }
         
         // Check if response is JSON before parsing
         const contentType = response.headers.get('content-type') || '';
         if (!contentType.includes('application/json')) {
             const errorText = await response.text();
+            // Check for rate limit in text response
+            if (errorText.includes('rate') || errorText.includes('429') || errorText.includes('limit')) {
+                sentEmailsFetchPausedUntil = Date.now() + (15 * 60 * 1000);
+                console.warn('⚠️ [SENT] Rate limit detected in response. Pausing for 15 minutes');
+                isFetchingSentEmails = false;
+                return;
+            }
             console.error(`❌ [FRONTEND] Expected JSON but got ${contentType}. Response:`, errorText.substring(0, 500));
             throw new Error(`Server returned ${contentType} instead of JSON. Status: ${response.status}`);
         }
@@ -2320,6 +2410,14 @@ async function fetchSentEmails() {
     } catch (error) {
         console.error('❌ [FRONTEND] Exception fetching sent emails:', error);
         console.error('❌ [FRONTEND] Error stack:', error.stack);
+        
+        // Check if it's a rate limit error in the exception
+        const errorMsg = error.message || '';
+        if (errorMsg.includes('429') || errorMsg.includes('rate') || errorMsg.includes('limit')) {
+            sentEmailsFetchPausedUntil = Date.now() + (15 * 60 * 1000);
+            console.warn('⚠️ [SENT] Rate limit detected in exception. Pausing for 15 minutes');
+        }
+        
         if (currentTab === 'sent') {
             const emailList = document.getElementById('emailList');
             if (emailList) {
@@ -2332,6 +2430,9 @@ async function fetchSentEmails() {
             }
             showToast(`Failed to load sent emails: ${error.message}`, 'error');
         }
+    } finally {
+        // Always reset the flag
+        isFetchingSentEmails = false;
     }
 }
 

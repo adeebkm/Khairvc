@@ -2821,12 +2821,24 @@ def get_sent_emails():
         })
     
     except Exception as e:
-        print(f"Error fetching sent emails: {str(e)}")
+        error_str = str(e)
+        print(f"Error fetching sent emails: {error_str}")
         import traceback
         traceback.print_exc()
+        
+        # Check for rate limit error
+        if '429' in error_str or 'rate' in error_str.lower() or 'limit' in error_str.lower():
+            print(f"⚠️  Rate limit detected for user {current_user.id}")
+            return jsonify({
+                'success': False,
+                'error': 'Gmail rate limit reached. Please wait 15 minutes and try again.',
+                'rate_limit': True,
+                'retry_after': 900  # 15 minutes in seconds
+            }), 429
+        
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': error_str
         }), 500
 
 
@@ -4502,11 +4514,14 @@ def migrate_add_encryption_columns():
 @login_required
 def get_setup_status():
     """Get setup status for current user"""
+    has_gmail = current_user.gmail_token is not None
+    setup_completed = current_user.setup_completed if current_user.setup_completed else False
     return jsonify({
         'success': True,
-        'setup_completed': current_user.setup_completed if current_user.setup_completed else False,
+        'setup_completed': setup_completed,
         'initial_emails_fetched': current_user.initial_emails_fetched if current_user.initial_emails_fetched else 0,
-        'needs_setup': current_user.gmail_token is not None and not current_user.setup_completed
+        'needs_setup': has_gmail and not setup_completed,
+        'has_gmail': has_gmail
     })
 
 @app.route('/api/setup/check-inbox-size', methods=['GET'])
