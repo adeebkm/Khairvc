@@ -4505,6 +4505,105 @@ def get_setup_status():
         'needs_setup': current_user.gmail_token is not None and not current_user.setup_completed
     })
 
+@app.route('/api/setup/check-inbox-size', methods=['GET'])
+@login_required
+def check_inbox_size():
+    """
+    Check Gmail inbox size BEFORE starting setup.
+    Returns total email count and estimated setup time.
+    """
+    if not current_user.gmail_token:
+        return jsonify({'success': False, 'error': 'Gmail not connected'}), 400
+    
+    try:
+        gmail = get_user_gmail_client(current_user.id)
+        if not gmail:
+            return jsonify({'success': False, 'error': 'Failed to initialize Gmail client'}), 500
+        
+        # Get inbox message count (fast, no fetching)
+        service = gmail.service
+        inbox = service.users().messages().list(
+            userId='me',
+            labelIds=['INBOX'],
+            maxResults=1  # We only need the count
+        ).execute()
+        
+        total_emails = inbox.get('resultSizeEstimate', 0)
+        
+        # Calculate estimated time based on count
+        if total_emails <= 100:
+            estimated_minutes = 4
+        elif total_emails <= 150:
+            estimated_minutes = 7
+        else:
+            estimated_minutes = 10
+        
+        # Cap at 200 (we only fetch first 200)
+        emails_to_fetch = min(total_emails, 200)
+        
+        print(f"📊 Inbox size check: {total_emails} total, fetching {emails_to_fetch}, ETA: {estimated_minutes} min")
+        
+        return jsonify({
+            'success': True,
+            'total_emails': total_emails,
+            'emails_to_fetch': emails_to_fetch,
+            'estimated_minutes': estimated_minutes,
+            'estimated_seconds': estimated_minutes * 60
+        })
+    
+    except Exception as e:
+        print(f"❌ Error checking inbox size: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        # Default fallback
+        return jsonify({
+            'success': True,
+            'total_emails': 100,
+            'emails_to_fetch': 100,
+            'estimated_minutes': 5,
+            'estimated_seconds': 300
+        })
+
+
+@app.route('/api/setup/progress', methods=['GET'])
+@login_required
+def get_setup_progress():
+    """
+    Get real-time setup progress for live updates.
+    Returns fetched, classified, and total counts.
+    """
+    try:
+        from models import EmailClassification
+        
+        # Count classified emails for this user
+        classified_count = EmailClassification.query.filter_by(
+            user_id=current_user.id
+        ).count()
+        
+        # Get initial emails fetched count
+        fetched_count = current_user.initial_emails_fetched or 0
+        target = 200  # Always aiming for 200
+        
+        return jsonify({
+            'success': True,
+            'fetched': fetched_count,
+            'classified': classified_count,
+            'total': target,
+            'progress_percent': min(100, (classified_count / target) * 100) if target > 0 else 0
+        })
+    
+    except Exception as e:
+        print(f"❌ Error getting setup progress: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'fetched': 0,
+            'classified': 0,
+            'total': 200,
+            'progress_percent': 0
+        })
+
+
 @app.route('/api/setup/complete', methods=['POST'])
 @login_required
 def complete_setup():

@@ -383,111 +383,71 @@ function toggleGmailDropdown(event) {
 
 // ==================== SETUP SCREEN ====================
 let finalizeSetupPromise = null;
+let setupProgressPoller = null;
+let setupTimerInterval = null;
+
 async function startSetup() {
+    console.log('🚀 Starting intelligent setup...');
+    
     const setupScreen = document.getElementById('setupScreen');
-    const startBtn = document.getElementById('startSetupBtn');
-    const progressDiv = document.getElementById('setupProgress');
     const progressBar = document.getElementById('setupProgressBar');
     const progressText = document.getElementById('setupProgressText');
+    const timerMinutes = document.getElementById('timerMinutes');
+    const timerSeconds = document.getElementById('timerSeconds');
+    const motivationalQuote = document.getElementById('motivationalQuote');
     
-    if (!setupScreen) return;
-    
-    // Hide start button, show progress
-    if (startBtn) startBtn.style.display = 'none';
-    if (progressDiv) progressDiv.style.display = 'block';
+    if (!setupScreen) {
+        console.error('Setup screen not found');
+        return;
+    }
     
     try {
-        // Start initial fetch (200 emails)
-        if (progressText) progressText.textContent = 'Fetching your first 200 emails...';
-        if (progressBar) progressBar.style.width = '10%';
+        // STEP 1: Check inbox size first
+        progressText.textContent = 'Analyzing your inbox...';
+        progressBar.style.width = '5%';
         
-        const response = await fetch('/api/setup/fetch-initial', {
+        const sizeResponse = await fetch('/api/setup/check-inbox-size');
+        const sizeData = await sizeResponse.json();
+        
+        if (!sizeData.success) {
+            throw new Error('Failed to check inbox size');
+        }
+        
+        const totalEmails = sizeData.total_emails;
+        const emailsToFetch = sizeData.emails_to_fetch;
+        const estimatedSeconds = sizeData.estimated_seconds;
+        
+        console.log(`📊 Inbox has ${totalEmails} emails, fetching ${emailsToFetch}, ETA: ${Math.floor(estimatedSeconds/60)} minutes`);
+        
+        // STEP 2: Start fetching emails
+        progressText.textContent = `Fetching ${emailsToFetch} emails from your inbox...`;
+        progressBar.style.width = '10%';
+        
+        const fetchResponse = await fetch('/api/setup/fetch-initial', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
         
-        const data = await response.json();
+        const fetchData = await fetchResponse.json();
         
-        // If setup is already complete (user has emails), skip to completion
-        if (data.success && data.already_complete) {
-            console.log(`✅ Setup already complete: ${data.email_count} emails found`);
-            if (progressBar) progressBar.style.width = '90%';
-            if (progressText) progressText.textContent = `Loading emails...`;
-            
-            // Mark as complete first
-            await fetch('/api/setup/complete', { method: 'POST' });
-            
-            // Auto-setup Pub/Sub if enabled (test environment)
-            try {
-                const pubsubResponse = await fetch('/api/setup-pubsub', { method: 'POST' });
-                const pubsubData = await pubsubResponse.json();
-                if (pubsubData.success) {
-                    console.log('✅ Pub/Sub watch configured automatically');
-                } else if (pubsubResponse.status === 400 && pubsubData.error?.includes('not enabled')) {
-                    console.log('ℹ️  Pub/Sub not enabled (production environment)');
-                } else {
-                    console.warn('⚠️  Pub/Sub setup failed (non-critical):', pubsubData.error);
-                }
-            } catch (error) {
-                console.warn('⚠️  Pub/Sub setup error (non-critical):', error);
-            }
-            
-        // Use hardcoded timer approach: random 7-10 minutes, then show inbox
-        await startHardcodedTimer(progressBar, progressText, setupScreen);
-        
-        showAlert('success', `Setup complete! Found ${data.email_count} existing emails.`);
-        return; // Exit early since setup is already complete
-        } else if (data.success && data.task_id) {
-            // Poll for progress
-            try {
-                await pollSetupProgress(data.task_id, progressBar, progressText);
-            } catch (pollError) {
-                console.warn('Polling failed, falling back to streaming:', pollError);
-                // Fall back to streaming if polling fails
-                await fetchInitialEmailsStreaming(progressBar, progressText);
-            }
-        } else if (data.use_streaming) {
-            // Use streaming endpoint
-            await fetchInitialEmailsStreaming(progressBar, progressText);
-        } else {
-            throw new Error(data.error || 'Failed to start setup');
+        if (fetchData.already_complete) {
+            // Setup already done
+            console.log('✅ Setup already complete, showing inbox');
+            await completeSetupImmediately(setupScreen, progressBar, progressText);
+            return;
         }
         
-        // Keep setup screen visible until the timer completes (completeSetupAfterTimer handles the UI transition)
-        await startHardcodedTimer(progressBar, progressText, setupScreen);
-        return;
+        // STEP 3: Start adaptive countdown timer
+        startAdaptiveTimer(estimatedSeconds, emailsToFetch, setupScreen, progressBar, progressText, timerMinutes, timerSeconds, motivationalQuote);
+        
+        // STEP 4: Start real-time progress polling
+        startProgressPolling(progressBar, progressText, emailsToFetch);
+        
     } catch (error) {
-        console.error('Setup error:', error);
-        // Even if setup fails, try to load existing emails and mark setup as complete
-        // This prevents users from being stuck on the setup screen
-        try {
-            // Check if we already have emails
-            await loadEmailsFromDatabase();
-            const emailCount = allEmails.length;
-            
-            if (emailCount > 0) {
-                // We have emails, mark setup as complete and continue
-                console.log(`✅ Found ${emailCount} existing emails, marking setup as complete`);
-                await finalizeSetupStatus();
-                
-                // Hide setup screen
-                if (setupScreen) setupScreen.style.display = 'none';
-                const emailList = document.getElementById('emailList');
-                if (emailList) emailList.style.display = 'block';
-                
-                showAlert('info', `Loaded ${emailCount} existing emails. Setup can be completed later.`);
-            } else {
-                // No emails, show error but allow retry
-                if (progressText) progressText.textContent = `Error: ${error.message}. Click "Start Setup" to retry.`;
-                if (startBtn) startBtn.style.display = 'block';
-                if (progressDiv) progressDiv.style.display = 'none';
-            }
-        } catch (loadError) {
-            console.error('Error loading emails after setup failure:', loadError);
-            if (progressText) progressText.textContent = `Error: ${error.message}. Click "Start Setup" to retry.`;
-            if (startBtn) startBtn.style.display = 'block';
-            if (progressDiv) progressDiv.style.display = 'none';
-        }
+        console.error('❌ Setup error:', error);
+        progressText.textContent = `Error: ${error.message}. Retrying...`;
+        // Retry after 3 seconds
+        setTimeout(() => startSetup(), 3000);
     }
 }
 
@@ -555,218 +515,197 @@ async function pollSetupProgress(taskId, progressBar, progressText) {
  * Shows approximate time remaining in minutes, then seconds (with random intervals) when < 1 minute
  * Timer persists across page refreshes using localStorage
  */
-async function startHardcodedTimer(progressBar, progressText, setupScreen) {
-    const TIMER_STORAGE_KEY = 'setup_timer_state';
+/**
+ * Start adaptive timer based on actual inbox size
+ */
+function startAdaptiveTimer(totalSeconds, emailCount, setupScreen, progressBar, progressText, timerMinutes, timerSeconds, motivationalQuote) {
+    let remainingSeconds = totalSeconds;
     
-    // Start timer display IMMEDIATELY
-    if (progressText) {
-        progressText.textContent = 'Setting up your inbox...';
-        progressText.style.display = 'block'; // Ensure visible
-    }
-    if (progressBar) {
-        progressBar.style.width = '10%';
-        progressBar.style.display = 'block'; // Ensure visible
-    }
+    console.log(`⏱️ Starting ${Math.floor(totalSeconds/60)} minute timer for ${emailCount} emails`);
     
-    // Check if there's an existing timer
-    let timerState = null;
-    let remaining = null;
-    try {
-        const stored = localStorage.getItem(TIMER_STORAGE_KEY);
-        if (stored) {
-            timerState = JSON.parse(stored);
-            const now = Date.now();
-            const elapsed = Math.floor((now - timerState.startTime) / 1000);
-            remaining = timerState.totalSeconds - elapsed;
-            
-            if (remaining <= 0) {
-                // Timer expired - complete setup with HARD REFRESH
-                console.log(`⏱️ Timer expired, completing setup with hard refresh...`);
-                localStorage.removeItem(TIMER_STORAGE_KEY);
-                window.location.reload(); // HARD REFRESH
-                return;
-            }
-        }
-    } catch (error) {
-        console.warn('Error reading timer state:', error);
-        localStorage.removeItem(TIMER_STORAGE_KEY);
-    }
+    // Show initial time
+    updateTimerDisplay(remainingSeconds, timerMinutes, timerSeconds);
     
-    // Generate new timer if needed
-    let totalSeconds, remainingSeconds, startTime;
-    if (timerState && remaining > 0) {
-        totalSeconds = timerState.totalSeconds;
-        remainingSeconds = remaining;
-        startTime = timerState.startTime;
-        console.log(`⏱️ Resuming timer: ${Math.floor(remaining / 60)}m remaining`);
-    } else {
-        // Check if we already have 200+ emails
-        const currentEmailCount = allEmails?.length || emailCache?.data?.length || 0;
-        if (currentEmailCount >= 200) {
-            console.log(`✅ ${currentEmailCount} emails already loaded, skipping timer`);
-            if (progressText) progressText.textContent = 'Setup complete! Loading inbox...';
-            if (progressBar) progressBar.style.width = '100%';
-            
-            localStorage.removeItem(TIMER_STORAGE_KEY);
-            await finalizeSetupStatus();
-            
-            // Hard refresh to show emails
-            setTimeout(() => {
-                window.location.reload();
-            }, 500);
-            return;
+    // Update motivational quote based on time
+    updateMotivationalQuote(Math.floor(totalSeconds/60), motivationalQuote);
+    
+    // Start countdown
+    setupTimerInterval = setInterval(async () => {
+        remainingSeconds--;
+        updateTimerDisplay(remainingSeconds, timerMinutes, timerSeconds);
+        
+        // Update motivational quotes at key milestones
+        if (remainingSeconds === Math.floor(totalSeconds * 0.66)) {
+            motivationalQuote.textContent = "Almost halfway there...";
+        } else if (remainingSeconds === Math.floor(totalSeconds * 0.33)) {
+            motivationalQuote.textContent = "Final stretch! 🎯";
+        } else if (remainingSeconds === 30) {
+            motivationalQuote.textContent = "Just a few more seconds...";
         }
         
-        // Start new 5-minute timer
-        totalSeconds = 5 * 60; // 5 minutes
-        remainingSeconds = totalSeconds;
-        startTime = Date.now();
-        
-            localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify({
-                startTime: startTime,
-                totalSeconds: totalSeconds
-            }));
-        
-        console.log(`⏱️ Starting 5-minute timer`);
-    }
-    
-    // Update timer display every second using Date.now() comparison
-    const timerInterval = setInterval(() => {
-        const now = Date.now();
-        const elapsed = Math.floor((now - startTime) / 1000);
-        const remaining = totalSeconds - elapsed;
-        
-        if (remaining <= 0) {
-            clearInterval(timerInterval);
-            localStorage.removeItem(TIMER_STORAGE_KEY);
-            
-            // Complete setup with HARD REFRESH
-            if (progressText) progressText.textContent = 'Setup complete! Refreshing...';
-            if (progressBar) progressBar.style.width = '100%';
-            
-            console.log('⏱️ Timer complete, hard refreshing page...');
-            setTimeout(() => {
-                window.location.reload(); // HARD REFRESH
-            }, 500);
-        } else {
-            // Update display
-            const minutes = Math.floor(remaining / 60);
-            const seconds = remaining % 60;
-            const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-            
-            const percentage = Math.max(10, Math.min(90, ((totalSeconds - remaining) / totalSeconds) * 100));
-            if (progressBar) progressBar.style.width = `${percentage}%`;
-            
-            if (progressText) {
-                // Show collecting or classifying message
-                const emailCount = allEmails?.length || 0;
-                if (emailCount < 200) {
-                    progressText.textContent = `Collecting emails... ${emailCount} of 200 collected (${timeStr})`;
-        } else {
-                    progressText.textContent = `Classifying emails... (${timeStr})`;
-                }
-            }
+        // When timer completes
+        if (remainingSeconds <= 0) {
+            clearInterval(setupTimerInterval);
+            clearInterval(setupProgressPoller);
+            await completeSetupAfterTimer(setupScreen, progressBar, progressText);
         }
     }, 1000);
 }
 
 /**
- * Complete setup after timer expires - loads emails and shows inbox
+ * Update timer display
  */
-async function completeSetupAfterTimer(progressBar, progressText, setupScreen) {
-    // Load emails and show inbox
-    console.log('⏱️ Timer complete, loading emails and showing inbox...');
+function updateTimerDisplay(seconds, timerMinutes, timerSeconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (timerMinutes) timerMinutes.textContent = mins;
+    if (timerSeconds) timerSeconds.textContent = secs.toString().padStart(2, '0');
+}
+
+/**
+ * Update motivational quote based on estimated time
+ */
+function updateMotivationalQuote(minutes, motivationalQuote) {
+    const quotes = {
+        4: "Quick setup for your inbox... ⚡",
+        5: "Setting up your email command center... 🚀",
+        7: "Great things take a bit longer... ⏳",
+        10: "Building something amazing for you... ✨"
+    };
+    if (motivationalQuote) {
+        motivationalQuote.textContent = quotes[minutes] || "Good things take time...";
+    }
+}
+
+/**
+ * Start polling for real-time progress updates
+ */
+function startProgressPolling(progressBar, progressText, totalToFetch) {
+    let lastClassifiedCount = 0;
+    
+    setupProgressPoller = setInterval(async () => {
+        try {
+            const response = await fetch('/api/setup/progress');
+            const data = await response.json();
+            
+            if (data.success) {
+                const { fetched, classified, total, progress_percent } = data;
+                
+                // Update progress bar (10% base + 80% for classification progress)
+                const displayProgress = 10 + (progress_percent * 0.8);
+                progressBar.style.width = `${Math.min(90, displayProgress)}%`;
+                
+                // Update status text
+                if (classified > lastClassifiedCount) {
+                    progressText.textContent = `Classified ${classified}/${totalToFetch} emails...`;
+                    lastClassifiedCount = classified;
+                }
+                
+                // If all emails are classified before timer ends, complete early
+                if (classified >= totalToFetch && classified > 0) {
+                    console.log('✅ All emails classified early!');
+                    clearInterval(setupTimerInterval);
+                    clearInterval(setupProgressPoller);
+                    const setupScreen = document.getElementById('setupScreen');
+                    await completeSetupAfterTimer(setupScreen, progressBar, progressText);
+                }
+            }
+        } catch (error) {
+            console.warn('Progress polling error:', error);
+        }
+    }, 2000); // Poll every 2 seconds
+}
+
+/**
+ * Complete setup immediately (when already done)
+ */
+async function completeSetupImmediately(setupScreen, progressBar, progressText) {
+    progressText.textContent = 'Setup complete! Loading inbox...';
+    progressBar.style.width = '100%';
+    
+    await loadEmailsFromDatabase();
+    
+    // Smooth fade out
+    setupScreen.style.transition = 'opacity 1s ease-out';
+    setupScreen.style.opacity = '0';
+    
+    setTimeout(() => {
+        setupScreen.style.display = 'none';
+        const compactHeader = document.querySelector('.main-content > .compact-header');
+        if (compactHeader) compactHeader.style.display = 'block';
+        const contentArea = document.getElementById('contentArea');
+        if (contentArea) contentArea.style.display = 'block';
+        
+        // Fade in email list
+        const emailList = document.getElementById('emailList');
+        if (emailList) {
+            emailList.style.transition = 'opacity 1s ease-in';
+            emailList.style.opacity = '1';
+        }
+        
+        if (allEmails.length > 0) {
+            applyFilters();
+            updatePagination();
+        }
+    }, 1000);
+}
+
+/**
+ * Complete setup after timer (IMPROVED with smooth transition)
+ */
+async function completeSetupAfterTimer(setupScreen, progressBar, progressText) {
+    console.log('⏱️ Timer complete, finalizing setup...');
+    
     if (progressText) progressText.textContent = 'Loading your inbox...';
     if (progressBar) progressBar.style.width = '95%';
     
-    // DON'T hide setup screen yet - load emails FIRST
-    // Load emails from database
     try {
-        console.log('📧 Loading emails from database (setup screen still visible)...');
+        // Load emails from database
         await loadEmailsFromDatabase();
-        console.log(`📧 Loaded ${allEmails.length} emails after timer`);
+        console.log(`📧 Loaded ${allEmails.length} emails`);
         
-        // If no emails loaded, wait and try again (up to 3 attempts)
-        let attempts = 0;
-        while (allEmails.length === 0 && attempts < 3) {
-            attempts++;
-            console.warn(`⚠️ No emails loaded yet (attempt ${attempts}/3), waiting 2 seconds...`);
-            if (progressText) progressText.textContent = `Waiting for emails to be classified... (attempt ${attempts}/3)`;
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            await loadEmailsFromDatabase();
-            console.log(`📧 Attempt ${attempts}: Loaded ${allEmails.length} emails`);
-        }
+        // Mark setup as complete on server
+        await fetch('/api/setup/complete', { method: 'POST' });
         
-        // Now that emails are loaded, hide setup screen and show inbox
-        if (progressText) progressText.textContent = `Setup complete! Loaded ${allEmails.length} emails.`;
+        // Show completion
+        if (progressText) progressText.textContent = `Setup complete! ${allEmails.length} emails loaded.`;
         if (progressBar) progressBar.style.width = '100%';
         
-        // Small delay to show completion message
         await new Promise(resolve => setTimeout(resolve, 1000));
         
+        // SMOOTH TRANSITION: Fade out overlay, fade in emails
         if (setupScreen) {
-            console.log('✅ Hiding setup screen and showing inbox');
-            setupScreen.style.display = 'none';
+            setupScreen.style.transition = 'opacity 1s ease-out';
+            setupScreen.style.opacity = '0';
         }
-        const emailListEl = document.getElementById('emailList');
-        if (emailListEl) emailListEl.style.display = 'block';
         
-        // Wait for DOM to update
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        console.log(`📧 Now displaying ${allEmails.length} emails`);
-        
-        // Ensure all emails have category
-        allEmails.forEach(email => {
-            if (!email.category && email.classification?.category) {
-                email.category = email.classification.category.toLowerCase();
-            } else if (!email.category) {
-                email.category = 'general';
-            }
-        });
-        
-        // Force apply filters and display emails
-        applyFilters();
-        updatePagination();
-        
-        // Double-check emails are displayed
         setTimeout(() => {
-            const visibleCount = emailListEl ? emailListEl.querySelectorAll('.email-item').length : 0;
-            console.log(`📊 After timer: ${visibleCount} emails visible, ${allEmails.length} total, ${filteredEmails.length} filtered`);
+            if (setupScreen) setupScreen.style.display = 'none';
             
-            if (visibleCount === 0 && allEmails.length > 0) {
-                console.warn('⚠️ Emails not visible after timer, forcing display...');
-                // Ensure categories are set
-                allEmails.forEach(email => {
-                    if (!email.category && email.classification?.category) {
-                        email.category = email.classification.category.toLowerCase();
-                    } else if (!email.category) {
-                        email.category = 'general';
-                    }
-                });
-                applyFilters();
-                if (filteredEmails.length > 0) {
-                    displayEmails(filteredEmails.slice(0, EMAILS_PER_PAGE));
-                    updatePagination();
-                } else {
-                    // Last resort - display all emails directly
-                    displayEmails(allEmails.slice(0, EMAILS_PER_PAGE));
-                    updatePagination();
-                }
+            // Show UI elements
+            const compactHeader = document.querySelector('.main-content > .compact-header');
+            if (compactHeader) compactHeader.style.display = 'block';
+            
+            const contentArea = document.getElementById('contentArea');
+            if (contentArea) {
+                contentArea.style.display = 'block';
+                contentArea.style.transition = 'opacity 1s ease-in';
+                contentArea.style.opacity = '1';
             }
             
-            // Show success message
+            // Display emails
             if (allEmails.length > 0) {
-                showAlert('success', `Setup complete! Loaded ${allEmails.length} emails.`);
-            } else {
-                showAlert('info', 'Setup complete! Emails are still being classified in the background. They will appear as they\'re ready.');
+                applyFilters();
+                updatePagination();
             }
-        }, 300);
+            
+            console.log('✅ Setup complete! Inbox displayed.');
+        }, 1000);
+        
     } catch (error) {
-        console.error('Error loading emails after timer:', error);
-        showAlert('info', 'Setup complete! Emails are being classified in the background.');
-    } finally {
-        await finalizeSetupStatus();
+        console.error('❌ Error completing setup:', error);
+        if (progressText) progressText.textContent = 'Error loading emails. Refreshing...';
+        setTimeout(() => window.location.reload(), 2000);
     }
 }
 
