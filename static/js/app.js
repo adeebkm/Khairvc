@@ -1813,10 +1813,19 @@ function switchTab(tabName) {
         emailList.style.display = 'block';
         dealFlowTable.style.display = 'none';
         
-        // Show loading state
+        // Clear allEmails to prevent showing inbox emails
+        allEmails = [];
+        
+        // Show loading state immediately
         const emailListEl = document.getElementById('emailList');
         if (emailListEl) {
             emailListEl.innerHTML = '<div class="empty-state"><div class="spinner"></div><p>Loading scheduled emails...</p></div>';
+        }
+        
+        // Update email count
+        const emailCountEl = document.getElementById('emailCount');
+        if (emailCountEl) {
+            emailCountEl.textContent = 'Loading scheduled emails...';
         }
         
         // Fetch scheduled emails
